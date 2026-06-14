@@ -7,11 +7,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 
-// Credentials are compiled in at build time — never bundled as a file asset.
-// Build with: --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
-// For local dev, use: --dart-define-from-file=.env  (keep .env gitignored)
-const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+const _supabaseUrl = 'https://orlqjhqxeyukvfzsursl.supabase.co';
+const _supabaseAnonKey =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ybHFqaHF4ZXl1a3ZmenN1cnNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODM2NTgsImV4cCI6MjA5MDk1OTY1OH0.4JXUdbPTkofshaYaYSOJwE9qwQ2zwjUQljuu5cfgzzw';
 
 const _smsChannel = MethodChannel('com.gymcrm/sms');
 
