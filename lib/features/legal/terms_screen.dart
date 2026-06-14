@@ -1,0 +1,208 @@
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../core/theme/app_theme.dart';
+
+class TermsScreen extends StatelessWidget {
+  const TermsScreen({super.key});
+
+  static const _webUrl = 'https://gymcrm.in/terms';
+
+  Future<void> _openWeb() async {
+    final uri = Uri.parse(_webUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Terms of Service'),
+        actions: [
+          TextButton(
+            onPressed: _openWeb,
+            child: const Text('View on Web'),
+          ),
+        ],
+      ),
+      body: const SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 40),
+        child: _TermsContent(),
+      ),
+    );
+  }
+}
+
+class _TermsContent extends StatelessWidget {
+  const _TermsContent();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _UpdatedChip(date: 'Last updated: June 2025'),
+        SizedBox(height: 16),
+        _Heading('Terms of Service — GymCRM'),
+        _Body(
+          'Please read these Terms of Service ("Terms") carefully before using GymCRM. '
+          'By creating an account or using the app, you agree to be bound by these Terms.',
+        ),
+        SizedBox(height: 20),
+        _Section(
+          title: '1. The Service',
+          body:
+              'GymCRM is a gym management platform that allows gym owners and staff to manage memberships, '
+              'billing, classes, check-ins, and communications. GymCRM is operated by Shashank Kumar, India.',
+        ),
+        _Section(
+          title: '2. Account Registration',
+          body:
+              'You must be at least 18 years old to create an account. You are responsible for maintaining '
+              'the security of your account credentials and for all activity that occurs under your account. '
+              'Notify us immediately at support@gymcrm.in if you suspect unauthorised access.',
+        ),
+        _Section(
+          title: '3. Free Trial & Subscriptions',
+          body:
+              'New gym-owner accounts receive a 7-day free trial with full access. After the trial, '
+              'continued use requires an active subscription. Subscription plans and pricing are listed at gymcrm.in.\n\n'
+              'Subscriptions are billed monthly or annually as chosen. You may cancel at any time; '
+              'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',
+        ),
+        _Section(
+          title: '4. In-App Purchases (iOS)',
+          body:
+              'On iOS, subscriptions are managed via gymcrm.in in a web browser. We do not process '
+              'payments through Apple In-App Purchase. Tapping "Open gymcrm.in" will take you to our '
+              'website where you can subscribe or manage your plan.',
+        ),
+        _Section(
+          title: '5. Acceptable Use',
+          body:
+              'You agree not to:\n'
+              '• Use GymCRM for any unlawful purpose.\n'
+              '• Upload malware, spam, or abusive content.\n'
+              '• Reverse engineer, decompile, or attempt to extract source code from the app.\n'
+              '• Resell or sublicense access to GymCRM without written permission.',
+        ),
+        _Section(
+          title: '6. Your Data',
+          body:
+              'You retain ownership of all data you enter into GymCRM (gym details, member records, etc.). '
+              'You grant us a limited licence to store and process that data solely to provide the service. '
+              'See our Privacy Policy for full details on data handling.',
+        ),
+        _Section(
+          title: '7. Service Availability',
+          body:
+              'We aim for high availability but do not guarantee uninterrupted service. '
+              'We may perform maintenance, upgrades, or changes at any time. '
+              'We are not liable for losses resulting from downtime.',
+        ),
+        _Section(
+          title: '8. Limitation of Liability',
+          body:
+              'To the maximum extent permitted by law, GymCRM and its operators are not liable for '
+              'indirect, incidental, special, or consequential damages arising from your use of the service. '
+              'Our total liability to you will not exceed the amount you paid in the 3 months preceding the claim.',
+        ),
+        _Section(
+          title: '9. Termination',
+          body:
+              'We may suspend or terminate your account if you violate these Terms or engage in conduct '
+              'that harms the service or other users. You may delete your account at any time from Settings → Sign Out, '
+              'or by contacting support@gymcrm.in.',
+        ),
+        _Section(
+          title: '10. Governing Law',
+          body:
+              'These Terms are governed by the laws of India. Any disputes will be subject to the exclusive '
+              'jurisdiction of the courts of India.',
+        ),
+        _Section(
+          title: '11. Changes to Terms',
+          body:
+              'We may update these Terms from time to time. We will notify you of material changes via the app '
+              'or by email. Continued use after changes constitutes acceptance of the updated Terms.',
+        ),
+        _Section(
+          title: '12. Contact',
+          body: 'GymCRM\nEmail: support@gymcrm.in\nWebsite: gymcrm.in',
+        ),
+      ],
+    );
+  }
+}
+
+class _UpdatedChip extends StatelessWidget {
+  final String date;
+  const _UpdatedChip({required this.date});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.activeBg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(date,
+          style: const TextStyle(
+              fontSize: 12, color: AppTheme.ink, fontWeight: FontWeight.w500)),
+    );
+  }
+}
+
+class _Heading extends StatelessWidget {
+  final String text;
+  const _Heading(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text,
+        style: const TextStyle(
+            fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.ink));
+  }
+}
+
+class _Body extends StatelessWidget {
+  final String text;
+  const _Body(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text,
+        style: const TextStyle(
+            fontSize: 14, color: AppTheme.textSecondary, height: 1.6));
+  }
+}
+
+class _Section extends StatelessWidget {
+  final String title;
+  final String body;
+  const _Section({required this.title, required this.body});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary)),
+          const SizedBox(height: 6),
+          Text(body,
+              style: const TextStyle(
+                  fontSize: 14, color: AppTheme.textSecondary, height: 1.6)),
+        ],
+      ),
+    );
+  }
+}
