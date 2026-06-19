@@ -142,7 +142,7 @@ class _CommunicationsScreenState extends State<CommunicationsScreen> {
       if (token == null) { _showSnack('Session expired — please sign in again'); return; }
 
       final res = await http.post(
-        Uri.parse('https://gymcrm.in/api/communications'),
+        Uri.parse('https://www.gymcrm.in/api/communications'),
         headers: {
           HttpHeaders.contentTypeHeader:   'application/json',
           HttpHeaders.authorizationHeader: 'Bearer $token',

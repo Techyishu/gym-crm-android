@@ -51,10 +51,16 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Supabase credentials baked in at build time from --dart-define values.
-        // The Kotlin SMS worker reads these instead of receiving them over IPC.
-        buildConfigField("String", "SUPABASE_URL", "\"${dartDefine("SUPABASE_URL")}\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${dartDefine("SUPABASE_ANON_KEY")}\"")
+        // Supabase credentials for the Kotlin SMS worker. Falls back to the
+        // hardcoded production values when --dart-define is not passed (e.g.
+        // local builds, CI without secrets). The anon key is a public key by
+        // design — security comes from Supabase RLS policies, not key secrecy.
+        val supabaseUrl = dartDefine("SUPABASE_URL")
+            .ifBlank { "https://orlqjhqxeyukvfzsursl.supabase.co" }
+        val supabaseAnonKey = dartDefine("SUPABASE_ANON_KEY")
+            .ifBlank { "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ybHFqaHF4ZXl1a3ZmenN1cnNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODM2NTgsImV4cCI6MjA5MDk1OTY1OH0.4JXUdbPTkofshaYaYSOJwE9qwQ2zwjUQljuu5cfgzzw" }
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
 
     signingConfigs {

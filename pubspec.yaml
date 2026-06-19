@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.0+16
+version: 1.0.0+19
 
 environment:
   sdk: ^3.10.7
@@ -43,6 +43,9 @@ dependencies:
   shared_preferences: ^2.3.3
 
   cupertino_icons: ^1.0.8
+
+  # Error monitoring
+  sentry_flutter: ^9.0.0
 
 dev_dependencies:
   flutter_test:

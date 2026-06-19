@@ -1,13 +1,16 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/validators.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../shared/models/member.dart';
 import '../../../shared/widgets/member_photo.dart';
@@ -36,28 +39,34 @@ String _detailPlanLabel(Map<String, dynamic> p) {
 }
 
 final _memberDetailProvider = FutureProvider.family<Member?, String>((ref, id) async {
+  final gymId = await ref.read(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('members')
       .select('*, memberships(*, membership_plans(*))')
       .eq('id', id)
+      .eq('gym_id', gymId)
       .maybeSingle();
   return data != null ? Member.fromJson(data) : null;
 });
 
 final _memberCheckInsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+  final gymId = await ref.read(gymIdProvider.future);
   return await Supabase.instance.client
       .from('check_ins')
       .select('*')
       .eq('member_id', id)
+      .eq('gym_id', gymId)
       .order('checked_in_at', ascending: false)
       .limit(10);
 });
 
 final _memberInvoicesProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+  final gymId = await ref.read(gymIdProvider.future);
   return await Supabase.instance.client
       .from('invoices')
       .select('id, amount, status, description, due_at, paid_at, created_at')
       .eq('member_id', id)
+      .eq('gym_id', gymId)
       .order('created_at', ascending: false)
       .limit(8);
 });
@@ -292,7 +301,6 @@ class MemberDetailScreen extends ConsumerWidget {
   }
 
   Widget _buildContactInfo(BuildContext context, Member m) {
-    final ec = m.emergencyContact;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -304,27 +312,14 @@ class MemberDetailScreen extends ConsumerWidget {
             children: [
               _SectionHeader(title: 'Contact'),
               const SizedBox(height: 12),
+              if (m.customId != null && m.customId!.isNotEmpty)
+                _InfoRow(label: 'Member ID', value: m.customId!),
               _InfoRow(label: 'Email', value: m.email),
               _InfoRow(label: 'Phone', value: m.phone ?? '-'),
               if (m.nextPaymentDate != null)
                 _InfoRow(label: 'Next payment', value: formatDateFromString(m.nextPaymentDate)),
               if (m.notes != null && m.notes!.isNotEmpty)
                 _InfoRow(label: 'Notes', value: m.notes!),
-              if (ec != null && (ec['name'] as String? ?? '').isNotEmpty) ...[
-                const SizedBox(height: 12),
-                const Divider(color: AppTheme.border),
-                const SizedBox(height: 12),
-                const Text(
-                  'Emergency Contact',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft),
-                ),
-                const SizedBox(height: 10),
-                _InfoRow(label: 'Name', value: ec['name'] as String? ?? '-'),
-                if ((ec['phone'] as String? ?? '').isNotEmpty)
-                  _InfoRow(label: 'Phone', value: ec['phone'] as String),
-                if ((ec['relationship'] as String? ?? '').isNotEmpty)
-                  _InfoRow(label: 'Relation', value: ec['relationship'] as String),
-              ],
             ],
           ),
         ),
@@ -739,6 +734,37 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     }
   }
 
+  Future<void> _sendInvite() async {
+    setState(() => _busy = true);
+    try {
+      final auth = Supabase.instance.client.auth;
+      final session = auth.currentSession ?? (await auth.refreshSession()).session;
+      final token = session?.accessToken;
+      if (token == null) {
+        _toast('Session expired. Please sign in again.');
+        return;
+      }
+      final res = await http.post(
+        Uri.parse('https://www.gymcrm.in/api/members/${m.id}/invite'),
+        headers: {
+          HttpHeaders.contentTypeHeader: 'application/json',
+          HttpHeaders.authorizationHeader: 'Bearer $token',
+        },
+      );
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _toast('Portal invite sent to ${m.email}');
+      } else {
+        final body = jsonDecode(res.body) as Map;
+        _toast(body['error']?.toString() ?? 'Failed to send invite');
+      }
+    } catch (e) {
+      if (mounted) _toast('Error: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _cancelPlan() async {
     final ms = m.currentMembership;
     if (ms == null || ms.status != 'active') return;
@@ -812,6 +838,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
         'starts_at': DateTime.now().toUtc().toIso8601String(),
         'ends_at': null,
       });
+      // Activate the member if they were expired or cancelled.
+      if (m.status == 'expired' || m.status == 'cancelled') {
+        await _client.from('members').update({'status': 'active'}).eq('id', m.id);
+      }
       ref.invalidate(_memberDetailProvider(m.id));
       _toast('Plan assigned');
     } catch (e) {
@@ -829,6 +859,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     final canEdit = widget.canPii; // same gate: manager+ only
     final showWhatsApp = canPii && m.phone != null && m.phone!.isNotEmpty;
     final showHold = canEdit && (m.status == 'active' || m.status == 'frozen');
+    final showInvite = canEdit && m.email.isNotEmpty && m.userId == null;
     if (!canPii && !canEdit) {
       return const SizedBox.shrink();
     }
@@ -895,6 +926,18 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
               ],
             ],
           ),
+          if (showInvite) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _sendInvite,
+                icon: const Icon(Icons.mail_outline, size: 16),
+                label: const Text('Send portal invite'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1171,20 +1214,15 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   late final TextEditingController _lastCtrl;
   late final TextEditingController _emailCtrl;
   late final TextEditingController _phoneCtrl;
+  late final TextEditingController _customIdCtrl;
+  late final TextEditingController _biometricIdCtrl;
   late final TextEditingController _notesCtrl;
-  late final TextEditingController _ecNameCtrl;
-  late final TextEditingController _ecPhoneCtrl;
-  late final TextEditingController _ecRelCtrl;
   late String _status;
   String? _nextPaymentDate;
+  int _billingIntervalMonths = 1;
   String? _joinedAt;
   File? _avatarFile;
   bool _loading = false;
-  bool _showEmergency = false;
-
-  // Billing day input
-  late final TextEditingController _billingDayCtrl;
-  bool _billingForceNextMonth = false;
 
   @override
   void initState() {
@@ -1194,41 +1232,26 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     _emailCtrl = TextEditingController(text: m.email);
     _lastCtrl = TextEditingController(text: m.lastName);
     _phoneCtrl = TextEditingController(text: m.phone ?? '');
+    _customIdCtrl = TextEditingController(text: m.customId ?? '');
+    _biometricIdCtrl = TextEditingController(text: m.biometricId ?? '');
     _notesCtrl = TextEditingController(text: m.notes ?? '');
     _status = m.status;
     _nextPaymentDate = m.nextPaymentDate;
+    _billingIntervalMonths = m.billingIntervalMonths;
     _joinedAt = m.joinedAt;
-    // Extract day from stored next_payment_date for the billing day input
-    final existingDay = m.nextPaymentDate?.split('-').lastOrNull;
-    _billingDayCtrl = TextEditingController(
-      text: existingDay != null ? int.tryParse(existingDay)?.toString() ?? '' : '',
-    );
-    final ec = m.emergencyContact;
-    _ecNameCtrl = TextEditingController(text: ec?['name'] as String? ?? '');
-    _ecPhoneCtrl = TextEditingController(text: ec?['phone'] as String? ?? '');
-    _ecRelCtrl = TextEditingController(text: ec?['relationship'] as String? ?? '');
-    _showEmergency = ec != null && (ec['name'] as String? ?? '').isNotEmpty;
   }
 
   @override
   void dispose() {
     _firstCtrl.dispose(); _lastCtrl.dispose(); _emailCtrl.dispose(); _phoneCtrl.dispose();
-    _notesCtrl.dispose(); _ecNameCtrl.dispose(); _ecPhoneCtrl.dispose();
-    _ecRelCtrl.dispose(); _billingDayCtrl.dispose();
+    _customIdCtrl.dispose(); _biometricIdCtrl.dispose(); _notesCtrl.dispose();
     super.dispose();
   }
 
-  String? _computeNextPaymentDate() {
-    final day = int.tryParse(_billingDayCtrl.text.trim());
-    if (day == null || day < 1 || day > 31) return null;
-    final now = DateTime.now();
-    final useNext = _billingForceNextMonth || day < now.day;
-    var year = now.year;
-    var month = now.month + (useNext ? 1 : 0);
-    if (month > 12) { month = 1; year++; }
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final actual = day <= daysInMonth ? day : daysInMonth;
-    return '$year-${month.toString().padLeft(2, '0')}-${actual.toString().padLeft(2, '0')}';
+  String _intervalLabel(int months) {
+    if (months == 1) return '1 Month';
+    if (months == 12) return '1 Year';
+    return '$months Months';
   }
 
   Future<void> _pickAvatar() async {
@@ -1286,36 +1309,50 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   }
 
   Future<void> _save() async {
+    final email = _emailCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
+    if (email.isNotEmpty && !isValidEmail(email)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Enter a valid email address')));
+      return;
+    }
+    if (phone.isNotEmpty && !isValidIndianMobile(phone)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Enter a valid 10-digit mobile number')));
+      return;
+    }
     setState(() => _loading = true);
     try {
-      Map<String, dynamic>? ec;
-      if (_ecNameCtrl.text.trim().isNotEmpty) {
-        ec = {
-          'name': _ecNameCtrl.text.trim(),
-          if (_ecPhoneCtrl.text.trim().isNotEmpty) 'phone': _ecPhoneCtrl.text.trim(),
-          if (_ecRelCtrl.text.trim().isNotEmpty) 'relationship': _ecRelCtrl.text.trim(),
-        };
-      }
-
       final newAvatarUrl = await _uploadAvatar();
 
       await Supabase.instance.client.from('members').update({
         'first_name': _firstCtrl.text.trim(),
         'last_name': _lastCtrl.text.trim(),
-        if (_emailCtrl.text.trim().isNotEmpty) 'email': _emailCtrl.text.trim(),
+        'email': _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
         if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim() else 'phone': null,
+        'custom_id': _customIdCtrl.text.trim().isEmpty ? null : _customIdCtrl.text.trim(),
+        'biometric_id': _biometricIdCtrl.text.trim().isEmpty ? null : _biometricIdCtrl.text.trim(),
         'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         'status': _status,
         if (_joinedAt != null) 'joined_at': _joinedAt,
-        'next_payment_date': _computeNextPaymentDate(),
-        'emergency_contact': ec,
+        'next_payment_date': _nextPaymentDate,
+        'billing_interval_months': _billingIntervalMonths,
         if (newAvatarUrl != null) 'avatar_url': newAvatarUrl,
       }).eq('id', widget.member.id);
 
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } on PostgrestException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        final msg = e.code == '23505'
+            ? 'A member with this ID already exists.'
+            : 'Failed to save. Please try again.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        setState(() => _loading = false);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Failed to save. Please try again.')));
         setState(() => _loading = false);
       }
     }
@@ -1387,10 +1424,46 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             TextFormField(
               controller: _emailCtrl,
               keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Email'),
+              decoration: const InputDecoration(labelText: 'Email (optional)'),
+              onChanged: (_) => setState(() {}),
             ),
+            if (_emailCtrl.text.trim().isEmpty) ...[
+              const SizedBox(height: 4),
+              const Text(
+                '⚠ Without email, the member portal won\'t be available and check-ins must be done manually.',
+                style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+              ),
+            ],
             const SizedBox(height: 12),
-            TextFormField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone')),
+            TextFormField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Phone (optional)'),
+              onChanged: (_) => setState(() {}),
+            ),
+            if (_phoneCtrl.text.trim().isEmpty) ...[
+              const SizedBox(height: 4),
+              const Text(
+                '⚠ Without phone number, SMS reminders won\'t be sent.',
+                style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+              ),
+            ],
+            const SizedBox(height: 12),
+            TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(labelText: 'Member ID (optional)', hintText: 'e.g. GYM-001', counterText: '')),
+            // BIOMETRIC HIDDEN — re-enable when ready to launch
+            // const SizedBox(height: 12),
+            // TextFormField(
+            //   controller: _biometricIdCtrl,
+            //   maxLength: 20,
+            //   keyboardType: TextInputType.number,
+            //   decoration: const InputDecoration(
+            //     labelText: 'Biometric Device ID (optional)',
+            //     hintText: 'e.g. 001',
+            //     counterText: '',
+            //     prefixIcon: Icon(Icons.fingerprint_outlined),
+            //     helperText: 'Employee number enrolled on fingerprint machine',
+            //   ),
+            // ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -1409,15 +1482,55 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _BillingDayField(
-                    controller: _billingDayCtrl,
-                    forceNextMonth: _billingForceNextMonth,
-                    onForceNextMonthChanged: (v) => setState(() => _billingForceNextMonth = v),
-                    onChanged: (_) => setState(() {}),
+                  child: InkWell(
+                    onTap: () => _pickDate(isJoined: false),
+                    borderRadius: BorderRadius.circular(10),
+                    child: InputDecorator(
+                      decoration: const InputDecoration(labelText: 'Next payment date', suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
+                      child: Text(
+                        _nextPaymentDate != null ? formatDateFromString(_nextPaymentDate) : 'Not set',
+                        style: TextStyle(color: _nextPaymentDate != null ? AppTheme.ink : AppTheme.inkHint),
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
+            if (_nextPaymentDate != null) ...[
+              const SizedBox(height: 12),
+              const Text('Payment Interval', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [1, 2, 3, 6, 12].map((m) {
+                  final selected = _billingIntervalMonths == m;
+                  return GestureDetector(
+                    onTap: () => setState(() => _billingIntervalMonths = m),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: selected ? AppTheme.ink : Colors.transparent,
+                        border: Border.all(color: selected ? AppTheme.ink : AppTheme.border),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _intervalLabel(m),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? Colors.white : AppTheme.ink,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Invoices will be generated every ${_intervalLabel(_billingIntervalMonths).toLowerCase()} starting ${formatDateFromString(_nextPaymentDate)}.',
+                style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
+              ),
+            ],
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               value: _status,
@@ -1429,33 +1542,6 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             ),
             const SizedBox(height: 12),
             TextFormField(controller: _notesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Notes')),
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () => setState(() => _showEmergency = !_showEmergency),
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Icon(_showEmergency ? Icons.expand_less : Icons.expand_more, color: AppTheme.ink, size: 20),
-                    const SizedBox(width: 6),
-                    const Text('Emergency Contact', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-                  ],
-                ),
-              ),
-            ),
-            if (_showEmergency) ...[
-              const SizedBox(height: 8),
-              TextFormField(controller: _ecNameCtrl, decoration: const InputDecoration(labelText: 'Contact name')),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(child: TextFormField(controller: _ecPhoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Contact phone'))),
-                  const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _ecRelCtrl, decoration: const InputDecoration(labelText: 'Relationship'))),
-                ],
-              ),
-            ],
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _loading ? null : _save,
@@ -1470,106 +1556,3 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   }
 }
 
-// ── Billing Day Field ─────────────────────────────────────────────────────────
-
-class _BillingDayField extends StatelessWidget {
-  final TextEditingController controller;
-  final bool forceNextMonth;
-  final ValueChanged<bool> onForceNextMonthChanged;
-  final ValueChanged<String> onChanged;
-
-  const _BillingDayField({
-    required this.controller,
-    required this.forceNextMonth,
-    required this.onForceNextMonthChanged,
-    required this.onChanged,
-  });
-
-  String? _computedDate() {
-    final day = int.tryParse(controller.text.trim());
-    if (day == null || day < 1 || day > 31) return null;
-    final now = DateTime.now();
-    final useNext = forceNextMonth || day < now.day;
-    var year = now.year;
-    var month = now.month + (useNext ? 1 : 0);
-    if (month > 12) { month = 1; year++; }
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final actual = day <= daysInMonth ? day : daysInMonth;
-    return '$year-${month.toString().padLeft(2, '0')}-${actual.toString().padLeft(2, '0')}';
-  }
-
-  String _monthName(DateTime d) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return months[d.month - 1];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final day = int.tryParse(controller.text.trim());
-    final validDay = day != null && day >= 1 && day <= 31;
-    final todayDay = DateTime.now().day;
-    final dayValue = day ?? 0;
-    final showToggle = validDay && dayValue > todayDay;
-    final computed = _computedDate();
-
-    final now = DateTime.now();
-    var nm = now.month + 1; var ny = now.year;
-    if (nm > 12) { nm = 1; ny++; }
-    final nextMonthLabel = _monthName(DateTime(ny, nm));
-    final thisMonthLabel = _monthName(now);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          maxLength: 2,
-          decoration: const InputDecoration(
-            labelText: 'Billing day',
-            hintText: 'e.g. 15',
-            counterText: '',
-          ),
-          onChanged: onChanged,
-          style: const TextStyle(fontSize: 14, color: AppTheme.ink),
-        ),
-        if (controller.text.isNotEmpty && !validDay)
-          const Padding(
-            padding: EdgeInsets.only(top: 4, left: 4),
-            child: Text('Enter a day 1–31', style: TextStyle(fontSize: 11, color: AppTheme.statusDanger)),
-          ),
-        if (validDay && computed != null) ...[
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Text(
-                'Next due: ${formatDateFromString(computed)}',
-                style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
-              ),
-              if (showToggle) ...[
-                const SizedBox(width: 6),
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => onForceNextMonthChanged(!forceNextMonth),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                    child: Text(
-                      forceNextMonth
-                          ? '← Back to $thisMonthLabel'
-                          : '→ Start from $nextMonthLabel',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF2563EB),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}

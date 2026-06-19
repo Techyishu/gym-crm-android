@@ -5,6 +5,7 @@ class Member {
   final String lastName;
   final String email;
   final String? phone;
+  final String? customId;
   final String? avatarUrl;
   final String? notes;
   final String status;
@@ -12,8 +13,9 @@ class Member {
   final String createdAt;
   final String? userId;
   final String? nextPaymentDate;
-  final Map<String, dynamic>? emergencyContact;
+  final int billingIntervalMonths;
   final Membership? currentMembership;
+  final String? biometricId;
 
   const Member({
     required this.id,
@@ -22,6 +24,7 @@ class Member {
     required this.lastName,
     required this.email,
     this.phone,
+    this.customId,
     this.avatarUrl,
     this.notes,
     required this.status,
@@ -29,8 +32,9 @@ class Member {
     required this.createdAt,
     this.userId,
     this.nextPaymentDate,
-    this.emergencyContact,
+    this.billingIntervalMonths = 1,
     this.currentMembership,
+    this.biometricId,
   });
 
   String get fullName => '$firstName $lastName';
@@ -48,6 +52,7 @@ class Member {
       lastName: j['last_name'] as String? ?? '',
       email: j['email'] as String? ?? '',
       phone: j['phone'] as String?,
+      customId: j['custom_id'] as String?,
       avatarUrl: j['avatar_url'] as String?,
       notes: j['notes'] as String?,
       status: j['status'] as String? ?? 'unknown',
@@ -55,12 +60,16 @@ class Member {
       createdAt: j['created_at'] as String? ?? '',
       userId: j['user_id'] as String?,
       nextPaymentDate: j['next_payment_date'] as String?,
-      emergencyContact: j['emergency_contact'] as Map<String, dynamic>?,
-      currentMembership: j['memberships'] != null &&
-              (j['memberships'] as List).isNotEmpty
-          ? Membership.fromJson(
-              (j['memberships'] as List).first as Map<String, dynamic>)
-          : null,
+      billingIntervalMonths: (j['billing_interval_months'] as int?) ?? 1,
+      biometricId: j['biometric_id'] as String?,
+      currentMembership: (() {
+        final list = j['memberships'] as List?;
+        if (list == null || list.isEmpty) return null;
+        final maps = list.cast<Map<String, dynamic>>();
+        // Prefer the active membership; fall back to first if none are active.
+        final active = maps.where((ms) => ms['status'] == 'active').toList();
+        return Membership.fromJson(active.isNotEmpty ? active.first : maps.first);
+      })(),
     );
   }
 

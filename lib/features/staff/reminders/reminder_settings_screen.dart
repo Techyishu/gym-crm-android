@@ -605,29 +605,9 @@ class _WelcomeSmsCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  child: const Text(
-                    '{name}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text("Member's first name", style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-              ],
-            ),
+            _PlaceholderChip(label: '{name}', hint: "Member's first name"),
+            const SizedBox(height: 6),
+            _PlaceholderChip(label: '{gym}', hint: 'Gym name'),
           ],
         ],
       ),

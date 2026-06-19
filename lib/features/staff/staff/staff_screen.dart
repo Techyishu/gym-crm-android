@@ -119,9 +119,18 @@ class StaffScreen extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
 
     try {
-      final token = Supabase.instance.client.auth.currentSession?.accessToken;
-      final res   = await http.delete(
-        Uri.parse('https://gymcrm.in/api/staff'),
+      final auth    = Supabase.instance.client.auth;
+      final session = auth.currentSession ?? (await auth.refreshSession()).session;
+      final token   = session?.accessToken;
+      if (token == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Session expired. Please sign in again.')));
+        }
+        return;
+      }
+      final res = await http.delete(
+        Uri.parse('https://www.gymcrm.in/api/staff'),
         headers: {
           HttpHeaders.contentTypeHeader:   'application/json',
           HttpHeaders.authorizationHeader: 'Bearer $token',
@@ -338,9 +347,15 @@ class _InviteStaffSheetState extends State<_InviteStaffSheet> {
 
     setState(() { _sending = true; _error = null; });
     try {
-      final token = Supabase.instance.client.auth.currentSession?.accessToken;
-      final res   = await http.post(
-        Uri.parse('https://gymcrm.in/api/staff'),
+      final auth    = Supabase.instance.client.auth;
+      final session = auth.currentSession ?? (await auth.refreshSession()).session;
+      final token   = session?.accessToken;
+      if (token == null) {
+        setState(() => _error = 'Session expired. Please sign in again.');
+        return;
+      }
+      final res = await http.post(
+        Uri.parse('https://www.gymcrm.in/api/staff'),
         headers: {
           HttpHeaders.contentTypeHeader:   'application/json',
           HttpHeaders.authorizationHeader: 'Bearer $token',

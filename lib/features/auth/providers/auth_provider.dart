@@ -50,7 +50,12 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
 
   return await client
       .from('profiles')
-      .select('*, gyms(*)')
+      .select(
+        'id, role, gym_id, first_name, last_name, phone, '
+        'gyms(id, name, slug, plan, settings, razorpay_key_id, '
+        'registration_enabled, registration_token, '
+        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price)',
+      )
       .eq('id', user.id)
       .maybeSingle();
 });
@@ -108,6 +113,11 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     state = const AsyncValue.loading();
     try {
       await _client.auth.signInWithPassword(email: email, password: password);
+      // Clear any stale error states that built up before the session existed.
+      _ref.invalidate(gymIdProvider);
+      _ref.invalidate(staffProfileProvider);
+      _ref.invalidate(userTypeProvider);
+      _ref.invalidate(memberRecordProvider);
       state = const AsyncValue.data(null);
       return null;
     } on AuthException catch (e) {
@@ -227,6 +237,11 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
         token: token,
         type: OtpType.email,
       );
+      // Clear any stale error states so the dashboard loads fresh after OTP verify.
+      _ref.invalidate(gymIdProvider);
+      _ref.invalidate(staffProfileProvider);
+      _ref.invalidate(userTypeProvider);
+      _ref.invalidate(memberRecordProvider);
       state = const AsyncValue.data(null);
       return null;
     } on AuthException catch (e) {

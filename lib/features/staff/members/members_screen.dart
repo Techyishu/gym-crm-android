@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/validators.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../shared/models/member.dart';
 import '../../../shared/widgets/member_photo.dart';
@@ -423,21 +424,16 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   final _lastCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _customIdCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
-  final _ecNameCtrl = TextEditingController();
-  final _ecPhoneCtrl = TextEditingController();
-  final _ecRelCtrl = TextEditingController();
 
   String _status = 'active';
   String? _joinedAt;
+  String? _nextPaymentDate;
+  int _billingIntervalMonths = 1;
   String? _planId;
   File? _avatarFile;
   bool _loading = false;
-  bool _showEmergency = false;
-
-  // Billing day input
-  final _billingDayCtrl = TextEditingController();
-  bool _billingForceNextMonth = false;
 
   @override
   void dispose() {
@@ -445,25 +441,9 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     _lastCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
+    _customIdCtrl.dispose();
     _notesCtrl.dispose();
-    _ecNameCtrl.dispose();
-    _ecPhoneCtrl.dispose();
-    _ecRelCtrl.dispose();
-    _billingDayCtrl.dispose();
     super.dispose();
-  }
-
-  String? _computeNextPaymentDate() {
-    final day = int.tryParse(_billingDayCtrl.text.trim());
-    if (day == null || day < 1 || day > 31) return null;
-    final now = DateTime.now();
-    final useNext = _billingForceNextMonth || day < now.day;
-    var year = now.year;
-    var month = now.month + (useNext ? 1 : 0);
-    if (month > 12) { month = 1; year++; }
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final actual = day <= daysInMonth ? day : daysInMonth;
-    return '$year-${month.toString().padLeft(2, '0')}-${actual.toString().padLeft(2, '0')}';
   }
 
   Future<void> _pickAvatar() async {
@@ -503,7 +483,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     return filename;
   }
 
-  Future<void> _pickDate(bool isJoined) async {
+  Future<void> _pickDate({required bool isJoined}) async {
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
@@ -512,8 +492,20 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     );
     if (picked != null && mounted) {
       final s = picked.toIso8601String().split('T')[0];
-      setState(() => _joinedAt = s);
+      setState(() {
+        if (isJoined) {
+          _joinedAt = s;
+        } else {
+          _nextPaymentDate = s;
+        }
+      });
     }
+  }
+
+  String _intervalLabel(int months) {
+    if (months == 1) return '1 Month';
+    if (months == 12) return '1 Year';
+    return '$months Months';
   }
 
   Future<void> _save() async {
@@ -526,27 +518,21 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
 
       final avatarUrl = await _uploadAvatar(gymId);
 
-      Map<String, dynamic>? ec;
-      if (_ecNameCtrl.text.trim().isNotEmpty) {
-        ec = {
-          'name': _ecNameCtrl.text.trim(),
-          if (_ecPhoneCtrl.text.trim().isNotEmpty) 'phone': _ecPhoneCtrl.text.trim(),
-          if (_ecRelCtrl.text.trim().isNotEmpty) 'relationship': _ecRelCtrl.text.trim(),
-        };
-      }
-
       final inserted = await client.from('members').insert({
         'gym_id': gymId,
         'first_name': _firstCtrl.text.trim(),
-        'last_name': _lastCtrl.text.trim(),
-        'email': _emailCtrl.text.trim(),
+        if (_lastCtrl.text.trim().isNotEmpty) 'last_name': _lastCtrl.text.trim(),
+        if (_emailCtrl.text.trim().isNotEmpty) 'email': _emailCtrl.text.trim(),
         if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim(),
+        if (_customIdCtrl.text.trim().isNotEmpty) 'custom_id': _customIdCtrl.text.trim(),
         if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
-        'status': _status,
+        'status': (_nextPaymentDate != null && _nextPaymentDate!.compareTo(DateTime.now().toIso8601String().split('T')[0]) < 0)
+            ? 'expired'
+            : _status,
         if (_joinedAt != null) 'joined_at': _joinedAt,
         if (avatarUrl != null) 'avatar_url': avatarUrl,
-        if (_computeNextPaymentDate() != null) 'next_payment_date': _computeNextPaymentDate(),
-        if (ec != null) 'emergency_contact': ec,
+        if (_nextPaymentDate != null) 'next_payment_date': _nextPaymentDate,
+        if (_nextPaymentDate != null) 'billing_interval_months': _billingIntervalMonths,
       }).select('id').single();
 
       // Assign the selected membership plan (open-ended, matches the web flow).
@@ -562,9 +548,12 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
 
       final phone = _phoneCtrl.text.trim();
       if (phone.isNotEmpty) {
+        final gymData = await client.from('gyms').select('name').eq('id', gymId).maybeSingle();
+        final gymName = gymData?['name'] as String? ?? '';
         await SmsReminderService.sendWelcomeSms(
           name: _firstCtrl.text.trim(),
           phone: phone,
+          gymName: gymName,
         );
       }
 
@@ -646,7 +635,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                 children: [
                   Expanded(child: TextFormField(controller: _firstCtrl, maxLength: 100, decoration: const InputDecoration(labelText: 'First name *', counterText: ''), validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null)),
                   const SizedBox(width: 12),
-                  Expanded(child: TextFormField(controller: _lastCtrl, maxLength: 100, decoration: const InputDecoration(labelText: 'Last name *', counterText: ''), validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null)),
+                  Expanded(child: TextFormField(controller: _lastCtrl, maxLength: 100, decoration: const InputDecoration(labelText: 'Last name (optional)', counterText: ''))),
                 ],
               ),
               const SizedBox(height: 12),
@@ -654,17 +643,41 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                 controller: _emailCtrl,
                 maxLength: 254,
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'Email *', counterText: ''),
-                validator: (v) => (v == null || !v.contains('@')) ? 'Valid email required' : null,
+                decoration: const InputDecoration(labelText: 'Email (optional)', counterText: ''),
+                validator: validateOptionalEmail,
+                onChanged: (_) => setState(() {}),
               ),
+              if (_emailCtrl.text.trim().isEmpty) ...[
+                const SizedBox(height: 4),
+                const Text(
+                  '⚠ Without email, the member portal won\'t be available and check-ins must be done manually.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                ),
+              ],
               const SizedBox(height: 12),
-              TextFormField(controller: _phoneCtrl, maxLength: 20, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone (optional)', counterText: '')),
+              TextFormField(
+                controller: _phoneCtrl,
+                maxLength: 20,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone (optional)', counterText: ''),
+                validator: validateOptionalPhone,
+                onChanged: (_) => setState(() {}),
+              ),
+              if (_phoneCtrl.text.trim().isEmpty) ...[
+                const SizedBox(height: 4),
+                const Text(
+                  '⚠ Without phone number, SMS reminders won\'t be sent.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                ),
+              ],
+              const SizedBox(height: 12),
+              TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(labelText: 'Member ID (optional)', hintText: 'e.g. GYM-001', counterText: '')),
               const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
                     child: InkWell(
-                      onTap: () => _pickDate(true),
+                      onTap: () => _pickDate(isJoined: true),
                       borderRadius: BorderRadius.circular(10),
                       child: InputDecorator(
                         decoration: const InputDecoration(labelText: 'Joining date', suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
@@ -677,15 +690,55 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: _BillingDayField(
-                      controller: _billingDayCtrl,
-                      forceNextMonth: _billingForceNextMonth,
-                      onForceNextMonthChanged: (v) => setState(() => _billingForceNextMonth = v),
-                      onChanged: (_) => setState(() {}),
+                    child: InkWell(
+                      onTap: () => _pickDate(isJoined: false),
+                      borderRadius: BorderRadius.circular(10),
+                      child: InputDecorator(
+                        decoration: const InputDecoration(labelText: 'Next payment date', suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
+                        child: Text(
+                          _nextPaymentDate != null ? formatDateFromString(_nextPaymentDate) : 'Optional',
+                          style: TextStyle(color: _nextPaymentDate != null ? AppTheme.ink : AppTheme.inkHint),
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
+              if (_nextPaymentDate != null) ...[
+                const SizedBox(height: 12),
+                const Text('Payment Interval', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [1, 2, 3, 6, 12].map((m) {
+                    final selected = _billingIntervalMonths == m;
+                    return GestureDetector(
+                      onTap: () => setState(() => _billingIntervalMonths = m),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: selected ? AppTheme.ink : Colors.transparent,
+                          border: Border.all(color: selected ? AppTheme.ink : AppTheme.border),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _intervalLabel(m),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: selected ? Colors.white : AppTheme.ink,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Invoices will be generated every ${_intervalLabel(_billingIntervalMonths).toLowerCase()} starting ${formatDateFromString(_nextPaymentDate)}.',
+                  style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
+                ),
+              ],
               const SizedBox(height: 12),
               // Membership plan (optional) — assigns a plan on creation
               Consumer(
@@ -715,36 +768,6 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                 },
               ),
               TextFormField(controller: _notesCtrl, maxLines: 2, maxLength: 500, decoration: const InputDecoration(labelText: 'Notes (optional)', counterText: '')),
-              const SizedBox(height: 16),
-              // Emergency contact toggle
-              InkWell(
-                onTap: () => setState(() => _showEmergency = !_showEmergency),
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Icon(_showEmergency ? Icons.expand_less : Icons.expand_more, color: AppTheme.ink, size: 20),
-                      const SizedBox(width: 6),
-                      const Text('Emergency Contact', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-                      const SizedBox(width: 6),
-                      const Text('(optional)', style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                    ],
-                  ),
-                ),
-              ),
-              if (_showEmergency) ...[
-                const SizedBox(height: 8),
-                TextFormField(controller: _ecNameCtrl, decoration: const InputDecoration(labelText: 'Contact name')),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(child: TextFormField(controller: _ecPhoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Contact phone'))),
-                    const SizedBox(width: 12),
-                    Expanded(child: TextFormField(controller: _ecRelCtrl, decoration: const InputDecoration(labelText: 'Relationship'))),
-                  ],
-                ),
-              ],
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _loading ? null : _save,
@@ -760,104 +783,3 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   }
 }
 
-// ── Billing Day Field ─────────────────────────────────────────────────────────
-
-class _BillingDayField extends StatelessWidget {
-  final TextEditingController controller;
-  final bool forceNextMonth;
-  final ValueChanged<bool> onForceNextMonthChanged;
-  final ValueChanged<String> onChanged;
-
-  const _BillingDayField({
-    required this.controller,
-    required this.forceNextMonth,
-    required this.onForceNextMonthChanged,
-    required this.onChanged,
-  });
-
-  String? _computedDate() {
-    final day = int.tryParse(controller.text.trim());
-    if (day == null || day < 1 || day > 31) return null;
-    final now = DateTime.now();
-    final useNext = forceNextMonth || day < now.day;
-    var year = now.year;
-    var month = now.month + (useNext ? 1 : 0);
-    if (month > 12) { month = 1; year++; }
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final actual = day <= daysInMonth ? day : daysInMonth;
-    return '$year-${month.toString().padLeft(2, '0')}-${actual.toString().padLeft(2, '0')}';
-  }
-
-  String _monthName(DateTime d) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return months[d.month - 1];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final day = int.tryParse(controller.text.trim());
-    final validDay = day != null && day >= 1 && day <= 31;
-    final todayDay = DateTime.now().day;
-    final dayValue = day ?? 0;
-    final showToggle = validDay && dayValue > todayDay;
-    final computed = _computedDate();
-
-    // Next month label for toggle
-    final now = DateTime.now();
-    var nm = now.month + 1; var ny = now.year;
-    if (nm > 12) { nm = 1; ny++; }
-    final nextMonthLabel = _monthName(DateTime(ny, nm));
-    final thisMonthLabel = _monthName(now);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        InputDecorator(
-          decoration: const InputDecoration(labelText: 'Billing day'),
-          child: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            maxLength: 2,
-            decoration: const InputDecoration.collapsed(
-              hintText: 'e.g. 15',
-            ),
-            onChanged: onChanged,
-            style: const TextStyle(fontSize: 14, color: AppTheme.ink),
-          ),
-        ),
-        if (controller.text.isNotEmpty && !validDay)
-          const Padding(
-            padding: EdgeInsets.only(top: 4, left: 4),
-            child: Text('Enter a day 1–31', style: TextStyle(fontSize: 11, color: AppTheme.statusDanger)),
-          ),
-        if (validDay && computed != null) ...[
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Text(
-                'Next due: ${formatDateFromString(computed)}',
-                style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
-              ),
-              if (showToggle) ...[
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () => onForceNextMonthChanged(!forceNextMonth),
-                  child: Text(
-                    forceNextMonth
-                        ? '← Back to $thisMonthLabel'
-                        : '→ Start from $nextMonthLabel',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF2563EB),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}

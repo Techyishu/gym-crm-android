@@ -9,15 +9,19 @@ import '../../auth/providers/auth_provider.dart';
 
 /// Outcome of a scan, shown on a confirmation screen that replaces the camera.
 class _ScanOutcome {
-  final bool success; // green — a fresh check-in was recorded
-  final bool already; // amber — already checked in today
+  final bool success;
+  final bool checkout;
   final String title;
   final String? subtitle;
+  final String? checkedInAt;
+  final String? checkedOutAt;
   const _ScanOutcome({
     required this.success,
-    this.already = false,
+    this.checkout = false,
     required this.title,
     this.subtitle,
+    this.checkedInAt,
+    this.checkedOutAt,
   });
 }
 
@@ -79,7 +83,7 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
       setState(() => _outcome = const _ScanOutcome(
             success: false,
             title: 'Not a gym QR code',
-            subtitle: 'Point the camera at your gym’s check-in QR code.',
+            subtitle: "Point the camera at your gym's check-in QR code.",
           ));
       return;
     }
@@ -96,20 +100,26 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
       final gym = map['gym_name'] as String?;
 
       if (map['ok'] == true) {
-        setState(() => _outcome = _ScanOutcome(
-              success: true,
-              title: name.isNotEmpty ? 'Welcome, $name!' : 'Checked in!',
-              subtitle: gym != null ? 'Checked in at $gym' : 'Check-in recorded',
-            ));
-      } else if (map['already'] == true) {
-        setState(() => _outcome = _ScanOutcome(
-              success: false,
-              already: true,
-              title: 'Already checked in today',
-              subtitle: gym != null
-                  ? 'You’re all set at $gym. Come back tomorrow!'
-                  : 'You’ve already checked in today.',
-            ));
+        final action = map['action'] as String? ?? 'checkin';
+        final checkedInAt = map['checked_in_at'] as String?;
+        final checkedOutAt = map['checked_out_at'] as String?;
+        if (action == 'checkout') {
+          setState(() => _outcome = _ScanOutcome(
+                success: true,
+                checkout: true,
+                title: name.isNotEmpty ? 'See you, $name!' : 'Checked out!',
+                subtitle: gym,
+                checkedInAt: checkedInAt,
+                checkedOutAt: checkedOutAt,
+              ));
+        } else {
+          setState(() => _outcome = _ScanOutcome(
+                success: true,
+                title: name.isNotEmpty ? 'Welcome, $name!' : 'Checked in!',
+                subtitle: gym,
+                checkedInAt: checkedInAt,
+              ));
+        }
       } else {
         setState(() => _outcome = _ScanOutcome(
               success: false,
@@ -345,18 +355,27 @@ class _ScanResultView extends StatelessWidget {
     final Color bg;
     final Color fg;
     final IconData icon;
-    if (outcome.success) {
+    if (outcome.checkout) {
+      bg = AppTheme.statusWarnBg;
+      fg = AppTheme.statusWarn;
+      icon = Icons.logout;
+    } else if (outcome.success) {
       bg = AppTheme.statusActiveBg;
       fg = AppTheme.statusActive;
       icon = Icons.check_circle_outline;
-    } else if (outcome.already) {
-      bg = AppTheme.statusWarnBg;
-      fg = AppTheme.statusWarn;
-      icon = Icons.info_outline;
     } else {
       bg = AppTheme.statusDangerBg;
       fg = AppTheme.statusDanger;
       icon = Icons.error_outline;
+    }
+
+    String fmt(String iso) {
+      final dt = DateTime.tryParse(iso)?.toLocal();
+      if (dt == null) return iso;
+      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final m = dt.minute.toString().padLeft(2, '0');
+      final period = dt.hour < 12 ? 'AM' : 'PM';
+      return '$h:$m $period';
     }
 
     return Center(
@@ -382,11 +401,40 @@ class _ScanResultView extends StatelessWidget {
               ),
             ),
             if (outcome.subtitle != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Text(
                 outcome.subtitle!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: AppTheme.inkHint),
+                style: const TextStyle(fontSize: 13, color: AppTheme.inkHint),
+              ),
+            ],
+            if (outcome.success) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Column(
+                  children: [
+                    if (outcome.checkedInAt != null)
+                      _TimeRow(
+                        label: 'Checked in',
+                        time: fmt(outcome.checkedInAt!),
+                        color: AppTheme.statusActive,
+                      ),
+                    if (outcome.checkedOutAt != null) ...[
+                      const SizedBox(height: 8),
+                      _TimeRow(
+                        label: 'Checked out',
+                        time: fmt(outcome.checkedOutAt!),
+                        color: AppTheme.statusWarn,
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ],
             const SizedBox(height: 32),
@@ -410,6 +458,27 @@ class _ScanResultView extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TimeRow extends StatelessWidget {
+  final String label;
+  final String time;
+  final Color color;
+  const _TimeRow({required this.label, required this.time, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+        Text(time,
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+      ],
     );
   }
 }

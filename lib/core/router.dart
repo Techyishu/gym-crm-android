@@ -115,10 +115,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
 
         final client = Supabase.instance.client;
-        final results = await Future.wait([
-          client.from('profiles').select('id').eq('id', user.id).maybeSingle(),
-          client.from('members').select('id').eq('user_id', user.id).maybeSingle(),
-        ]);
+        List<dynamic> results;
+        try {
+          results = await Future.wait([
+            client.from('profiles').select('id').eq('id', user.id).maybeSingle(),
+            client.from('members').select('id').eq('user_id', user.id).maybeSingle(),
+          ]);
+        } catch (e) {
+          debugPrint('[GymCRM] router redirect lookup failed: $e');
+          // Network/DB hiccup — stay put; redirect re-runs on the next auth/nav event.
+          return null;
+        }
 
         if (results[0] != null) {
           await prefs.setString('home_route', '/staff/dashboard');

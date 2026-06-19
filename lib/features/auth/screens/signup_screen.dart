@@ -801,41 +801,48 @@ class _TermsCheckbox extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: GestureDetector(
-                onTap: () => onChanged(!value),
-                child: Text.rich(
-                  TextSpan(
-                    text: 'I agree to the ',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
-                      height: 1.5,
-                    ),
-                    children: [
-                      TextSpan(
-                        text: 'Terms of Service',
-                        style: const TextStyle(
-                          color: AppTheme.ink,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                        ),
-                        recognizer: TapGestureRecognizer()
-                          ..onTap = () => context.push('/legal/terms'),
-                      ),
-                      const TextSpan(text: ' and '),
-                      TextSpan(
-                        text: 'Privacy Policy',
-                        style: const TextStyle(
-                          color: AppTheme.ink,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                        ),
-                        recognizer: TapGestureRecognizer()
-                          ..onTap = () => context.push('/legal/privacy'),
-                      ),
-                      const TextSpan(text: '.'),
-                    ],
+              child: Text.rich(
+                TextSpan(
+                  text: 'I agree to the ',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    height: 1.5,
                   ),
+                  recognizer: TapGestureRecognizer()
+                    ..onTap = () => onChanged(!value),
+                  children: [
+                    TextSpan(
+                      text: 'Terms of Service',
+                      style: const TextStyle(
+                        color: AppTheme.ink,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => context.push('/legal/terms'),
+                    ),
+                    TextSpan(
+                      text: ' and ',
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => onChanged(!value),
+                    ),
+                    TextSpan(
+                      text: 'Privacy Policy',
+                      style: const TextStyle(
+                        color: AppTheme.ink,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => context.push('/legal/privacy'),
+                    ),
+                    TextSpan(
+                      text: '.',
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () => onChanged(!value),
+                    ),
+                  ],
                 ),
               ),
             ),

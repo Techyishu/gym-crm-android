@@ -19,43 +19,79 @@ final _classesProvider = FutureProvider<List<GymClass>>((ref) async {
       .eq('gym_id', gymId)
       .order('name');
 
-  return (data as List).map((e) => GymClass.fromJson(e as Map<String, dynamic>)).toList();
+  return (data as List)
+      .map((e) => GymClass.fromJson(e as Map<String, dynamic>))
+      .toList();
 });
 
 /// Fetches upcoming sessions grouped by class_id.
 final _upcomingSessionsProvider =
     FutureProvider<Map<String, List<ClassSession>>>((ref) async {
-  final gymId = await ref.watch(gymIdProvider.future);
-  final client = Supabase.instance.client;
+      final gymId = await ref.watch(gymIdProvider.future);
+      final client = Supabase.instance.client;
 
-  final data = await client
-      .from('class_sessions')
-      .select('*, classes!inner(*, gym_id)')
-      .eq('classes.gym_id', gymId)
-      .gte('starts_at',
-          DateTime.now().subtract(const Duration(hours: 1)).toIso8601String())
-      .order('starts_at')
-      .limit(50);
+      final data = await client
+          .from('class_sessions')
+          .select('*, classes!inner(*, gym_id)')
+          .eq('classes.gym_id', gymId)
+          .gte(
+            'starts_at',
+            DateTime.now().subtract(const Duration(hours: 1)).toIso8601String(),
+          )
+          .order('starts_at')
+          .limit(50);
 
-  final sessions =
-      (data as List).map((e) => ClassSession.fromJson(e as Map<String, dynamic>)).toList();
+      final sessions = (data as List)
+          .map((e) => ClassSession.fromJson(e as Map<String, dynamic>))
+          .toList();
 
-  final grouped = <String, List<ClassSession>>{};
-  for (final s in sessions) {
-    grouped.putIfAbsent(s.classId, () => []).add(s);
-  }
-  return grouped;
-});
+      final grouped = <String, List<ClassSession>>{};
+      for (final s in sessions) {
+        grouped.putIfAbsent(s.classId, () => []).add(s);
+      }
+      return grouped;
+    });
+
+/// Members enrolled in a given batch (recurring roster, not per-session bookings).
+final _classEnrollmentsProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((
+      ref,
+      classId,
+    ) async {
+      final client = Supabase.instance.client;
+      final data = await client
+          .from('class_enrollments')
+          .select(
+            'id, member_id, enrolled_at, members(id, first_name, last_name, phone, email)',
+          )
+          .eq('class_id', classId)
+          .order('enrolled_at', ascending: false);
+      return (data as List).cast<Map<String, dynamic>>();
+    });
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const _classTypes = [
-  'general', 'yoga', 'hiit', 'spin', 'boxing', 'pilates', 'crossfit', 'zumba', 'swimming'
+  'general',
+  'yoga',
+  'hiit',
+  'spin',
+  'boxing',
+  'pilates',
+  'crossfit',
+  'zumba',
+  'swimming',
 ];
 
 const _colorSwatches = [
-  '#6366F1', '#3B82F6', '#10B981', '#F59E0B',
-  '#EF4444', '#8B5CF6', '#EC4899', '#0EA5E9',
+  '#6366F1',
+  '#3B82F6',
+  '#10B981',
+  '#F59E0B',
+  '#EF4444',
+  '#8B5CF6',
+  '#EC4899',
+  '#0EA5E9',
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -69,12 +105,11 @@ Color _parseColor(String hex) {
   }
 }
 
-String _capitalize(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+String _capitalize(String s) =>
+    s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
 String _formatTime(DateTime dt) {
-  final h = dt.hour > 12
-      ? dt.hour - 12
-      : (dt.hour == 0 ? 12 : dt.hour);
+  final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
   final m = dt.minute.toString().padLeft(2, '0');
   final period = dt.hour >= 12 ? 'PM' : 'AM';
   return '$h:$m $period';
@@ -90,7 +125,8 @@ class ClassesScreen extends ConsumerWidget {
     final classesAsync = ref.watch(_classesProvider);
     final sessionsAsync = ref.watch(_upcomingSessionsProvider);
 
-    void openAddSheet() => showModalBottomSheet(
+    void openAddSheet() =>
+        showModalBottomSheet(
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
@@ -106,10 +142,7 @@ class ClassesScreen extends ConsumerWidget {
         title: const Text('Batches'),
         leading: const BackButton(),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: openAddSheet,
-          ),
+          IconButton(icon: const Icon(Icons.add), onPressed: openAddSheet),
         ],
       ),
       body: classesAsync.when(
@@ -136,32 +169,82 @@ class ClassesScreen extends ConsumerWidget {
               itemBuilder: (_, i) => _ClassCard(
                 gymClass: classes[i],
                 sessions: sessionMap[classes[i].id] ?? [],
-                onEdit: () => showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => _ClassFormSheet(cls: {
-                    'id': classes[i].id,
-                    'name': classes[i].name,
-                    'type': classes[i].type,
-                    'color': classes[i].color,
-                    'capacity': classes[i].capacity,
-                    'description': classes[i].description,
-                    'default_start_time': classes[i].defaultStartTime,
-                    'default_end_time': classes[i].defaultEndTime,
-                    'trainer_name': classes[i].trainerName,
-                    'schedule_days': classes[i].scheduleDays,
-                  }),
-                ).then((_) {
-                  ref.invalidate(_classesProvider);
-                  ref.invalidate(_upcomingSessionsProvider);
-                }),
+                onEdit: () =>
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      builder: (_) => _ClassFormSheet(
+                        cls: {
+                          'id': classes[i].id,
+                          'name': classes[i].name,
+                          'type': classes[i].type,
+                          'color': classes[i].color,
+                          'capacity': classes[i].capacity,
+                          'description': classes[i].description,
+                          'default_start_time': classes[i].defaultStartTime,
+                          'default_end_time': classes[i].defaultEndTime,
+                          'trainer_name': classes[i].trainerName,
+                          'schedule_days': classes[i].scheduleDays,
+                        },
+                      ),
+                    ).then((_) {
+                      ref.invalidate(_classesProvider);
+                      ref.invalidate(_upcomingSessionsProvider);
+                    }),
                 onAddSession: () => showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
                   builder: (_) => _AddSessionSheet(gymClass: classes[i]),
                 ).then((_) => ref.invalidate(_upcomingSessionsProvider)),
+                onEnroll: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  builder: (_) =>
+                      _BatchEnrollmentSheet(gymClass: classes[i]),
+                ),
+                onDelete: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Delete batch'),
+                      content: Text(
+                        'Delete "${classes[i].name}"? All sessions and enrollments will also be removed. This cannot be undone.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.statusDanger,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true) return;
+                  try {
+                    await Supabase.instance.client
+                        .from('classes')
+                        .delete()
+                        .eq('id', classes[i].id);
+                    ref.invalidate(_classesProvider);
+                    ref.invalidate(_upcomingSessionsProvider);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to delete: $e')),
+                      );
+                    }
+                  }
+                },
               ),
             ),
           );
@@ -191,7 +274,8 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
   void initState() {
     super.initState();
     _date = DateTime.now();
-    _start = _ClassFormSheetState._parseHm(widget.gymClass.defaultStartTime) ??
+    _start =
+        _ClassFormSheetState._parseHm(widget.gymClass.defaultStartTime) ??
         const TimeOfDay(hour: 9, minute: 0);
   }
 
@@ -214,13 +298,25 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
     setState(() => _loading = true);
     try {
       final cls = widget.gymClass;
-      final starts = DateTime(_date.year, _date.month, _date.day, _start.hour, _start.minute);
+      final starts = DateTime(
+        _date.year,
+        _date.month,
+        _date.day,
+        _start.hour,
+        _start.minute,
+      );
 
       // End = class default_end_time on the same day, else start + duration.
       DateTime ends;
       final end = _ClassFormSheetState._parseHm(cls.defaultEndTime);
       if (end != null) {
-        ends = DateTime(_date.year, _date.month, _date.day, end.hour, end.minute);
+        ends = DateTime(
+          _date.year,
+          _date.month,
+          _date.day,
+          end.hour,
+          end.minute,
+        );
         if (!ends.isAfter(starts)) {
           ends = starts.add(Duration(minutes: cls.durationMin));
         }
@@ -237,7 +333,9 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -247,7 +345,9 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
-        left: 16, right: 16, top: 20,
+        left: 16,
+        right: 16,
+        top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       child: Column(
@@ -256,17 +356,30 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
         children: [
           Center(
             child: Container(
-              width: 36, height: 4,
-              decoration: BoxDecoration(color: AppTheme.border, borderRadius: BorderRadius.circular(2)),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
           ),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Add Session — ${widget.gymClass.name}',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink)),
-              IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+              Text(
+                'Add Session — ${widget.gymClass.name}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: AppTheme.ink,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -305,7 +418,14 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
           ElevatedButton(
             onPressed: _loading ? null : _save,
             child: _loading
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
                 : const Text('Add Session'),
           ),
         ],
@@ -316,24 +436,34 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
 
 // ── Class card ────────────────────────────────────────────────────────────────
 
-class _ClassCard extends StatefulWidget {
+class _ClassCard extends ConsumerStatefulWidget {
   final GymClass gymClass;
   final List<ClassSession> sessions;
   final VoidCallback onEdit;
   final VoidCallback onAddSession;
+  final VoidCallback onEnroll;
+  final VoidCallback onDelete;
   const _ClassCard({
     required this.gymClass,
     required this.sessions,
     required this.onEdit,
     required this.onAddSession,
+    required this.onEnroll,
+    required this.onDelete,
   });
 
   @override
-  State<_ClassCard> createState() => _ClassCardState();
+  ConsumerState<_ClassCard> createState() => _ClassCardState();
 }
 
-class _ClassCardState extends State<_ClassCard> {
+class _ClassCardState extends ConsumerState<_ClassCard> {
   bool _expanded = false;
+
+  int _enrolledCount(WidgetRef ref) {
+    return ref
+        .watch(_classEnrollmentsProvider(widget.gymClass.id))
+        .maybeWhen(data: (rows) => rows.length, orElse: () => 0);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -348,135 +478,193 @@ class _ClassCardState extends State<_ClassCard> {
       child: Column(
         children: [
           // Main card content
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Left color strip
-              Container(
-                width: 4,
-                color: color,
-              ),
-              // Content
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Name + type badge + menu
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              cls.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                                color: AppTheme.ink,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: AppTheme.activeBg,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              _capitalize(cls.type),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.inkSoft,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          InkWell(
-                            onTap: widget.onEdit,
-                            borderRadius: BorderRadius.circular(6),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(Icons.edit_outlined,
-                                  size: 16, color: AppTheme.inkHint),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-
-                      // Capacity info
-                      Row(
-                        children: [
-                          const Icon(Icons.people_outline,
-                              size: 13, color: AppTheme.inkHint),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Capacity: ${cls.capacity}  ·  ${cls.durationMin} min',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.inkSoft,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-
-                      // Schedule info
-                      Row(
-                        children: [
-                          const Icon(Icons.schedule_outlined,
-                              size: 13, color: AppTheme.inkHint),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              cls.description != null && cls.description!.isNotEmpty
-                                  ? cls.description!
-                                  : '${sessions.length} upcoming session${sessions.length == 1 ? '' : 's'}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.inkHint,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // "View Sessions" button
-                      GestureDetector(
-                        onTap: () => setState(() => _expanded = !_expanded),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+          // Wrapped in IntrinsicHeight: a stretch-aligned Row whose height is
+          // itself intrinsic (no fixed height from a ListView item) creates a
+          // layout sizing cycle Flutter can't resolve — RenderBox is never
+          // laid out and the whole card silently fails to paint.
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Left color strip
+                Container(width: 4, color: color),
+                // Content
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Name + type badge + menu
+                        Row(
                           children: [
-                            Text(
-                              _expanded ? 'Hide Sessions' : 'View Sessions',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.ink,
+                            Expanded(
+                              child: Text(
+                                cls.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  color: AppTheme.ink,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.activeBg,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                _capitalize(cls.type),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.inkSoft,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 4),
-                            Icon(
-                              _expanded
-                                  ? Icons.keyboard_arrow_up
-                                  : Icons.keyboard_arrow_down,
-                              size: 16,
-                              color: AppTheme.ink,
+                            InkWell(
+                              onTap: widget.onEdit,
+                              borderRadius: BorderRadius.circular(6),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.edit_outlined,
+                                  size: 16,
+                                  color: AppTheme.inkHint,
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: widget.onDelete,
+                              borderRadius: BorderRadius.circular(6),
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.delete_outline,
+                                  size: 16,
+                                  color: AppTheme.statusDanger,
+                                ),
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 6),
+
+                        // Capacity info
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.people_outline,
+                              size: 13,
+                              color: AppTheme.inkHint,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Capacity: ${cls.capacity}  ·  ${cls.durationMin} min',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.inkSoft,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+
+                        // Schedule info
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.schedule_outlined,
+                              size: 13,
+                              color: AppTheme.inkHint,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                cls.description != null &&
+                                        cls.description!.isNotEmpty
+                                    ? cls.description!
+                                    : '${sessions.length} upcoming session${sessions.length == 1 ? '' : 's'}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.inkHint,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        Row(
+                          children: [
+                            // "View Sessions" toggle
+                            GestureDetector(
+                              onTap: () =>
+                                  setState(() => _expanded = !_expanded),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _expanded
+                                        ? 'Hide Sessions'
+                                        : 'View Sessions',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.ink,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    _expanded
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.keyboard_arrow_down,
+                                    size: 16,
+                                    color: AppTheme.ink,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            // "Enroll members" button
+                            GestureDetector(
+                              onTap: widget.onEnroll,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.person_add_outlined,
+                                    size: 14,
+                                    color: AppTheme.inkSoft,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${_enrolledCount(ref)} enrolled',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.inkSoft,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
 
           // Expandable sessions list
@@ -493,17 +681,18 @@ class _ClassCardState extends State<_ClassCard> {
                 ),
               )
             else
-              ...sessions.map((s) => _SessionRow(
-                    session: s,
-                    classCapacity: cls.capacity,
-                  )),
+              ...sessions.map(
+                (s) => _SessionRow(session: s, classCapacity: cls.capacity),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
               child: OutlinedButton.icon(
                 onPressed: widget.onAddSession,
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('Add session'),
-                style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 42)),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 42),
+                ),
               ),
             ),
           ],
@@ -532,7 +721,8 @@ class _SessionRow extends StatelessWidget {
       'completed': (AppTheme.statusActiveBg, AppTheme.statusActive),
       'cancelled': (AppTheme.statusDangerBg, AppTheme.statusDanger),
     };
-    final c = statusColors[session.status] ?? (AppTheme.activeBg, AppTheme.inkSoft);
+    final c =
+        statusColors[session.status] ?? (AppTheme.activeBg, AppTheme.inkSoft);
 
     return Column(
       children: [
@@ -575,8 +765,11 @@ class _SessionRow extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.people_outline,
-                        size: 12, color: AppTheme.inkSoft),
+                    const Icon(
+                      Icons.people_outline,
+                      size: 12,
+                      color: AppTheme.inkSoft,
+                    ),
                     const SizedBox(width: 3),
                     Text(
                       '$enrolled/$capacity',
@@ -664,9 +857,7 @@ class _EmptyBatches extends StatelessWidget {
                 onPressed: onAdd,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('Add Batch'),
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(0, 44),
-                ),
+                style: ElevatedButton.styleFrom(minimumSize: const Size(0, 44)),
               ),
             ),
           ],
@@ -718,11 +909,20 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
     super.initState();
     final c = widget.cls;
     _nameCtrl = TextEditingController(text: c?['name'] as String? ?? '');
-    _capacityCtrl =
-        TextEditingController(text: c?['capacity']?.toString() ?? '20');
-    _trainerCtrl = TextEditingController(text: c?['trainer_name'] as String? ?? '');
+    _capacityCtrl = TextEditingController(
+      text: c?['capacity']?.toString() ?? '20',
+    );
+    _trainerCtrl = TextEditingController(
+      text: c?['trainer_name'] as String? ?? '',
+    );
     _descCtrl = TextEditingController(text: c?['description'] as String? ?? '');
-    _type = c?['type'] as String? ?? 'general';
+    // Older rows can have mixed-case or free-text types (e.g. "Swimming") that
+    // predate the fixed dropdown list — DropdownButtonFormField throws if its
+    // value doesn't exactly match one of its items, so fall back to 'general'.
+    final rawType = (c?['type'] as String?)?.toLowerCase();
+    _type = (rawType != null && _classTypes.contains(rawType))
+        ? rawType
+        : 'general';
     _color = c?['color'] as String? ?? '#6366F1';
     final days = c?['schedule_days'] as List?;
     if (days != null) _scheduleDays.addAll(days.map((e) => e as int));
@@ -775,7 +975,8 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
         '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}';
     final endStr =
         '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}';
-    final durationMin = (_endTime.hour * 60 + _endTime.minute) -
+    final durationMin =
+        (_endTime.hour * 60 + _endTime.minute) -
         (_startTime.hour * 60 + _startTime.minute);
 
     try {
@@ -789,8 +990,10 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
         'default_start_time': startStr,
         'default_end_time': endStr,
         'schedule_days': (_scheduleDays.toList()..sort()),
-        if (_trainerCtrl.text.trim().isNotEmpty) 'trainer_name': _trainerCtrl.text.trim(),
-        if (_descCtrl.text.trim().isNotEmpty) 'description': _descCtrl.text.trim(),
+        if (_trainerCtrl.text.trim().isNotEmpty)
+          'trainer_name': _trainerCtrl.text.trim(),
+        if (_descCtrl.text.trim().isNotEmpty)
+          'description': _descCtrl.text.trim(),
       };
 
       if (_isEdit) {
@@ -803,8 +1006,9 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -868,10 +1072,12 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                 value: _type,
                 decoration: const InputDecoration(labelText: 'Type'),
                 items: _classTypes
-                    .map((t) => DropdownMenuItem(
-                          value: t,
-                          child: Text(_capitalize(t)),
-                        ))
+                    .map(
+                      (t) => DropdownMenuItem(
+                        value: t,
+                        child: Text(_capitalize(t)),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) => setState(() => _type = v!),
               ),
@@ -896,7 +1102,10 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                       child: InputDecorator(
                         decoration: const InputDecoration(
                           labelText: 'Start time',
-                          suffixIcon: Icon(Icons.access_time_outlined, size: 16),
+                          suffixIcon: Icon(
+                            Icons.access_time_outlined,
+                            size: 16,
+                          ),
                         ),
                         child: Text(_formatTod(_startTime)),
                       ),
@@ -910,7 +1119,10 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                       child: InputDecorator(
                         decoration: const InputDecoration(
                           labelText: 'End time',
-                          suffixIcon: Icon(Icons.access_time_outlined, size: 16),
+                          suffixIcon: Icon(
+                            Icons.access_time_outlined,
+                            size: 16,
+                          ),
                         ),
                         child: Text(_formatTod(_endTime)),
                       ),
@@ -923,7 +1135,11 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
               // Runs-on day selector (drives auto-generated sessions)
               const Text(
                 'Runs on',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.inkSoft,
+                ),
               ),
               const SizedBox(height: 10),
               Row(
@@ -932,7 +1148,9 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                   final active = _scheduleDays.contains(d.$1);
                   return GestureDetector(
                     onTap: () => setState(() {
-                      active ? _scheduleDays.remove(d.$1) : _scheduleDays.add(d.$1);
+                      active
+                          ? _scheduleDays.remove(d.$1)
+                          : _scheduleDays.add(d.$1);
                     }),
                     child: Container(
                       width: 38,
@@ -941,7 +1159,9 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                       decoration: BoxDecoration(
                         color: active ? AppTheme.ink : AppTheme.surface,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: active ? AppTheme.ink : AppTheme.border),
+                        border: Border.all(
+                          color: active ? AppTheme.ink : AppTheme.border,
+                        ),
                       ),
                       child: Text(
                         d.$2,
@@ -992,18 +1212,22 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                         shape: BoxShape.circle,
                         border: selected
                             ? Border.all(color: AppTheme.ink, width: 2.5)
-                            : Border.all(
-                                color: Colors.transparent, width: 2.5),
+                            : Border.all(color: Colors.transparent, width: 2.5),
                         boxShadow: selected
                             ? [
                                 BoxShadow(
-                                    color: c.withValues(alpha: 0.4),
-                                    blurRadius: 6)
+                                  color: c.withValues(alpha: 0.4),
+                                  blurRadius: 6,
+                                ),
                               ]
                             : null,
                       ),
                       child: selected
-                          ? const Icon(Icons.check, color: Colors.white, size: 16)
+                          ? const Icon(
+                              Icons.check,
+                              color: Colors.white,
+                              size: 16,
+                            )
                           : null,
                     ),
                   );
@@ -1014,8 +1238,9 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
               TextFormField(
                 controller: _descCtrl,
                 maxLines: 2,
-                decoration:
-                    const InputDecoration(labelText: 'Description (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Description (optional)',
+                ),
               ),
               const SizedBox(height: 20),
 
@@ -1026,12 +1251,449 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
                     : Text(_isEdit ? 'Save Changes' : 'Create Batch'),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Batch enrollment sheet ────────────────────────────────────────────────────
+// Manages the recurring class_enrollments roster for a batch — mirrors the
+// web app's BatchEnrollmentSheet (search members, add/remove from the batch).
+class _BatchEnrollmentSheet extends ConsumerStatefulWidget {
+  final GymClass gymClass;
+  const _BatchEnrollmentSheet({required this.gymClass});
+
+  @override
+  ConsumerState<_BatchEnrollmentSheet> createState() =>
+      _BatchEnrollmentSheetState();
+}
+
+class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
+  final _searchCtrl = TextEditingController();
+  String _search = '';
+  List<Map<String, dynamic>> _allMembers = [];
+  bool _loadingMembers = true;
+  String? _busyMemberId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMembers();
+  }
+
+  Future<void> _loadMembers() async {
+    final gymId = await ref.read(gymIdProvider.future);
+    final data = await Supabase.instance.client
+        .from('members')
+        .select('id, first_name, last_name, phone, email')
+        .eq('gym_id', gymId)
+        .order('first_name');
+    if (mounted) {
+      setState(() {
+        _allMembers = (data as List).cast<Map<String, dynamic>>();
+        _loadingMembers = false;
+      });
+    }
+  }
+
+  // Returns conflicting class name if the member is already enrolled in a
+  // class whose days + time overlap with the class being enrolled into.
+  Future<String?> _findScheduleConflict(String memberId) async {
+    final newStart = _hhmm(widget.gymClass.defaultStartTime);
+    final newEnd   = _hhmm(widget.gymClass.defaultEndTime);
+    final newDays  = widget.gymClass.scheduleDays.toSet();
+    if (newStart == null || newEnd == null || newDays.isEmpty) return null;
+
+    final data = await Supabase.instance.client
+        .from('class_enrollments')
+        .select('classes(id, name, default_start_time, default_end_time, schedule_days)')
+        .eq('member_id', memberId);
+
+    for (final row in (data as List)) {
+      final cls = (row as Map<String, dynamic>)['classes'] as Map<String, dynamic>?;
+      if (cls == null || cls['id'] == widget.gymClass.id) continue;
+
+      final exStart = _hhmm(cls['default_start_time'] as String?);
+      final exEnd   = _hhmm(cls['default_end_time']   as String?);
+      final exDays  = ((cls['schedule_days'] as List?) ?? []).map((e) => e as int).toSet();
+
+      if (exStart == null || exEnd == null || exDays.isEmpty) continue;
+      if (newDays.intersection(exDays).isEmpty) continue;
+
+      // Standard interval overlap: A.start < B.end && A.end > B.start
+      final ns = newStart.hour * 60 + newStart.minute;
+      final ne = newEnd.hour   * 60 + newEnd.minute;
+      final es = exStart.hour  * 60 + exStart.minute;
+      final ee = exEnd.hour    * 60 + exEnd.minute;
+      if (ns < ee && ne > es) return cls['name'] as String? ?? 'another batch';
+    }
+    return null;
+  }
+
+  static TimeOfDay? _hhmm(String? s) {
+    if (s == null || s.isEmpty) return null;
+    final p = s.split(':');
+    if (p.length < 2) return null;
+    final h = int.tryParse(p[0]);
+    final m = int.tryParse(p[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  Future<void> _enroll(Map<String, dynamic> member) async {
+    setState(() => _busyMemberId = member['id'] as String);
+    try {
+      final conflict = await _findScheduleConflict(member['id'] as String);
+      if (conflict != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${member['first_name']} is already in "$conflict" which overlaps with this batch.',
+              ),
+              backgroundColor: AppTheme.statusWarn,
+            ),
+          );
+        }
+        return;
+      }
+
+      await Supabase.instance.client.from('class_enrollments').insert({
+        'class_id': widget.gymClass.id,
+        'member_id': member['id'],
+      });
+      ref.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
+      _searchCtrl.clear();
+      setState(() => _search = '');
+    } catch (e) {
+      if (mounted) {
+        final already = e is PostgrestException && e.code == '23505';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              already
+                  ? 'Already enrolled in this batch'
+                  : 'Failed to enroll: $e',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busyMemberId = null);
+    }
+  }
+
+  Future<void> _remove(String memberId, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Remove from batch'),
+        content: Text('Remove $name from ${widget.gymClass.name}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.statusDanger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _busyMemberId = memberId);
+    try {
+      await Supabase.instance.client
+          .from('class_enrollments')
+          .delete()
+          .eq('class_id', widget.gymClass.id)
+          .eq('member_id', memberId);
+      ref.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to remove: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busyMemberId = null);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enrollmentsAsync = ref.watch(
+      _classEnrollmentsProvider(widget.gymClass.id),
+    );
+    final enrolledIds = enrollmentsAsync.maybeWhen(
+      data: (rows) => rows.map((r) => r['member_id'] as String).toSet(),
+      orElse: () => <String>{},
+    );
+
+    final query = _search.trim().toLowerCase();
+    final results = _allMembers.where((m) {
+      if (enrolledIds.contains(m['id'])) return false;
+      if (query.isEmpty) return true;
+      final name = '${m['first_name']} ${m['last_name']}'.toLowerCase();
+      final phone = (m['phone'] as String? ?? '').toLowerCase();
+      final email = (m['email'] as String? ?? '').toLowerCase();
+      return name.contains(query) ||
+          phone.contains(query) ||
+          email.contains(query);
+    }).toList();
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.85,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 20,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _parseColor(widget.gymClass.color),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Members · ${widget.gymClass.name}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      Text(
+                        enrollmentsAsync.maybeWhen(
+                          data: (rows) =>
+                              '${rows.length} member${rows.length != 1 ? 's' : ''} enrolled',
+                          orElse: () => '…',
+                        ),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.inkSoft,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            TextField(
+              controller: _searchCtrl,
+              enabled: !_loadingMembers,
+              decoration: InputDecoration(
+                labelText: _loadingMembers ? 'Loading members…' : 'Add member',
+                hintText: 'Search by name or phone',
+                prefixIcon: const Icon(Icons.search, size: 18),
+              ),
+              onChanged: (v) => setState(() => _search = v),
+            ),
+
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Add member',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (_loadingMembers)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (results.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          query.isEmpty
+                              ? 'All members are already enrolled.'
+                              : 'No members found',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.inkSoft,
+                          ),
+                        ),
+                      )
+                    else
+                      for (final m in results)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            '${m['first_name']} ${m['last_name']}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            (m['phone'] as String?) ??
+                                (m['email'] as String?) ??
+                                '—',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.inkSoft,
+                            ),
+                          ),
+                          trailing: _busyMemberId == m['id']
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : IconButton(
+                                  icon: const Icon(
+                                    Icons.person_add_outlined,
+                                    size: 20,
+                                  ),
+                                  onPressed: () => _enroll(m),
+                                ),
+                        ),
+                    const SizedBox(height: 12),
+                    const Divider(),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Enrolled members',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...enrollmentsAsync.maybeWhen(
+                      data: (rows) {
+                        if (rows.isEmpty) {
+                          return [
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'No members enrolled yet — add one above.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.inkSoft,
+                                ),
+                              ),
+                            ),
+                          ];
+                        }
+                        return rows.map((row) {
+                          final member =
+                              row['members'] as Map<String, dynamic>?;
+                          if (member == null) return const SizedBox.shrink();
+                          final memberId = member['id'] as String;
+                          final name =
+                              '${member['first_name']} ${member['last_name']}';
+                          final busy = _busyMemberId == memberId;
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              name,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: Text(
+                              (member['phone'] as String?) ??
+                                  (member['email'] as String?) ??
+                                  '—',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.inkSoft,
+                              ),
+                            ),
+                            trailing: busy
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: AppTheme.statusDanger,
+                                    ),
+                                    onPressed: () => _remove(memberId, name),
+                                  ),
+                          );
+                        }).toList();
+                      },
+                      orElse: () => [],
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

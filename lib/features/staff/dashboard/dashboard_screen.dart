@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../shared/widgets/member_photo.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
@@ -37,9 +38,9 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
     client.from('invoices').select('amount, paid_at, members(first_name, last_name)').eq('gym_id', gymId).eq('status', 'paid').order('paid_at', ascending: false).limit(4),
     client.from('invoices').select('amount').eq('gym_id', gymId).inFilter('status', ['pending', 'open', 'overdue']),
     client.from('invoices').select('amount').eq('gym_id', gymId).eq('status', 'paid').gte('paid_at', thirtyDaysAgo),
-    client.from('members').select('id, first_name, last_name, phone, next_payment_date').eq('gym_id', gymId).eq('status', 'active').gte('next_payment_date', todayDate).lte('next_payment_date', in14Days).order('next_payment_date'),
+    client.from('members').select('id, first_name, last_name, phone, next_payment_date, avatar_url').eq('gym_id', gymId).eq('status', 'active').gte('next_payment_date', todayDate).lte('next_payment_date', in14Days).order('next_payment_date'),
     client.from('leads').select('id, first_name, last_name, phone, source, status, created_at').eq('gym_id', gymId).order('created_at', ascending: false).limit(4),
-    client.from('check_ins').select('id, checked_in_at, members(first_name, last_name)').eq('gym_id', gymId).gte('checked_in_at', startOfDay).order('checked_in_at', ascending: false).limit(8),
+    client.from('check_ins').select('id, checked_in_at, members(first_name, last_name, avatar_url)').eq('gym_id', gymId).gte('checked_in_at', startOfDay).order('checked_in_at', ascending: false).limit(8),
   ]);
 
   final countResults = await countFuture;
@@ -149,16 +150,35 @@ class _LoadingBody extends StatelessWidget {
   }
 }
 
-class _ErrorBody extends StatelessWidget {
+class _ErrorBody extends ConsumerWidget {
   final String error;
   const _ErrorBody({required this.error});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Text('Failed to load dashboard', style: const TextStyle(color: AppTheme.inkHint, fontSize: 14)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.cloud_off_outlined, size: 48, color: AppTheme.inkHint),
+            const SizedBox(height: 16),
+            const Text(
+              'Failed to load dashboard',
+              style: TextStyle(color: AppTheme.inkHint, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: () {
+                ref.invalidate(_dashboardDataProvider);
+                ref.invalidate(gymIdProvider);
+              },
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -541,6 +561,7 @@ class _PaymentDueCard extends ConsumerWidget {
                 final lastName = m['last_name'] as String? ?? '';
                 final name = '$firstName $lastName'.trim();
                 final nextPayment = m['next_payment_date'] as String?;
+                final avatarUrl = m['avatar_url'] as String?;
                 final daysUntil = nextPayment != null
                     ? DateTime.parse(nextPayment).difference(DateTime.now()).inDays
                     : 0;
@@ -551,7 +572,7 @@ class _PaymentDueCard extends ConsumerWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        _Avatar(name: name),
+                        _DashboardAvatar(name: name, avatarUrl: avatarUrl),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -726,7 +747,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
           final advanced = _advancePaymentDate(npd);
           if (advanced != null) updates['next_payment_date'] = advanced;
         }
-        if (memberRow['status'] == 'frozen') updates['status'] = 'active';
+        if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';
         if (updates.isNotEmpty) {
           await client.from('members').update(updates).eq('id', memberId);
         }
@@ -1048,6 +1069,7 @@ class _TodayCheckinsCard extends StatelessWidget {
                 final firstName = member?['first_name'] as String? ?? '';
                 final lastName = member?['last_name'] as String? ?? '';
                 final name = '$firstName $lastName'.trim().isEmpty ? 'Unknown' : '$firstName $lastName'.trim();
+                final avatarUrl = member?['avatar_url'] as String?;
                 final checkedInAt = ci['checked_in_at'] as String?;
                 String timeStr = '';
                 if (checkedInAt != null) {
@@ -1067,7 +1089,7 @@ class _TodayCheckinsCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(
                     children: [
-                      _Avatar(name: name),
+                      _DashboardAvatar(name: name, avatarUrl: avatarUrl),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -1393,6 +1415,33 @@ class _Avatar extends StatelessWidget {
       child: Center(
         child: Text(initials, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF111111))),
       ),
+    );
+  }
+}
+
+class _DashboardAvatar extends StatelessWidget {
+  final String name;
+  final String? avatarUrl;
+  const _DashboardAvatar({required this.name, this.avatarUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = name.trim().split(' ');
+    final initials = parts.length >= 2
+        ? '${parts.first[0]}${parts.last[0]}'.toUpperCase()
+        : (name.isNotEmpty ? name[0].toUpperCase() : '?');
+    final fallback = Container(
+      width: 38,
+      height: 38,
+      decoration: const BoxDecoration(color: Color(0xFFF0F0F0), shape: BoxShape.circle),
+      child: Center(
+        child: Text(initials, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF111111))),
+      ),
+    );
+    return SizedBox(
+      width: 38,
+      height: 38,
+      child: MemberPhoto(stored: avatarUrl, fallback: fallback),
     );
   }
 }

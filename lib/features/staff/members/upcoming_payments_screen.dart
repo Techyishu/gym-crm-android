@@ -711,7 +711,7 @@ class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
           final advanced = _advancePaymentDate(npd);
           if (advanced != null) updates['next_payment_date'] = advanced;
         }
-        if (memberRow['status'] == 'frozen') updates['status'] = 'active';
+        if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';
         if (updates.isNotEmpty) {
           await client.from('members').update(updates).eq('id', widget.memberId);
         }

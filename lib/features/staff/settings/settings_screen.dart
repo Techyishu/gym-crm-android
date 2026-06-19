@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,6 +13,9 @@ import '../../auth/providers/auth_provider.dart';
 
 /// Public base URL for member self-registration links (matches the web app).
 const _registrationBaseUrl = 'https://gymcrm.in';
+
+// Supabase project URL — hardcoded to match main.dart (required for Shorebird patch compatibility).
+const _supabaseProjectUrl = 'https://orlqjhqxeyukvfzsursl.supabase.co';
 
 String _uuidV4() {
   final rnd = Random.secure();
@@ -104,7 +108,6 @@ class SettingsScreen extends ConsumerWidget {
                   isScrollControlled: true,
                   useSafeArea: true,
                   builder: (_) => _GymDetailsSheet(
-                    gymAsync: ref.watch(_gymProvider),
                     onSaved: () => ref.invalidate(_gymProvider),
                   ),
                 ),
@@ -121,9 +124,8 @@ class SettingsScreen extends ConsumerWidget {
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
-                  builder: (_) =>
-                      _RegistrationLinkSheet(gymAsync: ref.watch(_gymProvider)),
-                ).then((_) => ref.invalidate(_gymProvider)),
+                  builder: (_) => const _RegistrationLinkSheet(),
+                ),
               ),
               _SettingsRow(
                 icon: Icons.payments_outlined,
@@ -132,10 +134,20 @@ class SettingsScreen extends ConsumerWidget {
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
-                  builder: (_) =>
-                      _PaymentsSheet(gymAsync: ref.watch(_gymProvider)),
-                ).then((_) => ref.invalidate(_gymProvider)),
+                  builder: (_) => const _PaymentsSheet(),
+                ),
               ),
+              // BIOMETRIC HIDDEN — re-enable when ready to launch
+              // _SettingsRow(
+              //   icon: Icons.fingerprint,
+              //   label: 'Biometric Device',
+              //   onTap: () => showModalBottomSheet(
+              //     context: context,
+              //     isScrollControlled: true,
+              //     useSafeArea: true,
+              //     builder: (_) => const _BiometricDeviceSheet(),
+              //   ),
+              // ),
             ]),
 
             const SizedBox(height: 20),
@@ -601,9 +613,8 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
 
 // ─── Gym Details sheet ────────────────────────────────────────────────────────
 class _GymDetailsSheet extends ConsumerStatefulWidget {
-  final AsyncValue<Map<String, dynamic>?> gymAsync;
   final VoidCallback onSaved;
-  const _GymDetailsSheet({required this.gymAsync, required this.onSaved});
+  const _GymDetailsSheet({required this.onSaved});
 
   @override
   ConsumerState<_GymDetailsSheet> createState() => _GymDetailsSheetState();
@@ -619,6 +630,8 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   bool _loading     = false;
   String? _error;
   bool _initialized = false;
+  File? _logoFile;
+  String? _logoUrl;
 
   @override
   void initState() {
@@ -628,9 +641,6 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
     _phoneCtrl   = TextEditingController();
     _websiteCtrl = TextEditingController();
     _descCtrl    = TextEditingController();
-    widget.gymAsync.whenData((gym) {
-      if (!_initialized && gym != null) _seed(gym);
-    });
   }
 
   // Address/phone/website/description live inside the gyms.settings JSONB
@@ -642,7 +652,36 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
     _phoneCtrl.text   = _settings['phone'] as String? ?? '';
     _websiteCtrl.text = _settings['website'] as String? ?? '';
     _descCtrl.text    = _settings['description'] as String? ?? '';
+    _logoUrl          = _settings['logo_url'] as String?;
     _initialized = true;
+  }
+
+  Future<void> _pickLogo() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      imageQuality: 90,
+    );
+    if (picked != null && mounted) {
+      setState(() => _logoFile = File(picked.path));
+    }
+  }
+
+  Future<String?> _uploadLogo(String gymId) async {
+    if (_logoFile == null) return null;
+    final ext = _logoFile!.path.split('.').last.toLowerCase();
+    final mime = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+    final path = '$gymId/logo.$ext';
+    final bytes = await _logoFile!.readAsBytes();
+    await Supabase.instance.client.storage
+        .from('gym-logos')
+        .uploadBinary(path, bytes,
+            fileOptions: FileOptions(contentType: mime, upsert: true));
+    final publicUrl = Supabase.instance.client.storage
+        .from('gym-logos')
+        .getPublicUrl(path);
+    // Bust cache by appending a timestamp query param
+    return '$publicUrl?t=${DateTime.now().millisecondsSinceEpoch}';
   }
 
   @override
@@ -663,12 +702,14 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
     setState(() { _loading = true; _error = null; });
 
     try {
+      final uploadedLogoUrl = await _uploadLogo(gymId);
       final settings = {
         ..._settings,
         'address': _addressCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
         'website': _websiteCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
+        if (uploadedLogoUrl != null) 'logo_url': uploadedLogoUrl,
       };
       await Supabase.instance.client.from('gyms').update({
         'name': _nameCtrl.text.trim(),
@@ -683,9 +724,10 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
       title: 'Gym Details',
-      child: widget.gymAsync.when(
+      child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Text('Error: $e'),
         data: (gym) {
@@ -695,6 +737,59 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_error != null) _ErrorBox(message: _error!),
+              // ── Logo picker ──────────────────────────────────────────────
+              Center(
+                child: GestureDetector(
+                  onTap: _pickLogo,
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.border),
+                          image: _logoFile != null
+                              ? DecorationImage(
+                                  image: FileImage(_logoFile!),
+                                  fit: BoxFit.cover,
+                                )
+                              : (_logoUrl != null && _logoUrl!.isNotEmpty)
+                                  ? DecorationImage(
+                                      image: NetworkImage(_logoUrl!),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                        ),
+                        child: (_logoFile == null &&
+                                (_logoUrl == null || _logoUrl!.isEmpty))
+                            ? const Icon(Icons.upload_file_outlined,
+                                size: 32, color: AppTheme.inkHint)
+                            : null,
+                      ),
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.edit_outlined, size: 12, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Center(
+                child: Text('Gym Logo',
+                    style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(labelText: 'Gym name *'),
@@ -764,15 +859,14 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
 // ─── Payments (Razorpay) sheet ────────────────────────────────────────────────
 // Connect/disconnect a Razorpay key (saved to gyms.razorpay_key_id/secret),
 // matching the web Settings → Payments tab.
-class _PaymentsSheet extends StatefulWidget {
-  final AsyncValue<Map<String, dynamic>?> gymAsync;
-  const _PaymentsSheet({required this.gymAsync});
+class _PaymentsSheet extends ConsumerStatefulWidget {
+  const _PaymentsSheet();
 
   @override
-  State<_PaymentsSheet> createState() => _PaymentsSheetState();
+  ConsumerState<_PaymentsSheet> createState() => _PaymentsSheetState();
 }
 
-class _PaymentsSheetState extends State<_PaymentsSheet> {
+class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
   final _keyIdCtrl = TextEditingController();
   final _keySecretCtrl = TextEditingController();
   String? _gymId;
@@ -854,9 +948,10 @@ class _PaymentsSheetState extends State<_PaymentsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
       title: 'Payments — Razorpay',
-      child: widget.gymAsync.when(
+      child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Text('Error: $e'),
         data: (gym) {
@@ -944,18 +1039,18 @@ class _PaymentsSheetState extends State<_PaymentsSheet> {
 // ─── Registration Link sheet ──────────────────────────────────────────────────
 // Full parity with the web RegistrationLinkBanner: enable/disable toggle,
 // regenerate token, copy and share the link, plus a QR code for in-person sharing.
-class _RegistrationLinkSheet extends StatefulWidget {
-  final AsyncValue<Map<String, dynamic>?> gymAsync;
-  const _RegistrationLinkSheet({required this.gymAsync});
+class _RegistrationLinkSheet extends ConsumerStatefulWidget {
+  const _RegistrationLinkSheet();
 
   @override
-  State<_RegistrationLinkSheet> createState() => _RegistrationLinkSheetState();
+  ConsumerState<_RegistrationLinkSheet> createState() => _RegistrationLinkSheetState();
 }
 
-class _RegistrationLinkSheetState extends State<_RegistrationLinkSheet> {
+class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> {
   String? _gymId;
   bool _enabled = false;
   String _token = '';
+  String? _expiresAt;
   bool _toggling = false;
   bool _regenerating = false;
   bool _seeded = false;
@@ -966,6 +1061,18 @@ class _RegistrationLinkSheetState extends State<_RegistrationLinkSheet> {
     _gymId = gym['id'] as String?;
     _enabled = gym['registration_enabled'] as bool? ?? false;
     _token = gym['registration_token'] as String? ?? '';
+    _expiresAt = gym['registration_token_expires_at'] as String?;
+  }
+
+  String _formatExpiry() {
+    if (_expiresAt == null) return '';
+    final expiry = DateTime.tryParse(_expiresAt!);
+    if (expiry == null) return '';
+    final diff = expiry.toUtc().difference(DateTime.now().toUtc());
+    if (diff.isNegative) return 'Expired';
+    if (diff.inHours >= 24) return 'Expires in ${diff.inDays}d ${diff.inHours % 24}h';
+    if (diff.inHours > 0) return 'Expires in ${diff.inHours}h ${diff.inMinutes % 60}m';
+    return 'Expires in ${diff.inMinutes}m';
   }
 
   String get _link => _token.isEmpty ? '' : '$_registrationBaseUrl/register/$_token';
@@ -1004,10 +1111,12 @@ class _RegistrationLinkSheetState extends State<_RegistrationLinkSheet> {
     setState(() => _regenerating = true);
     try {
       final next = _uuidV4();
-      await Supabase.instance.client
-          .from('gyms')
-          .update({'registration_token': next}).eq('id', _gymId!);
-      if (mounted) setState(() => _token = next);
+      final nextExpiry = DateTime.now().toUtc().add(const Duration(hours: 24)).toIso8601String();
+      await Supabase.instance.client.from('gyms').update({
+        'registration_token': next,
+        'registration_token_expires_at': nextExpiry,
+      }).eq('id', _gymId!);
+      if (mounted) setState(() { _token = next; _expiresAt = nextExpiry; });
       _toast('New registration link generated');
     } catch (e) {
       debugPrint('[GymCRM] Regenerate link error: $e');
@@ -1024,9 +1133,10 @@ class _RegistrationLinkSheetState extends State<_RegistrationLinkSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
       title: 'Member Registration Link',
-      child: widget.gymAsync.when(
+      child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Text('Error: $e'),
         data: (gym) {
@@ -1080,8 +1190,33 @@ class _RegistrationLinkSheetState extends State<_RegistrationLinkSheet> {
 
               if (_enabled && _link.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text('Shareable Link',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                Row(
+                  children: [
+                    const Text('Shareable Link',
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    const Spacer(),
+                    if (_formatExpiry().isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _formatExpiry() == 'Expired'
+                              ? const Color(0xFFFFEBEE)
+                              : const Color(0xFFE8F5E9),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _formatExpiry(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: _formatExpiry() == 'Expired'
+                                ? const Color(0xFFC62828)
+                                : const Color(0xFF2E7D32),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -1169,6 +1304,294 @@ class _RegistrationLinkSheetState extends State<_RegistrationLinkSheet> {
   }
 }
 
+// ─── Biometric Device sheet ───────────────────────────────────────────────────
+class _BiometricDeviceSheet extends ConsumerStatefulWidget {
+  const _BiometricDeviceSheet();
+
+  @override
+  ConsumerState<_BiometricDeviceSheet> createState() => _BiometricDeviceSheetState();
+}
+
+class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
+  Map<String, dynamic>? _device;
+  bool _loading = true;
+  String? _error;
+  bool _initialized = false;
+
+  Future<void> _loadOrCreate(String gymId) async {
+    try {
+      var data = await Supabase.instance.client
+          .from('biometric_devices')
+          .select()
+          .eq('gym_id', gymId)
+          .maybeSingle();
+
+      if (data == null) {
+        final res = await Supabase.instance.client
+            .from('biometric_devices')
+            .insert({'gym_id': gymId})
+            .select()
+            .single();
+        data = res;
+      }
+
+      if (mounted) setState(() { _device = data; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = '$e'; _loading = false; });
+    }
+  }
+
+  String get _admsUrl {
+    final token = _device?['token'] as String? ?? '';
+    return '$_supabaseProjectUrl/functions/v1/biometric-adms/$token';
+  }
+
+  String get _lastPing {
+    final raw = _device?['last_ping_at'] as String?;
+    if (raw == null) return 'Never connected';
+    final dt = DateTime.tryParse(raw)?.toLocal();
+    if (dt == null) return 'Unknown';
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_initialized) {
+      ref.watch(_gymProvider).whenData((gym) {
+        if (gym != null) {
+          _initialized = true;
+          Future.microtask(() { if (mounted) _loadOrCreate(gym['id'] as String); });
+        }
+      });
+    }
+    return _SheetScaffold(
+      title: 'Biometric Device',
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? _ErrorBox(message: _error!)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Beta disclaimer ──────────────────────────────────────
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1c1200),
+                        border: Border.all(color: AppTheme.statusWarn),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Icon(Icons.warning_amber_outlined, color: AppTheme.statusWarn, size: 16),
+                            SizedBox(width: 6),
+                            Text('Beta Feature', style: TextStyle(color: AppTheme.statusWarn, fontWeight: FontWeight.w700, fontSize: 13)),
+                          ]),
+                          SizedBox(height: 6),
+                          Text(
+                            'Designed for ZKTeco & eSSL devices (F22, K40, E9, E990). '
+                            'Other models may work but are untested. '
+                            'If your device behaves differently, contact support.',
+                            style: TextStyle(color: AppTheme.statusWarn, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Device status ────────────────────────────────────────
+                    Row(
+                      children: [
+                        Container(
+                          width: 8, height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: (_device?['last_ping_at'] != null)
+                                ? AppTheme.statusActive
+                                : AppTheme.inkHint,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Last seen: $_lastPing',
+                          style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                        ),
+                        if (_device?['device_sn'] != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '· SN: ${_device!['device_sn']}',
+                            style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
+                          ),
+                        ],
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── ADMS URL ─────────────────────────────────────────────
+                    const Text(
+                      'Server URL',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.background,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _admsUrl,
+                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppTheme.inkSoft),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 18),
+                            tooltip: 'Copy',
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: _admsUrl));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Server URL copied')),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // ── Setup steps ──────────────────────────────────────────
+                    const Text(
+                      'How to Configure Your Device',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                    ),
+                    const SizedBox(height: 10),
+                    ..._steps.map((s) => _SetupStep(number: s.$1, text: s.$2)),
+
+                    const SizedBox(height: 16),
+
+                    // ── Compatible devices ───────────────────────────────────
+                    const Text(
+                      'Compatible Devices',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
+                    ),
+                    const SizedBox(height: 6),
+                    const Wrap(
+                      spacing: 6, runSpacing: 6,
+                      children: [
+                        _DeviceChip('ZKTeco F22'),
+                        _DeviceChip('ZKTeco K40 Pro'),
+                        _DeviceChip('ZKTeco SpeedFace'),
+                        _DeviceChip('eSSL E9'),
+                        _DeviceChip('eSSL E990'),
+                        _DeviceChip('eSSL MB160'),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Member linking note ──────────────────────────────────
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                      child: const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, size: 16, color: AppTheme.inkHint),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'After enrolling a member\'s finger on the device, open their profile '
+                              '(Members → tap member → Edit) and set their Biometric Device ID '
+                              'to match the employee number on the machine.',
+                              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+}
+
+const _steps = [
+  (1, 'On the device, go to Menu → Communication → Cloud / ADMS Settings'),
+  (2, 'Set Server Address to: your Supabase project domain (e.g. orlqjhqx...supabase.co)'),
+  (3, 'Set Port to 443 and enable HTTPS'),
+  (4, 'Set Server Path / Device Path to the path portion of the URL above (starting with /functions/...)'),
+  (5, 'Save and restart the device — status will show "Last seen: Just now" when connected'),
+  (6, 'Enroll each member\'s fingerprint and note the employee number assigned'),
+  (7, 'Open each member\'s profile in GymCRM and enter that employee number as "Biometric Device ID"'),
+];
+
+class _SetupStep extends StatelessWidget {
+  final int number;
+  final String text;
+  const _SetupStep({required this.number, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20, height: 20,
+            decoration: const BoxDecoration(color: AppTheme.activeBg, shape: BoxShape.circle),
+            child: Center(
+              child: Text(
+                '$number',
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.ink),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(text, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.4)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceChip extends StatelessWidget {
+  final String label;
+  const _DeviceChip(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.activeBg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+    );
+  }
+}
+
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 class _SheetScaffold extends StatelessWidget {
   final String title;
@@ -1205,7 +1628,11 @@ class _SheetScaffold extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          child,
+          Flexible(
+            child: SingleChildScrollView(
+              child: child,
+            ),
+          ),
         ],
       ),
     );

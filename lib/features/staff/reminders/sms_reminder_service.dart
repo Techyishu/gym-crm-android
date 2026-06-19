@@ -14,18 +14,21 @@ const kSmsDefaultTemplate =
 const kWelcomeEnabled = 'sms_welcome_enabled';
 const kWelcomeTemplate = 'sms_welcome_template';
 const kWelcomeDefaultTemplate =
-    'Welcome to our gym, {name}! We\'re thrilled to have you. See you on the floor!';
+    'Welcome, {name}! We\'re thrilled to have you. See you on the floor! - {gym}';
 
 class SmsReminderService {
   // Send a welcome SMS to a newly added member (foreground, no session needed).
   static Future<void> sendWelcomeSms({
     required String name,
     required String phone,
+    String gymName = '',
   }) async {
     final prefs = await SharedPreferences.getInstance();
     if (!(prefs.getBool(kWelcomeEnabled) ?? false)) return;
     final template = prefs.getString(kWelcomeTemplate) ?? kWelcomeDefaultTemplate;
-    final msg = template.replaceAll('{name}', name);
+    final msg = template
+        .replaceAll('{name}', name)
+        .replaceAll('{gym}', gymName);
     try {
       await _smsChannel.invokeMethod('sendSms', {'to': phone, 'message': msg});
     } catch (e) {
