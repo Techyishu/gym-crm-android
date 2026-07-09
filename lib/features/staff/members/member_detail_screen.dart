@@ -67,12 +67,10 @@ final _memberInvoicesProvider = FutureProvider.family<List<Map<String, dynamic>>
 });
 
 final _memberBatchesProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
-  final gymId = await ref.read(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('class_enrollments')
       .select('id, enrolled_at, classes(id, name, color, default_start_time, default_end_time)')
       .eq('member_id', id)
-      .eq('gym_id', gymId)
       .order('enrolled_at', ascending: false);
   return (data as List).cast<Map<String, dynamic>>();
 });
