@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/member_photo.dart';
+import '../../../core/access/role_access.dart';
 import '../../auth/providers/auth_provider.dart';
 
 final _overdueProvider =
@@ -28,12 +29,12 @@ final _upcomingProvider =
   final tomorrow = today.add(const Duration(days: 1));
   final tomorrowStr =
       '${tomorrow.year}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
-  final end = today.add(const Duration(days: 14));
+  final end = today.add(const Duration(days: 30));
   final endStr =
       '${end.year}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}';
   final data = await Supabase.instance.client
       .from('members')
-      .select('id, first_name, last_name, avatar_url, next_payment_date, status, phone, email')
+      .select('id, first_name, last_name, avatar_url, next_payment_date, status, phone, email, memberships(status, membership_plans(price))')
       .eq('gym_id', gymId)
       .gte('next_payment_date', tomorrowStr)
       .lte('next_payment_date', endStr)
@@ -76,13 +77,13 @@ class _UpcomingPaymentsScreenState
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Upcoming Payments'),
+        title: const Text('Expiring soon'),
         leading: const BackButton(),
         bottom: TabBar(
           controller: _tabs,
           tabs: const [
             Tab(text: 'Overdue'),
-            Tab(text: 'Next 14 Days'),
+            Tab(text: 'Expiring'),
           ],
         ),
       ),
@@ -258,30 +259,59 @@ class _UpcomingTab extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Error: $e')),
       data: (all) {
-        final filtered = bucketFilter == null
-            ? all
-            : all.where((m) {
-                final days = _daysUntil(m['next_payment_date'] as String?);
-                if (bucketFilter == 3) return days <= 3;
-                if (bucketFilter == 7) return days > 3 && days <= 7;
-                return days > 7 && days <= 14;
-              }).toList();
+        final window = bucketFilter ?? 7; // 7 or 30 days
+        final filtered = all.where((m) {
+          final days = _daysUntil(m['next_payment_date'] as String?);
+          return days <= window;
+        }).toList();
+
+        // Total renewal value of the visible window.
+        double value = 0;
+        for (final m in filtered) {
+          final memberships = (m['memberships'] as List?) ?? [];
+          for (final ms in memberships) {
+            if ((ms as Map)['status'] == 'active') {
+              value += ((ms['membership_plans'] as Map?)?['price'] as num?)?.toDouble() ?? 0;
+              break;
+            }
+          }
+        }
 
         return Column(
           children: [
-            // Bucket filter chips
-            Container(
-              color: AppTheme.surface,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            // Dark summary card
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+                decoration: AppTheme.darkCardDecoration(),
+                child: Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Next $window days',
+                        style: const TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
+                      const SizedBox(height: 4),
+                      Text('${filtered.length} plan${filtered.length == 1 ? '' : 's'}',
+                        style: AppTheme.numberStyle(fontSize: 20, color: AppTheme.onDark)),
+                    ]),
+                  ),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    const Text('Value', style: TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
+                    const SizedBox(height: 4),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(formatCurrency(value),
+                      style: AppTheme.numberStyle(fontSize: 20, color: AppTheme.mintOnDark))),
+                  ]),
+                ]),
+              ),
+            ),
+            // 7 / 30 day toggle
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  _FilterChip(label: 'All', selected: bucketFilter == null, onTap: () => onBucketChange(null)),
+                  _FilterChip(label: '7 days', selected: window == 7, onTap: () => onBucketChange(7)),
                   const SizedBox(width: 8),
-                  _FilterChip(label: '≤3 days', selected: bucketFilter == 3, color: AppTheme.statusDanger, onTap: () => onBucketChange(bucketFilter == 3 ? null : 3)),
-                  const SizedBox(width: 8),
-                  _FilterChip(label: '4–7 days', selected: bucketFilter == 7, color: const Color(0xFFF97316), onTap: () => onBucketChange(bucketFilter == 7 ? null : 7)),
-                  const SizedBox(width: 8),
-                  _FilterChip(label: '8–14 days', selected: bucketFilter == 14, color: const Color(0xFFEAB308), onTap: () => onBucketChange(bucketFilter == 14 ? null : 14)),
+                  _FilterChip(label: '30 days', selected: window == 30, onTap: () => onBucketChange(30)),
                 ],
               ),
             ),
@@ -532,6 +562,8 @@ class _CollectButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final role = ref.watch(staffRoleProvider).valueOrNull;
+    if (!RoleAccess.canRecordPayment(role)) return const SizedBox.shrink();
     return SizedBox(
       height: 32,
       child: ElevatedButton(
@@ -671,15 +703,34 @@ class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
       final gymId = await ref.read(gymIdProvider.future);
       final client = Supabase.instance.client;
 
-      // 1. Create invoice
-      final invoiceResult = await client.from('invoices').insert({
-        'member_id': widget.memberId,
-        'gym_id': gymId,
-        'amount': amount,
-        if (_nextPaymentDate != null) 'due_at': _nextPaymentDate,
-        'status': 'open',
-      }).select('id').single();
-      final invoiceId = invoiceResult['id'] as String;
+      // 1. Reuse existing open invoice if one exists, otherwise create a new one.
+      final existingInvoice = await client
+          .from('invoices')
+          .select('id')
+          .eq('member_id', widget.memberId)
+          .eq('gym_id', gymId)
+          .eq('status', 'open')
+          .order('created_at', ascending: true)
+          .limit(1)
+          .maybeSingle();
+
+      final String invoiceId;
+      if (existingInvoice != null) {
+        invoiceId = existingInvoice['id'] as String;
+        await client.from('invoices').update({
+          'amount': amount,
+          if (_nextPaymentDate != null) 'due_at': _nextPaymentDate,
+        }).eq('id', invoiceId);
+      } else {
+        final invoiceResult = await client.from('invoices').insert({
+          'member_id': widget.memberId,
+          'gym_id': gymId,
+          'amount': amount,
+          if (_nextPaymentDate != null) 'due_at': _nextPaymentDate,
+          'status': 'open',
+        }).select('id').single();
+        invoiceId = invoiceResult['id'] as String;
+      }
 
       // 2. Record payment
       await client.from('payments').insert({

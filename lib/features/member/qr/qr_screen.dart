@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,7 +36,12 @@ class MemberQrScreen extends ConsumerStatefulWidget {
 class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
-  final MobileScannerController _scanner = MobileScannerController();
+  // autoStart is off — the tab listener below owns start()/stop(), and
+  // leaving autoStart on races with it (mobile_scanner throws instead of
+  // queuing when start() is called while a previous start() is still
+  // resolving).
+  final MobileScannerController _scanner = MobileScannerController(autoStart: false);
+  StreamSubscription<BarcodeCapture>? _barcodeSub;
   bool _processing = false;
   _ScanOutcome? _outcome;
 
@@ -43,11 +49,30 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
+    _tabs.addListener(_onTabChanged);
+    _barcodeSub = _scanner.barcodes.listen((capture) {
+      final barcode = capture.barcodes.firstOrNull;
+      if (barcode?.rawValue != null) {
+        _handleScan(barcode!.rawValue!);
+      }
+    });
+  }
+
+  // Run the camera only while the Scan tab is active and no result is showing.
+  void _onTabChanged() {
+    if (_tabs.indexIsChanging) return;
+    if (_tabs.index == 1 && _outcome == null) {
+      _scanner.start().catchError((_) {});
+    } else {
+      _scanner.stop().catchError((_) {});
+    }
   }
 
   @override
   void dispose() {
+    _tabs.removeListener(_onTabChanged);
     _tabs.dispose();
+    _barcodeSub?.cancel();
     _scanner.dispose();
     super.dispose();
   }
@@ -76,7 +101,7 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
     if (_processing || _outcome != null) return;
 
     // Freeze the camera immediately so it can't fire again on the next frame.
-    await _scanner.stop();
+    await _scanner.stop().catchError((_) {});
 
     final token = _extractToken(raw);
     if (token == null) {
@@ -140,7 +165,7 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
 
   Future<void> _scanAgain() async {
     setState(() => _outcome = null);
-    await _scanner.start();
+    await _scanner.start().catchError((_) {});
   }
 
   @override
@@ -303,15 +328,7 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
         Expanded(
           child: Stack(
             children: [
-              MobileScanner(
-                controller: _scanner,
-                onDetect: (capture) {
-                  final barcode = capture.barcodes.firstOrNull;
-                  if (barcode?.rawValue != null) {
-                    _handleScan(barcode!.rawValue!);
-                  }
-                },
-              ),
+              MobileScanner(controller: _scanner),
               Center(
                 child: Container(
                   width: 240,

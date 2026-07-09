@@ -1,13 +1,19 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/providers/revenue_cat_provider.dart';
+import '../../../core/services/revenue_cat_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'ios_custom_paywall.dart';
 
-const _kAppUrl = 'https://www.gymcrm.in';
 const _kWhatsAppUrl = 'https://wa.me/917541004076';
 
 class PaywallScreen extends ConsumerStatefulWidget {
@@ -75,6 +81,18 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     final profileAsync = ref.watch(staffProfileProvider);
     final gym = profileAsync.valueOrNull?['gyms'] as Map<String, dynamic>?;
 
+    // On iOS, show the RC customer center directly from Settings.
+    if (Platform.isIOS) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text('Subscription'),
+          leading: const BackButton(),
+        ),
+        body: _IosActiveSubscription(gym: gym),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
@@ -96,7 +114,7 @@ class _PlanBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (Platform.isIOS) {
-      return _IosManageOnWeb(gym: gym);
+      return _IosPaywall(gym: gym);
     }
 
     return SafeArea(
@@ -123,6 +141,7 @@ class _PlanBody extends StatelessWidget {
             _PlanCard(
               name: 'Pro',
               highlighted: true,
+              price: '₹249/mo',
               features: const [
                 'Unlimited members & check-ins',
                 'Unlimited staff logins & roles',
@@ -135,6 +154,8 @@ class _PlanBody extends StatelessWidget {
                 'Priority support',
               ],
             ),
+            const SizedBox(height: 16),
+            _UpgradeButton(gym: gym),
             const SizedBox(height: 24),
             _ContactForPricing(),
           ],
@@ -144,24 +165,43 @@ class _PlanBody extends StatelessWidget {
   }
 }
 
-// ── iOS: manage subscription on the web ───────────────────────────────────────
-// Apple does not allow selling our digital subscription via our own checkout
-// inside the app, so on iOS we show the current status and a button that opens
-// the website where the owner can subscribe / manage their plan.
+// ── iOS: RevenueCat paywall + subscription management ─────────────────────────
 
-class _IosManageOnWeb extends StatelessWidget {
+class _IosPaywall extends ConsumerWidget {
   final Map<String, dynamic>? gym;
-  const _IosManageOnWeb({required this.gym});
+  const _IosPaywall({required this.gym});
 
-  Future<void> _openWeb(BuildContext context) async {
-    final uri = Uri.parse('$_kAppUrl/dashboard');
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open the browser')),
-        );
-      }
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final customerInfoAsync = ref.watch(customerInfoProvider);
+    final hasAccess = customerInfoAsync.valueOrNull?.entitlements.active
+            .containsKey(kRcEntitlement) ??
+        false;
+
+    // Loading RC customer info — show blank to avoid flash.
+    if (customerInfoAsync.isLoading && !customerInfoAsync.hasValue) {
+      return const Scaffold(backgroundColor: AppTheme.background);
     }
+
+    // Active subscription → show status + manage options.
+    if (hasAccess) {
+      return _IosActiveSubscription(gym: gym);
+    }
+
+    // No active subscription → show custom paywall with StoreKit IAP.
+    // Sign out is handled by PaywallScreen's AppBar action above.
+    return const IosCustomPaywall();
+  }
+}
+
+// ── Active subscription screen (iOS) ─────────────────────────────────────────
+
+class _IosActiveSubscription extends StatelessWidget {
+  final Map<String, dynamic>? gym;
+  const _IosActiveSubscription({required this.gym});
+
+  Future<void> _openCustomerCenter() async {
+    await RevenueCatUI.presentCustomerCenter();
   }
 
   @override
@@ -173,50 +213,27 @@ class _IosManageOnWeb extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _StatusBanner(gym: gym),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppTheme.border),
-              ),
+              decoration: AppTheme.cardDecoration(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Manage your subscription',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.ink,
-                    ),
+                    'Subscription',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   const Text(
-                    'Plans and billing are managed on the GymCRM website. '
-                    'Sign in there to start or change your subscription — your '
-                    'plan applies automatically across all your devices.',
-                    style: TextStyle(fontSize: 14, color: AppTheme.inkSoft, height: 1.5),
+                    'View billing history, cancel, or restore purchases.',
+                    style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft, height: 1.5),
                   ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 48,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _openWeb(context),
-                      icon: const Icon(Icons.open_in_new, size: 18),
-                      label: const Text(
-                        'Open gymcrm.in',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.ink,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    onPressed: _openCustomerCenter,
+                    icon: const Icon(Icons.manage_accounts_outlined, size: 18),
+                    label: const Text('Manage subscription'),
                   ),
                 ],
               ),
@@ -335,84 +352,84 @@ class _PlanCard extends StatelessWidget {
   final String name;
   final List<String> features;
   final bool highlighted;
+  final String? price;
 
   const _PlanCard({
     required this.name,
     required this.features,
     this.highlighted = false,
+    this.price,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: highlighted ? AppTheme.ink : AppTheme.border,
-          width: highlighted ? 2 : 1,
-        ),
-        boxShadow: highlighted
-            ? const [BoxShadow(color: Color(0x1A000000), blurRadius: 8, offset: Offset(0, 2))]
-            : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-            decoration: BoxDecoration(
-              color: highlighted ? AppTheme.ink : AppTheme.background,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            ),
-            child: Row(
-              children: [
-                Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    color: highlighted ? Colors.white : AppTheme.ink,
-                  ),
-                ),
-                if (highlighted) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'Popular',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
-                    ),
-                  ),
-                ],
+    if (!highlighted) {
+      // Secondary (non-featured) plan keeps a light card.
+      return Container(
+        decoration: AppTheme.cardDecoration(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              if (price != null) ...[
+                const Spacer(),
+                Text(price!, style: AppTheme.numberStyle(fontSize: 15)),
               ],
-            ),
-          ),
+            ]),
+            const SizedBox(height: 14),
+            ...features.map((f) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Icon(Icons.check, size: 16, color: AppTheme.statusActive),
+                const SizedBox(width: 10),
+                Expanded(child: Text(f, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft))),
+              ]),
+            )),
+          ],
+        ),
+      );
+    }
 
-          // Features
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            child: Column(
-              children: features.map((f) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.check_circle_outline, size: 16, color: AppTheme.statusActive),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(f, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
-                    ),
-                  ],
-                ),
-              )).toList(),
+    // Featured plan: deep green-black card, mint launch badge, big price.
+    return Container(
+      decoration: AppTheme.darkCardDecoration(radius: 22),
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF7FD6A2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              name.toUpperCase(),
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: Color(0xFF12291B)),
             ),
           ),
+          if (price != null) ...[
+            const SizedBox(height: 14),
+            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text(price!, style: AppTheme.numberStyle(fontSize: 40, color: AppTheme.onDark, height: 1)),
+            ]),
+            const SizedBox(height: 8),
+            const Text('Flat. No per-member fees. Cancel anytime.',
+              style: TextStyle(fontSize: 12.5, color: AppTheme.onDarkSoft)),
+          ],
+          const SizedBox(height: 16),
+          Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+          const SizedBox(height: 16),
+          ...features.map((f) => Padding(
+            padding: const EdgeInsets.only(bottom: 11),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.check, size: 16, color: AppTheme.mintOnDark),
+              const SizedBox(width: 10),
+              Expanded(child: Text(f, style: const TextStyle(fontSize: 13.5, color: AppTheme.onDark))),
+            ]),
+          )),
         ],
       ),
     );
@@ -437,53 +454,139 @@ class _ContactForPricing extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.border),
-      ),
+      decoration: AppTheme.cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: const [
-              Icon(Icons.info_outline, size: 20, color: AppTheme.ink),
-              SizedBox(width: 10),
-              Text(
-                'Contact us for pricing',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.ink,
-                ),
-              ),
-            ],
+          const Text(
+            'Contact us for pricing',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           const Text(
             'Reach out to our support team on WhatsApp to get the right plan for your gym and discuss pricing.',
             style: TextStyle(fontSize: 13, color: AppTheme.inkSoft, height: 1.5),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            height: 48,
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _openWhatsApp(context),
-              icon: const Icon(Icons.chat_outlined, size: 18),
-              label: const Text(
-                'Chat on WhatsApp',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF25D366),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
+          ElevatedButton.icon(
+            onPressed: () => _openWhatsApp(context),
+            icon: const Icon(Icons.chat_outlined, size: 18),
+            label: const Text('Chat on WhatsApp'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Upgrade button (Android — Dodo checkout via Custom Tab) ──────────────────
+
+class _UpgradeButton extends ConsumerStatefulWidget {
+  final Map<String, dynamic>? gym;
+  const _UpgradeButton({required this.gym});
+
+  @override
+  ConsumerState<_UpgradeButton> createState() => _UpgradeButtonState();
+}
+
+class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
+    with WidgetsBindingObserver {
+  bool _loading = false;
+  bool _checkoutInProgress = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Fallback for when the gymcrm://payment-success deep link doesn't fire
+    // (some OEM Chrome builds drop the redirect) — re-check plan status
+    // whenever the app resumes from a checkout attempt.
+    if (state == AppLifecycleState.resumed && _checkoutInProgress) {
+      _checkoutInProgress = false;
+      ref.invalidate(staffProfileProvider);
+    }
+  }
+
+  Future<void> _upgrade() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return;
+
+    setState(() => _loading = true);
+    try {
+      final response = await http.post(
+        Uri.parse('https://www.gymcrm.in/api/billing/mobile/checkout'),
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'plan': 'pro'}),
+      );
+
+      if (response.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not start checkout. Please try again.')),
+          );
+        }
+        return;
+      }
+
+      final url = (jsonDecode(response.body) as Map<String, dynamic>)['url'] as String?;
+      if (url == null) return;
+
+      _checkoutInProgress = true;
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start checkout. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = widget.gym?['plan'] as String?;
+    final planExpiresAt = widget.gym?['plan_expires_at'] as String?;
+    final now = DateTime.now().toUtc();
+    final hasExpiry = planExpiresAt != null &&
+        (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false);
+    final isActive = (plan == 'pro' && planExpiresAt == null) || hasExpiry;
+
+    if (isActive) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 52,
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _loading ? null : _upgrade,
+        child: _loading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              )
+            : const Text(
+                'Upgrade to Pro',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
       ),
     );
   }

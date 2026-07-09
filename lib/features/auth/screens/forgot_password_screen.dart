@@ -74,7 +74,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
           if (_error != null) ...[
             Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFFECACA))),
+              decoration: BoxDecoration(color: const Color(0xFFF8DFD7), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFEBC0B2))),
               child: Text(_error!, style: const TextStyle(color: AppTheme.error)),
             ),
             const SizedBox(height: 16),

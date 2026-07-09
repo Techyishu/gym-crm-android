@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/utils/invoice_pdf.dart';
+import '../../shared/widgets/redesign.dart';
 
 final _invoiceDetailProvider =
     FutureProvider.family<Map<String, dynamic>, String>((ref, id) async {
@@ -26,16 +28,20 @@ class InvoiceDetailScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
+        backgroundColor: AppTheme.background,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        foregroundColor: AppTheme.ink,
         title: async.maybeWhen(
-          data: (inv) => Text(_invoiceNumber(inv['id'] as String, inv['created_at'] as String)),
+          data: (inv) => Text(invoiceNumber(inv['id'] as String, inv['created_at'] as String)),
           orElse: () => const Text('Invoice'),
         ),
         actions: [
           if (async.hasValue)
             IconButton(
               icon: const Icon(Icons.share_outlined),
-              onPressed: () => _share(async.value!),
-              tooltip: 'Share',
+              onPressed: () => _sharePdf(async.value!),
+              tooltip: 'Share as PDF',
             ),
         ],
       ),
@@ -47,27 +53,10 @@ class InvoiceDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _share(Map<String, dynamic> inv) {
-    final member = inv['members'] as Map<String, dynamic>?;
-    final gym = inv['gyms'] as Map<String, dynamic>?;
-    final invNum = _invoiceNumber(inv['id'] as String, inv['created_at'] as String);
-    final memberName = member != null
-        ? '${member['first_name']} ${member['last_name']}'
-        : 'Member';
-    final amount = formatCurrency(inv['amount'] as num);
-    final status = (inv['status'] as String).toUpperCase();
-    final issued = formatDateFromString(inv['created_at'] as String?);
-
-    Share.share(
-      '${gym?['name'] ?? 'Gym'}\n'
-      'Invoice: $invNum\n'
-      'Issued: $issued\n'
-      'Bill To: $memberName\n'
-      '${inv['description'] != null ? 'Description: ${inv['description']}\n' : ''}'
-      'Amount: $amount\n'
-      'Status: $status',
-      subject: 'Invoice $num',
-    );
+  Future<void> _sharePdf(Map<String, dynamic> inv) async {
+    final invNum = invoiceNumber(inv['id'] as String, inv['created_at'] as String);
+    final bytes  = await buildInvoicePdf(inv);
+    await Printing.sharePdf(bytes: bytes, filename: '$invNum.pdf');
   }
 }
 
@@ -83,17 +72,12 @@ class _InvoiceBody extends StatelessWidget {
     final member = invoice['members'] as Map<String, dynamic>?;
     final settings = (gym?['settings'] as Map<String, dynamic>?) ?? {};
     final status = invoice['status'] as String;
-    final invNum = _invoiceNumber(invoice['id'] as String, invoice['created_at'] as String);
-    final (statusBg, statusFg, statusLabel) = _statusInfo(status);
+    final invNum = invoiceNumber(invoice['id'] as String, invoice['created_at'] as String);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))],
-        ),
+        decoration: AppTheme.cardDecoration(),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -105,9 +89,7 @@ class _InvoiceBody extends StatelessWidget {
               phone: settings['phone'] as String?,
               website: settings['website'] as String?,
               invNumber: invNum,
-              statusBg: statusBg,
-              statusFg: statusFg,
-              statusLabel: statusLabel,
+              status: status,
             ),
 
             // Meta row: issue date / due date / paid on
@@ -139,8 +121,8 @@ class _InvoiceBody extends StatelessWidget {
             // Line item
             _LineItems(invoice: invoice),
 
-            // Total
-            _Total(amount: invoice['amount'] as num),
+            // Total (with optional discount breakdown)
+            _Total(invoice: invoice),
 
             // Notes
             if ((invoice['notes'] as String?)?.isNotEmpty == true)
@@ -169,9 +151,7 @@ class _Header extends StatelessWidget {
   final String? phone;
   final String? website;
   final String invNumber;
-  final Color statusBg;
-  final Color statusFg;
-  final String statusLabel;
+  final String status;
 
   const _Header({
     required this.gymName,
@@ -179,9 +159,7 @@ class _Header extends StatelessWidget {
     required this.phone,
     required this.website,
     required this.invNumber,
-    required this.statusBg,
-    required this.statusFg,
-    required this.statusLabel,
+    required this.status,
   });
 
   @override
@@ -247,22 +225,7 @@ class _Header extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusBg,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1,
-                    color: statusFg,
-                  ),
-                ),
-              ),
+              _statusPill(status),
             ],
           ),
         ],
@@ -398,6 +361,8 @@ class _LineItems extends StatelessWidget {
     final description = (invoice['description'] as String?)?.isNotEmpty == true
         ? invoice['description'] as String
         : 'Membership fee';
+    final originalAmount = (invoice['original_amount'] as num?);
+    final displayAmount = originalAmount ?? (invoice['amount'] as num);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
@@ -445,12 +410,8 @@ class _LineItems extends StatelessWidget {
               ),
               const SizedBox(width: 16),
               Text(
-                formatCurrency(invoice['amount'] as num),
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.ink,
-                ),
+                formatCurrency(displayAmount),
+                style: AppTheme.numberStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -463,36 +424,58 @@ class _LineItems extends StatelessWidget {
 // ── Total ─────────────────────────────────────────────────────────────────────
 
 class _Total extends StatelessWidget {
-  final num amount;
-  const _Total({required this.amount});
+  final Map<String, dynamic> invoice;
+  const _Total({required this.invoice});
 
   @override
   Widget build(BuildContext context) {
+    final amount = invoice['amount'] as num;
+    final discountAmount = (invoice['discount_amount'] as num?) ?? 0;
+    final hasDiscount = discountAmount > 0;
+
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
       decoration: const BoxDecoration(
         color: Color(0xFFF8F8F8),
         border: Border(bottom: BorderSide(color: AppTheme.border)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
-          const Text(
-            'TOTAL DUE',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1,
-              color: AppTheme.inkSoft,
+          if (hasDiscount) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'DISCOUNT',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                ),
+                Text(
+                  '− ${formatCurrency(discountAmount)}',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                ),
+              ],
             ),
-          ),
-          Text(
-            formatCurrency(amount),
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.ink,
-            ),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: AppTheme.border),
+            const SizedBox(height: 10),
+          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'TOTAL DUE',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1,
+                  color: AppTheme.inkSoft,
+                ),
+              ),
+              Text(
+                formatCurrency(amount),
+                style: AppTheme.numberStyle(fontSize: 22, fontWeight: FontWeight.w800),
+              ),
+            ],
           ),
         ],
       ),
@@ -523,17 +506,10 @@ class _Footer extends StatelessWidget {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-String _invoiceNumber(String id, String createdAt) {
-  final dt = DateTime.parse(createdAt);
-  final month = '${dt.year}${dt.month.toString().padLeft(2, '0')}';
-  final shortId = id.replaceAll('-', '').substring(0, 6).toUpperCase();
-  return 'INV-$month-$shortId';
-}
-
-(Color, Color, String) _statusInfo(String status) => switch (status) {
-      'paid'   => (const Color(0xFFE8F5E9), AppTheme.statusActive, 'PAID'),
-      'open'   => (const Color(0xFFFFF3E0), AppTheme.statusWarn, 'PENDING'),
-      'failed' => (const Color(0xFFFFEBEE), AppTheme.statusDanger, 'FAILED'),
-      'void'   => (const Color(0xFFECEFF1), AppTheme.statusNeutral, 'VOID'),
-      _        => (const Color(0xFFECEFF1), AppTheme.statusNeutral, 'DRAFT'),
+Widget _statusPill(String status) => switch (status) {
+      'paid'   => StatusPill.active(label: 'PAID'),
+      'open'   => StatusPill.warn(label: 'PENDING'),
+      'failed' => StatusPill.danger(label: 'FAILED'),
+      'void'   => StatusPill.neutral(label: 'VOID'),
+      _        => StatusPill.neutral(label: 'DRAFT'),
     };

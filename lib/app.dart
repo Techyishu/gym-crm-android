@@ -1,13 +1,43 @@
+import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/auth/providers/auth_provider.dart';
 
-class GymCRMApp extends ConsumerWidget {
+class GymCRMApp extends ConsumerStatefulWidget {
   const GymCRMApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GymCRMApp> createState() => _GymCRMAppState();
+}
+
+class _GymCRMAppState extends ConsumerState<GymCRMApp> {
+  StreamSubscription<Uri>? _linkSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Dodo checkout redirects here (gymcrm://payment-success) after mobile
+    // payment completes. The webhook (server-side) is the source of truth
+    // for the actual plan update — this just forces the app to re-read it
+    // immediately instead of waiting for the next natural refetch.
+    _linkSub = AppLinks().uriLinkStream.listen((uri) {
+      if (uri.host == 'payment-success') {
+        ref.invalidate(staffProfileProvider);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(

@@ -3,15 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
-import '../reminders/sms_reminder_service.dart';
+import '../../../shared/widgets/redesign.dart';
 
 // ─── Channel enum ──────────────────────────────────────────────────────────────
-enum _Channel { email, push, whatsapp, sms }
+enum _Channel { email, push, whatsapp }
 
 // ─── Template model ────────────────────────────────────────────────────────────
 class _Template {
@@ -85,9 +83,8 @@ class _CommunicationsScreenState extends State<CommunicationsScreen> {
   bool     _sending  = false;
   _SendResult? _result;
 
-  List<_Channel> get _channels => Platform.isIOS
-      ? [_Channel.email, _Channel.push, _Channel.whatsapp]
-      : [_Channel.email, _Channel.push, _Channel.whatsapp, _Channel.sms];
+  List<_Channel> get _channels =>
+      [_Channel.email, _Channel.push, _Channel.whatsapp];
 
   @override
   void initState() {
@@ -185,8 +182,6 @@ class _CommunicationsScreenState extends State<CommunicationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isSms = _channel == _Channel.sms;
-
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('Messages'), leading: const BackButton()),
@@ -198,38 +193,33 @@ class _CommunicationsScreenState extends State<CommunicationsScreen> {
             _ChannelSelector(channels: _channels, selected: _channel, onChanged: _switchChannel),
             const SizedBox(height: 16),
 
-            // ── SMS tab: full SMS panel (Android only) ────────────────────
-            if (isSms)
-              const _SmsPanel()
+            // ── WhatsApp: Due Reminders only ──────────────────────────────
+            if (_channel == _Channel.whatsapp)
+              const _WaDueRemindersCard()
             else ...[
-              // ── WhatsApp: Due Reminders only ──────────────────────────────
-              if (_channel == _Channel.whatsapp)
-                const _WaDueRemindersCard()
-              else ...[
-                // ── Email / Push composer ───────────────────────────────────
-                _ComposerCard(
-                  channel:    _channel,
-                  audience:   _audience,
-                  onAudienceChanged: (v) => setState(() { _audience = v!; _result = null; }),
-                  subjectCtrl: _subjectCtrl,
-                  messageCtrl: _messageCtrl,
-                  sending:    _sending,
-                  onSend:     _sendBroadcast,
-                  onCopy:     _copyMessage,
-                ),
+              // ── Email / Push composer ───────────────────────────────────
+              _ComposerCard(
+                channel:    _channel,
+                audience:   _audience,
+                onAudienceChanged: (v) => setState(() { _audience = v!; _result = null; }),
+                subjectCtrl: _subjectCtrl,
+                messageCtrl: _messageCtrl,
+                sending:    _sending,
+                onSend:     _sendBroadcast,
+                onCopy:     _copyMessage,
+              ),
 
-                if (_result != null) ...[
-                  const SizedBox(height: 12),
-                  _ResultCard(result: _result!),
-                ],
-
-                const SizedBox(height: 16),
-                _TemplatesCard(onSelect: _applyTemplate),
+              if (_result != null) ...[
+                const SizedBox(height: 12),
+                _ResultCard(result: _result!),
               ],
 
               const SizedBox(height: 16),
-              _RecentActivityCard(),
+              _TemplatesCard(onSelect: _applyTemplate),
             ],
+
+            const SizedBox(height: 16),
+            _RecentActivityCard(),
 
             const SizedBox(height: 32),
           ],
@@ -250,14 +240,12 @@ class _ChannelSelector extends StatelessWidget {
     _Channel.email    => 'Email',
     _Channel.push     => 'Push',
     _Channel.whatsapp => 'WhatsApp',
-    _Channel.sms      => 'SMS',
   };
 
   IconData _icon(_Channel c) => switch (c) {
     _Channel.email    => Icons.email_outlined,
     _Channel.push     => Icons.notifications_outlined,
     _Channel.whatsapp => Icons.chat_outlined,
-    _Channel.sms      => Icons.sms_outlined,
   };
 
   @override
@@ -346,55 +334,56 @@ class _ComposerCard extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                channel == _Channel.email ? 'Email Broadcast'
-                    : channel == _Channel.push ? 'Push Notification Broadcast'
-                    : 'WhatsApp Broadcast',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                channel == _Channel.email ? 'Email broadcast'
+                    : channel == _Channel.push ? 'Push notification broadcast'
+                    : 'WhatsApp broadcast',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink),
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
 
           // Audience
-          InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Send to',
-              contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: audience,
-                isExpanded: true,
-                isDense: true,
-                items: _kAudienceFilters
-                    .map((a) => DropdownMenuItem(value: a, child: Text(_kAudienceLabels[a] ?? a)))
-                    .toList(),
-                onChanged: onAudienceChanged,
-              ),
+          const FieldLabel('Send to'),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _kAudienceFilters.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final a = _kAudienceFilters[i];
+                return PillChip(
+                  label: _kAudienceLabels[a] ?? a,
+                  selected: audience == a,
+                  onTap: () => onAudienceChanged(a),
+                );
+              },
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
 
           // Subject / Title (email + push only)
           if (channel != _Channel.whatsapp) ...[
+            FieldLabel(channel == _Channel.email ? 'Subject' : 'Notification title'),
             TextField(
               controller: subjectCtrl,
               decoration: InputDecoration(
-                labelText: channel == _Channel.email ? 'Subject' : 'Notification title',
                 hintText: channel == _Channel.email
                     ? 'e.g. Important update from your gym'
                     : 'e.g. Special offer this weekend!',
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
           ],
 
           // Message body
+          const FieldLabel('Message'),
           TextField(
             controller: messageCtrl,
             maxLines: channel == _Channel.push ? 3 : 5,
             decoration: const InputDecoration(
-              hintText: 'Type your message...\nUse {name} to personalise.',
+              hintText: 'Type your message…\nUse {name} to personalise.',
               alignLabelWithHint: true,
             ),
           ),
@@ -464,596 +453,6 @@ class _ComposerCard extends StatelessWidget {
   }
 }
 
-// ─── SMS Panel (Android only — full screen with broadcast + auto-reminders) ────
-class _SmsPanel extends StatefulWidget {
-  const _SmsPanel();
-
-  @override
-  State<_SmsPanel> createState() => _SmsPanelState();
-}
-
-class _SmsPanelState extends State<_SmsPanel> {
-  // ── Broadcast state ──────────────────────────────────────────────────────────
-  String _broadcastAudience = 'all';
-  final _broadcastCtrl = TextEditingController();
-  bool _broadcastSending = false;
-  int _broadcastSent = -1; // -1 = not sent yet
-
-  // ── Auto-reminder state ──────────────────────────────────────────────────────
-  bool _autoEnabled   = false;
-  int  _daysBefore    = 3;
-  late TextEditingController _templateCtrl;
-  bool _reminderLoading = true;
-  bool _reminderSending = false;
-  SharedPreferences? _prefs;
-
-  static const _daysOptions = [1, 2, 3, 5, 7, 14];
-  static const _smsChannel  = MethodChannel('com.gymcrm/sms');
-
-  @override
-  void initState() {
-    super.initState();
-    _templateCtrl = TextEditingController();
-    _loadReminderSettings();
-    _broadcastCtrl.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _broadcastCtrl.dispose();
-    _templateCtrl.dispose();
-    super.dispose();
-  }
-
-  // ── Load reminder prefs ──────────────────────────────────────────────────────
-  Future<void> _loadReminderSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _prefs           = prefs;
-      _autoEnabled     = prefs.getBool(kSmsEnabled) ?? false;
-      _daysBefore      = prefs.getInt(kSmsDaysBefore) ?? 3;
-      _templateCtrl.text = prefs.getString(kSmsTemplate) ?? kSmsDefaultTemplate;
-      _reminderLoading = false;
-    });
-  }
-
-  Future<void> _saveReminderSettings() async {
-    await _prefs?.setBool(kSmsEnabled, _autoEnabled);
-    await _prefs?.setInt(kSmsDaysBefore, _daysBefore);
-    await _prefs?.setString(kSmsTemplate,
-        _templateCtrl.text.trim().isEmpty ? kSmsDefaultTemplate : _templateCtrl.text.trim());
-  }
-
-  // ── SMS permission ───────────────────────────────────────────────────────────
-  Future<bool> _ensureSmsPermission() async {
-    var status = await Permission.sms.status;
-    if (status.isGranted) return true;
-    status = await Permission.sms.request();
-    if (status.isGranted) return true;
-    if (!mounted) return false;
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('SMS Permission Blocked'),
-        content: const Text(
-          'Android blocked the SMS permission.\n\n'
-          'To fix this:\n'
-          '1. Go to Settings → Apps → gym_crm\n'
-          '2. Tap the ⋮ menu → "Allow restricted settings"\n'
-          '3. Come back and try again.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(onPressed: () { Navigator.pop(ctx); openAppSettings(); }, child: const Text('Open Settings')),
-        ],
-      ),
-    );
-    return false;
-  }
-
-  // ── SMS Broadcast (custom audience + message) ────────────────────────────────
-  Future<void> _sendSmsBroadcast() async {
-    final msg = _broadcastCtrl.text.trim();
-    if (msg.isEmpty) { _showSnack('Message is required'); return; }
-
-    final granted = await _ensureSmsPermission();
-    if (!granted || !mounted) return;
-
-    final audienceLabel = _kAudienceLabels[_broadcastAudience] ?? _broadcastAudience;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Send SMS Broadcast'),
-        content: Text('Send SMS to $audienceLabel using your SIM?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(c, true), child: const Text('Send')),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    setState(() { _broadcastSending = true; _broadcastSent = -1; });
-    try {
-      final members = await _fetchMembersForAudience(_broadcastAudience);
-      int sent = 0;
-      for (final m in members) {
-        final phone = (m['phone'] as String?)?.trim();
-        if (phone == null || phone.isEmpty) continue;
-        final name = m['first_name'] as String? ?? 'Member';
-        final text = msg.replaceAll('{name}', name);
-        try {
-          await _smsChannel.invokeMethod('sendSms', {'to': phone, 'message': text});
-          sent++;
-        } catch (e) {
-          debugPrint('[GymCRM] SMS send error to $phone: $e');
-        }
-      }
-      setState(() => _broadcastSent = sent);
-      _showSnack('Sent $sent SMS${sent == 1 ? '' : 's'} successfully');
-      _broadcastCtrl.clear();
-    } catch (e) {
-      _showSnack('Error: $e');
-    } finally {
-      if (mounted) setState(() => _broadcastSending = false);
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchMembersForAudience(String audience) async {
-    final client = Supabase.instance.client;
-    final userId = client.auth.currentUser?.id;
-    if (userId == null) return [];
-    final profile = await client.from('profiles').select('gym_id').eq('id', userId).maybeSingle();
-    final gymId = profile?['gym_id'] as String?;
-    if (gymId == null || gymId.isEmpty) return [];
-    var query = client.from('members').select('id, first_name, last_name, phone')
-        .eq('gym_id', gymId).not('phone', 'is', null);
-    if (audience == 'active')  query = query.eq('status', 'active');
-    if (audience == 'expired') query = query.eq('status', 'expired');
-    if (audience == 'frozen')  query = query.eq('status', 'frozen');
-    final data = await query;
-    return List<Map<String, dynamic>>.from(data as List);
-  }
-
-  // ── Auto reminder toggle ─────────────────────────────────────────────────────
-  Future<void> _toggleAutoReminders(bool value) async {
-    if (value) {
-      final granted = await _ensureSmsPermission();
-      if (!granted) return;
-    }
-    setState(() => _autoEnabled = value);
-    await _saveReminderSettings();
-    _showSnack(value ? 'Auto SMS reminders enabled' : 'Auto SMS reminders disabled');
-  }
-
-  // ── Send reminders now ───────────────────────────────────────────────────────
-  Future<void> _sendRemindersNow() async {
-    final granted = await _ensureSmsPermission();
-    if (!granted) return;
-    await _saveReminderSettings();
-    setState(() => _reminderSending = true);
-    try {
-      final count = await SmsReminderService.sendManualReminders();
-      if (mounted) {
-        _showSnack(count == 0
-            ? 'No members with expiring memberships found.'
-            : 'Sent $count reminder${count == 1 ? '' : 's'} successfully.');
-      }
-    } catch (e) {
-      if (mounted) _showSnack('Error: $e');
-    } finally {
-      if (mounted) setState(() => _reminderSending = false);
-    }
-  }
-
-  void _showSnack(String text) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_reminderLoading) {
-      return const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator()));
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Info banner ──────────────────────────────────────────────────────
-        _SmsInfoBanner(),
-        const SizedBox(height: 16),
-
-        // ── SMS Broadcast ────────────────────────────────────────────────────
-        _SmsBroadcastCard(
-          audience:   _broadcastAudience,
-          onAudienceChanged: (v) => setState(() { _broadcastAudience = v!; _broadcastSent = -1; }),
-          messageCtrl: _broadcastCtrl,
-          sending:    _broadcastSending,
-          sentCount:  _broadcastSent,
-          onSend:     _sendSmsBroadcast,
-        ),
-        const SizedBox(height: 16),
-
-        // ── Auto-reminders ───────────────────────────────────────────────────
-        _AutoReminderCard(
-          enabled:    _autoEnabled,
-          daysBefore: _daysBefore,
-          daysOptions: _daysOptions,
-          onToggle:   _toggleAutoReminders,
-          onDaysChanged: (v) async {
-            setState(() => _daysBefore = v!);
-            await _saveReminderSettings();
-          },
-        ),
-        const SizedBox(height: 16),
-
-        // ── Message template ─────────────────────────────────────────────────
-        _SmsTemplateCard(
-          controller: _templateCtrl,
-          onReset: () async {
-            setState(() => _templateCtrl.text = kSmsDefaultTemplate);
-            await _saveReminderSettings();
-          },
-          onChanged: (_) => _saveReminderSettings(),
-        ),
-        const SizedBox(height: 16),
-
-        // ── Send reminders now ───────────────────────────────────────────────
-        _ReminderSendNowCard(
-          daysBefore: _daysBefore,
-          sending:    _reminderSending,
-          onSend:     _sendRemindersNow,
-        ),
-      ],
-    );
-  }
-}
-
-// ─── SMS info banner ───────────────────────────────────────────────────────────
-class _SmsInfoBanner extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.activeBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.sms_outlined, size: 18, color: AppTheme.primary),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text(
-              'SMS messages are sent from your own SIM card — no third-party service needed. '
-              'Members receive the SMS directly from your phone number.',
-              style: TextStyle(fontSize: 13, color: AppTheme.ink, height: 1.5),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── SMS Broadcast card ────────────────────────────────────────────────────────
-class _SmsBroadcastCard extends StatelessWidget {
-  final String audience;
-  final ValueChanged<String?> onAudienceChanged;
-  final TextEditingController messageCtrl;
-  final bool sending;
-  final int sentCount;
-  final VoidCallback onSend;
-
-  const _SmsBroadcastCard({
-    required this.audience,
-    required this.onAudienceChanged,
-    required this.messageCtrl,
-    required this.sending,
-    required this.sentCount,
-    required this.onSend,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.chat_outlined, size: 16, color: AppTheme.inkSoft),
-              const SizedBox(width: 6),
-              const Text('SMS Broadcast',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text('Send a custom SMS to a group of members right now.',
-              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-          const SizedBox(height: 14),
-
-          // Audience
-          InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Send to',
-              contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: audience,
-                isExpanded: true,
-                isDense: true,
-                items: _kAudienceFilters
-                    .map((a) => DropdownMenuItem(value: a, child: Text(_kAudienceLabels[a] ?? a)))
-                    .toList(),
-                onChanged: onAudienceChanged,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Message
-          TextField(
-            controller: messageCtrl,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'Type your message...\nUse {name} to personalise.',
-              alignLabelWithHint: true,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text('${messageCtrl.text.length} characters',
-              style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
-          const SizedBox(height: 14),
-
-          // Send button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: sending ? null : onSend,
-              icon: sending
-                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.sms_outlined, size: 18),
-              label: Text(sending ? 'Sending...' : 'Send SMS Now'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-                textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-
-          // Result
-          if (sentCount >= 0) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle_outline, color: Color(0xFF065F46), size: 16),
-                  const SizedBox(width: 8),
-                  Text('$sentCount SMS sent successfully',
-                      style: const TextStyle(fontSize: 13, color: Color(0xFF065F46), fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Auto-reminder card ────────────────────────────────────────────────────────
-class _AutoReminderCard extends StatelessWidget {
-  final bool enabled;
-  final int daysBefore;
-  final List<int> daysOptions;
-  final ValueChanged<bool> onToggle;
-  final ValueChanged<int?> onDaysChanged;
-
-  const _AutoReminderCard({
-    required this.enabled,
-    required this.daysBefore,
-    required this.daysOptions,
-    required this.onToggle,
-    required this.onDaysChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Auto Reminders',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-          const SizedBox(height: 4),
-          const Text('Runs daily in the background — sends to members whose membership is about to expire.',
-              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.5)),
-          const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Enable auto reminders',
-                  style: TextStyle(fontSize: 14, color: AppTheme.ink, fontWeight: FontWeight.w500)),
-              Switch(value: enabled, onChanged: onToggle),
-            ],
-          ),
-          if (enabled) ...[
-            const Divider(height: 24),
-            const Text('Send reminder',
-                style: TextStyle(fontSize: 14, color: AppTheme.ink, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            InputDecorator(
-              decoration: const InputDecoration(
-                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  value: daysBefore,
-                  isExpanded: true,
-                  isDense: true,
-                  items: daysOptions
-                      .map((d) => DropdownMenuItem(
-                            value: d,
-                            child: Text('$d day${d == 1 ? '' : 's'} before expiry'),
-                          ))
-                      .toList(),
-                  onChanged: onDaysChanged,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ─── SMS Template card ─────────────────────────────────────────────────────────
-class _SmsTemplateCard extends StatelessWidget {
-  final TextEditingController controller;
-  final VoidCallback onReset;
-  final ValueChanged<String> onChanged;
-
-  const _SmsTemplateCard({
-    required this.controller,
-    required this.onReset,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Reminder Template',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-              TextButton(
-                onPressed: onReset,
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text('Reset', style: TextStyle(fontSize: 12)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text('Used by both auto-reminders and "Send Reminders Now".',
-              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-          const SizedBox(height: 10),
-          TextField(
-            controller: controller,
-            maxLines: 4,
-            onChanged: onChanged,
-            decoration: const InputDecoration(
-              hintText: 'Type your reminder message...',
-              alignLabelWithHint: true,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _PlaceholderRow(label: '{name}', hint: "Member's first name"),
-          const SizedBox(height: 6),
-          _PlaceholderRow(label: '{days}', hint: 'Days before expiry (auto-reminders only)'),
-        ],
-      ),
-    );
-  }
-}
-
-class _PlaceholderRow extends StatelessWidget {
-  final String label;
-  final String hint;
-  const _PlaceholderRow({required this.label, required this.hint});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: AppTheme.border),
-          ),
-          child: Text(label,
-              style: const TextStyle(
-                  fontSize: 12, fontFamily: 'monospace',
-                  color: AppTheme.primary, fontWeight: FontWeight.w600)),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: Text(hint, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft))),
-      ],
-    );
-  }
-}
-
-// ─── Send reminders now card ───────────────────────────────────────────────────
-class _ReminderSendNowCard extends StatelessWidget {
-  final int daysBefore;
-  final bool sending;
-  final VoidCallback onSend;
-
-  const _ReminderSendNowCard({
-    required this.daysBefore,
-    required this.sending,
-    required this.onSend,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Send Reminders Now',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-          const SizedBox(height: 6),
-          Text(
-            'Manually send the reminder template to members whose membership expires in $daysBefore day${daysBefore == 1 ? '' : 's'}.',
-            style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, height: 1.5),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: sending ? null : onSend,
-              icon: sending
-                  ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.send_outlined, size: 18),
-              label: Text(sending ? 'Sending...' : 'Send Reminders Now'),
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 48)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Result card ───────────────────────────────────────────────────────────────
 class _ResultCard extends StatelessWidget {
   final _SendResult result;
@@ -1062,19 +461,15 @@ class _ResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFBBF7D0)),
-      ),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppTheme.statusActiveBg, borderRadius: BorderRadius.circular(16)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            height: 36, width: 36,
-            decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.check_circle_outline, color: Color(0xFF065F46), size: 20),
+            height: 40, width: 40,
+            decoration: BoxDecoration(color: AppTheme.statusActive, borderRadius: BorderRadius.circular(13)),
+            child: const Icon(Icons.check, color: Colors.white, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1082,22 +477,22 @@ class _ResultCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('Broadcast complete',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF065F46))),
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: AppTheme.statusActive)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6, runSpacing: 4,
                   children: [
-                    _Chip('${result.sent} sent', const Color(0xFF065F46), const Color(0xFFD1FAE5)),
-                    if (result.failed  > 0) _Chip('${result.failed} failed',  const Color(0xFF991B1B), const Color(0xFFFEE2E2)),
-                    if (result.skipped > 0) _Chip('${result.skipped} skipped', AppTheme.inkSoft,       AppTheme.surface),
+                    StatusPill.active(label: '${result.sent} sent'),
+                    if (result.failed  > 0) StatusPill.danger(label: '${result.failed} failed'),
+                    if (result.skipped > 0) StatusPill.neutral(label: '${result.skipped} skipped'),
                   ],
                 ),
                 if (result.lastError != null) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(6)),
-                    child: Text(result.lastError!, style: const TextStyle(fontSize: 11, color: Color(0xFF991B1B))),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: AppTheme.statusDangerBg, borderRadius: BorderRadius.circular(8)),
+                    child: Text(result.lastError!, style: const TextStyle(fontSize: 11.5, color: AppTheme.statusDanger)),
                   ),
                 ],
               ],
@@ -1105,22 +500,6 @@ class _ResultCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _Chip extends StatelessWidget {
-  final String label;
-  final Color textColor;
-  final Color bgColor;
-  const _Chip(this.label, this.textColor, this.bgColor);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: textColor)),
     );
   }
 }
@@ -1138,16 +517,15 @@ class _TemplatesCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Quick Templates',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-          const SizedBox(height: 12),
-          ...List.generate(_kTemplates.length, (i) {
-            final t = _kTemplates[i];
-            return Padding(
-              padding: EdgeInsets.only(bottom: i < _kTemplates.length - 1 ? 10 : 0),
-              child: _TemplateTile(template: t, onTap: () => onSelect(t)),
-            );
-          }),
+          const Text('Templates',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+          const SizedBox(height: 10),
+          CardList(
+            children: List.generate(_kTemplates.length, (i) {
+              final t = _kTemplates[i];
+              return _TemplateTile(template: t, onTap: () => onSelect(t));
+            }),
+          ),
         ],
       ),
     );
@@ -1163,14 +541,8 @@ class _TemplateTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.border),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
             Expanded(
@@ -1178,15 +550,16 @@ class _TemplateTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(template.name,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.ink)),
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
                   const SizedBox(height: 2),
                   Text(template.subject,
-                      style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft, height: 1.4)),
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.4)),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(Icons.copy_outlined, size: 14, color: AppTheme.inkHint),
+            const Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
           ],
         ),
       ),
@@ -1322,11 +695,9 @@ class _WaDueRemindersCardState extends State<_WaDueRemindersCard> {
         children: [
           Row(
             children: [
-              const Icon(Icons.access_time_outlined, size: 16, color: AppTheme.inkSoft),
-              const SizedBox(width: 6),
               const Expanded(
-                child: Text('Due Reminders',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                child: Text('Due reminders',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
               ),
               GestureDetector(
                 onTap: _load,
@@ -1337,19 +708,19 @@ class _WaDueRemindersCardState extends State<_WaDueRemindersCard> {
           const SizedBox(height: 4),
           const Text(
             'Tap Send to open WhatsApp with a pre-filled reminder — you just hit send.',
-            style: TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.5),
+            style: TextStyle(fontSize: 12.5, color: AppTheme.inkSoft, height: 1.5),
           ),
           const SizedBox(height: 14),
 
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              _WaFilterChip(label: '3 days', selected: _daysFilter == 3,
+              PillChip(label: '3 days', selected: _daysFilter == 3,
                   onTap: () { setState(() => _daysFilter = 3); _load(); }),
-              const SizedBox(width: 8),
-              _WaFilterChip(label: '7 days', selected: _daysFilter == 7,
+              PillChip(label: '7 days', selected: _daysFilter == 7,
                   onTap: () { setState(() => _daysFilter = 7); _load(); }),
-              const SizedBox(width: 8),
-              _WaFilterChip(label: 'Expired', selected: _daysFilter == 0,
+              PillChip(label: 'Expired', selected: _daysFilter == 0,
                   onTap: () { setState(() => _daysFilter = 0); _load(); }),
             ],
           ),
@@ -1371,14 +742,13 @@ class _WaDueRemindersCardState extends State<_WaDueRemindersCard> {
               ),
             )
           else
-            ...List.generate(_members.length, (i) => Padding(
-              padding: EdgeInsets.only(bottom: i < _members.length - 1 ? 10 : 0),
-              child: _DueMemberRow(
+            CardList(
+              children: List.generate(_members.length, (i) => _DueMemberRow(
                 member:     _members[i],
                 daysFilter: _daysFilter,
                 onSend:     () => _openWhatsApp(_members[i]),
-              ),
-            )),
+              )),
+            ),
         ],
       ),
     );
@@ -1401,107 +771,44 @@ class _DueMemberRow extends StatelessWidget {
     final dateStr   = member['next_payment_date'] as String?;
 
     String badgeText  = '';
-    Color  badgeColor = AppTheme.statusWarn;
-    Color  badgeBg    = AppTheme.statusWarnBg;
+    Widget badge = const SizedBox.shrink();
 
     if (daysFilter == 0) {
-      badgeText  = 'Expired';
-      badgeColor = AppTheme.statusDanger;
-      badgeBg    = AppTheme.statusDangerBg;
+      badgeText = 'Expired';
+      badge = StatusPill.danger(label: badgeText);
     } else if (dateStr != null) {
       final expiry = DateTime.tryParse(dateStr);
       if (expiry != null) {
         final left = expiry.difference(DateTime.now()).inDays;
-        badgeText  = left <= 0 ? 'Today' : '${left}d';
-        badgeColor = left <= 1 ? AppTheme.statusDanger : AppTheme.statusWarn;
-        badgeBg    = left <= 1 ? AppTheme.statusDangerBg : AppTheme.statusWarnBg;
+        badgeText = left <= 0 ? 'Today' : '${left}d';
+        badge = left <= 1 ? StatusPill.danger(label: badgeText) : StatusPill.warn(label: badgeText);
       }
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       child: Row(
         children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: AppTheme.ink.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Text(
-                name.isNotEmpty ? name[0].toUpperCase() : '?',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
+          InitialsAvatar(name: name.isEmpty ? '?' : name, size: 38),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name.isEmpty ? 'Unknown' : name,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.ink),
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink),
                     overflow: TextOverflow.ellipsis),
                 if (phone.isNotEmpty)
-                  Text(phone, style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft)),
+                  Text(phone, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
               ],
             ),
           ),
           if (badgeText.isNotEmpty) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(20)),
-              child: Text(badgeText,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: badgeColor)),
-            ),
+            badge,
             const SizedBox(width: 8),
           ],
-          ElevatedButton.icon(
-            onPressed: phone.isEmpty ? null : onSend,
-            icon: const Icon(Icons.chat_outlined, size: 14),
-            label: const Text('Send'),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(0, 32),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-          ),
+          PillButton(label: 'Send', onTap: phone.isEmpty ? null : onSend, filled: phone.isNotEmpty),
         ],
-      ),
-    );
-  }
-}
-
-// ─── WhatsApp filter chip ──────────────────────────────────────────────────────
-class _WaFilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _WaFilterChip({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? AppTheme.ink : AppTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? AppTheme.ink : AppTheme.border),
-        ),
-        child: Text(label,
-            style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : AppTheme.inkSoft,
-            )),
       ),
     );
   }
@@ -1517,8 +824,8 @@ class _RecentActivityCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
-          Text('Recent Activity',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+          Text('Recent broadcasts',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
           SizedBox(height: 24),
           Center(
             child: Column(

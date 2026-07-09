@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/services/member_photo_service.dart';
@@ -20,20 +21,16 @@ class MemberPhoto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (stored == null || stored!.isEmpty) return fallback;
-    return FutureBuilder<String?>(
-      future: MemberPhotoService.signedUrl(stored),
-      builder: (context, snap) {
-        final url = snap.data;
-        if (url == null) return fallback;
-        return ClipOval(
-          child: Image.network(
-            url,
-            fit: fit,
-            errorBuilder: (_, __, ___) => fallback,
-          ),
-        );
-      },
+    final url = MemberPhotoService.photoUrl(stored);
+    if (url == null) return fallback;
+    return ClipOval(
+      child: CachedNetworkImage(
+        imageUrl: url,
+        httpHeaders: MemberPhotoService.authHeaders(),
+        cacheKey: MemberPhotoService.pathFrom(stored),
+        fit: fit,
+        errorWidget: (_, __, ___) => fallback,
+      ),
     );
   }
 }

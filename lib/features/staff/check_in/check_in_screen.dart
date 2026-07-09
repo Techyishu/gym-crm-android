@@ -52,14 +52,13 @@ class CheckInScreen extends ConsumerStatefulWidget {
   ConsumerState<CheckInScreen> createState() => _CheckInScreenState();
 }
 
-class _CheckInScreenState extends ConsumerState<CheckInScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs;
+class _CheckInScreenState extends ConsumerState<CheckInScreen> {
   final MobileScannerController _scanner = MobileScannerController();
+  StreamSubscription<BarcodeCapture>? _barcodeSub;
   bool _processing = false;
   String? _message;
   bool _success = false;
-  _CheckResult? _qrResult; // confirmation shown on the Scan tab; pauses the camera
+  _CheckResult? _qrResult; // confirmation shown in the scanner card; pauses the camera
   int _pendingSync = 0;    // queued offline check-ins waiting to sync
   final _searchCtrl = TextEditingController();
   List<Map<String, dynamic>> _searchResults = [];
@@ -68,25 +67,18 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
-    _tabs.addListener(_onTabChanged);
     _tryFlushQueue();
-  }
-
-  // Run the camera only while the Scan tab is active and no result is showing.
-  void _onTabChanged() {
-    if (_tabs.indexIsChanging) return;
-    if (_tabs.index == 0 && _qrResult == null) {
-      _scanner.start();
-    } else {
-      _scanner.stop();
-    }
+    _barcodeSub = _scanner.barcodes.listen((capture) {
+      final barcode = capture.barcodes.firstOrNull;
+      if (barcode?.rawValue != null) {
+        _handleQrScan(barcode!.rawValue!);
+      }
+    });
   }
 
   @override
   void dispose() {
-    _tabs.removeListener(_onTabChanged);
-    _tabs.dispose();
+    _barcodeSub?.cancel();
     _scanner.dispose();
     _searchCtrl.dispose();
     super.dispose();
@@ -262,11 +254,26 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen>
     if (mounted) setState(() => _message = null);
   }
 
+  static final _uuidPattern = RegExp(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    caseSensitive: false,
+  );
+
   /// QR check-in — freezes the camera and shows a full confirmation screen.
   Future<void> _handleQrScan(String raw) async {
     if (_processing || _qrResult != null) return;
     await _scanner.stop();
-    final r = await _doCheckIn(raw.trim(), method: 'qr');
+    final trimmed = raw.trim();
+    if (!_uuidPattern.hasMatch(trimmed)) {
+      if (!mounted) return;
+      setState(() => _qrResult = const _CheckResult(
+        success: false,
+        title: 'Invalid QR Code',
+        subtitle: 'This is not a GymCRM member QR code.',
+      ));
+      return;
+    }
+    final r = await _doCheckIn(trimmed, method: 'qr');
     if (!mounted) return;
     setState(() => _qrResult = r);
   }
@@ -309,120 +316,276 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen>
 
   @override
   Widget build(BuildContext context) {
+    final recentAsync = ref.watch(_recentCheckInsProvider);
+
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Check-in'),
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(text: 'Scan'),
-            Tab(text: 'Gym QR'),
-            Tab(text: 'Manual'),
-            Tab(text: 'History'),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              child: Row(
+                children: [
+                  const Text('Check-in',
+                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+                  const Spacer(),
+                  _HeaderIconButton(
+                    icon: Icons.qr_code_2,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const _GymQrPage()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _HeaderIconButton(
+                    icon: Icons.history,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => Scaffold(
+                        backgroundColor: AppTheme.background,
+                        appBar: AppBar(title: const Text('Check-in history')),
+                        body: const _HistoryTab(),
+                      )),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_pendingSync > 0) _PendingSyncBanner(count: _pendingSync, onTap: _tryFlushQueue),
+            if (_message != null) _ResultBanner(message: _message!, success: _success),
+            Expanded(
+              child: RefreshIndicator(
+                color: AppTheme.accent,
+                onRefresh: () async => ref.invalidate(_recentCheckInsProvider),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  children: [
+                    _buildScannerCard(),
+                    const SizedBox(height: 18),
+                    Row(children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('or tap a name',
+                          style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+                      ),
+                      const Expanded(child: Divider()),
+                    ]),
+                    const SizedBox(height: 14),
+                    _buildSearch(),
+                    const SizedBox(height: 20),
+                    _buildInToday(recentAsync),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
-      ),
-      body: Column(
-        children: [
-          if (_pendingSync > 0) _PendingSyncBanner(count: _pendingSync, onTap: _tryFlushQueue),
-          if (_message != null) _ResultBanner(message: _message!, success: _success),
-          Expanded(
-            child: TabBarView(
-              controller: _tabs,
-              children: [_buildQrTab(), _buildGymQrTab(), _buildManualTab(), const _HistoryTab()],
-            ),
-          ),
-        ],
       ),
     );
   }
 
-  // ── QR Tab ─────────────────────────────────────────────────────────────────
+  // ── Scanner card ───────────────────────────────────────────────────────────
 
-  Widget _buildQrTab() {
-    if (_qrResult != null) {
-      return _CheckResultView(
-        result: _qrResult!,
-        onScanNext: _scanNext,
-        buttonLabel: 'Scan next',
-      );
-    }
+  Widget _buildScannerCard() {
+    return Container(
+      height: 250,
+      decoration: AppTheme.darkCardDecoration(radius: 20),
+      clipBehavior: Clip.antiAlias,
+      child: _qrResult != null
+          ? Container(
+              color: AppTheme.surface,
+              child: _CheckResultView(
+                result: _qrResult!,
+                onScanNext: _scanNext,
+                buttonLabel: 'Scan next',
+              ),
+            )
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                MobileScanner(controller: _scanner),
+                Center(
+                  child: SizedBox(
+                    width: 150,
+                    height: 150,
+                    child: Stack(
+                      children: [
+                        Positioned(top: 0, left: 0, child: _CornerAccent(corner: _Corner.topLeft)),
+                        Positioned(top: 0, right: 0, child: _CornerAccent(corner: _Corner.topRight)),
+                        Positioned(bottom: 0, left: 0, child: _CornerAccent(corner: _Corner.bottomLeft)),
+                        Positioned(bottom: 0, right: 0, child: _CornerAccent(corner: _Corner.bottomRight)),
+                      ],
+                    ),
+                  ),
+                ),
+                const Positioned(
+                  left: 0, right: 0, bottom: 18,
+                  child: Text("Point at the member's QR",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDark)),
+                ),
+                if (_processing)
+                  Container(
+                    color: Colors.black38,
+                    child: const Center(child: CircularProgressIndicator(color: AppTheme.accent)),
+                  ),
+              ],
+            ),
+    );
+  }
+
+  // ── Search ─────────────────────────────────────────────────────────────────
+
+  Widget _buildSearch() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Stack(
-            children: [
-              MobileScanner(
-                controller: _scanner,
-                onDetect: (capture) {
-                  final barcode = capture.barcodes.firstOrNull;
-                  if (barcode?.rawValue != null) {
-                    _handleQrScan(barcode!.rawValue!);
-                  }
-                },
-              ),
-              // Overlay frame
-              Center(
-                child: Container(
-                  width: 240,
-                  height: 240,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: AppTheme.accent, width: 2),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Stack(
-                    children: [
-                      // Corner accents
-                      Positioned(
-                        top: 0, left: 0,
-                        child: _CornerAccent(corner: _Corner.topLeft),
-                      ),
-                      Positioned(
-                        top: 0, right: 0,
-                        child: _CornerAccent(corner: _Corner.topRight),
-                      ),
-                      Positioned(
-                        bottom: 0, left: 0,
-                        child: _CornerAccent(corner: _Corner.bottomLeft),
-                      ),
-                      Positioned(
-                        bottom: 0, right: 0,
-                        child: _CornerAccent(corner: _Corner.bottomRight),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (_processing)
-                Container(
-                  color: Colors.black38,
-                  child: const Center(
-                    child: CircularProgressIndicator(color: AppTheme.accent),
-                  ),
-                ),
-            ],
+        TextField(
+          controller: _searchCtrl,
+          onChanged: _searchMembers,
+          decoration: InputDecoration(
+            hintText: 'Search to check in',
+            prefixIcon: const Icon(Icons.search, color: AppTheme.inkHint, size: 20),
+            isDense: true,
+            suffixIcon: _searching
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.ink)),
+                  )
+                : (_searchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18, color: AppTheme.inkHint),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchResults = []);
+                        },
+                      )
+                    : null),
           ),
         ),
-        const SizedBox(height: 16),
-        Text(
-          'Point camera at member QR code',
-          style: const TextStyle(
-            color: AppTheme.inkHint,
-            fontSize: 14,
+        if (_searchResults.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Container(
+            decoration: AppTheme.cardDecoration(),
+            child: Column(
+              children: _searchResults.map((m) => _SearchResultRow(
+                member: m,
+                processing: _processing,
+                onCheckIn: () => _processManual(m['id'] as String),
+              )).toList(),
+            ),
           ),
-        ),
-        const SizedBox(height: 24),
+        ],
+        if (_searchCtrl.text.isNotEmpty && _searchResults.isEmpty && !_searching)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: Center(child: Text('No members found',
+              style: TextStyle(color: AppTheme.inkHint, fontSize: 13))),
+          ),
       ],
     );
   }
 
-  // ── Gym QR Tab ─────────────────────────────────────────────────────────────
+  // ── In today ───────────────────────────────────────────────────────────────
 
-  Widget _buildGymQrTab() {
+  Widget _buildInToday(AsyncValue<List<Map<String, dynamic>>> recentAsync) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Text('In today',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+          const Spacer(),
+          recentAsync.maybeWhen(
+            data: (list) {
+              final today = DateTime.now();
+              final count = list.where((c) {
+                final dt = DateTime.tryParse(c['checked_in_at'] as String? ?? '')?.toLocal();
+                return dt != null && dt.year == today.year && dt.month == today.month && dt.day == today.day;
+              }).length;
+              return Text('$count',
+                style: AppTheme.numberStyle(fontSize: 16, color: AppTheme.accent));
+            },
+            orElse: () => const SizedBox.shrink(),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        recentAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (e, _) => Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('Error: $e', style: const TextStyle(color: AppTheme.statusDanger)),
+          ),
+          data: (list) {
+            if (list.isEmpty) {
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                decoration: AppTheme.cardDecoration(),
+                child: const Center(child: Text('No check-ins yet today',
+                  style: TextStyle(color: AppTheme.inkHint, fontSize: 13))),
+              );
+            }
+            return Container(
+              decoration: AppTheme.cardDecoration(),
+              child: Column(
+                children: list.map((c) {
+                  final isOpen = c['checked_out_at'] == null;
+                  final member = c['members'] as Map<String, dynamic>?;
+                  final name = '${member?['first_name'] ?? ''} ${member?['last_name'] ?? ''}'.trim();
+                  return _RecentCheckInRow(
+                    checkIn: c,
+                    onCheckOut: isOpen && !_processing
+                        ? () => _processCheckOut(c['id'] as String, name.isNotEmpty ? name : 'Member')
+                        : null,
+                  );
+                }).toList(),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// ── Header icon button ─────────────────────────────────────────────────────────
+
+class _HeaderIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _HeaderIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 38, height: 38,
+        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
+        child: Icon(icon, size: 20, color: AppTheme.ink),
+      ),
+    );
+  }
+}
+
+// ── Gym QR page ───────────────────────────────────────────────────────────────
+
+class _GymQrPage extends ConsumerWidget {
+  const _GymQrPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final gymAsync = ref.watch(_gymQrProvider);
 
-    return gymAsync.when(
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(title: const Text('Gym QR')),
+      body: gymAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(
         child: Padding(
@@ -545,149 +708,6 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen>
           ),
         );
       },
-    );
-  }
-
-  // ── Manual Tab ─────────────────────────────────────────────────────────────
-
-  Widget _buildManualTab() {
-    final recentAsync = ref.watch(_recentCheckInsProvider);
-
-    return RefreshIndicator(
-      onRefresh: () async => ref.invalidate(_recentCheckInsProvider),
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Search card
-          Container(
-            decoration: AppTheme.cardDecoration(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Enter Member Name or ID',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: AppTheme.ink,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _searchCtrl,
-                  onChanged: _searchMembers,
-                  decoration: InputDecoration(
-                    hintText: 'Search by name...',
-                    prefixIcon: const Icon(Icons.search, color: AppTheme.inkHint, size: 20),
-                    suffixIcon: _searching
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.ink),
-                            ),
-                          )
-                        : (_searchCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 18, color: AppTheme.inkHint),
-                                onPressed: () {
-                                  _searchCtrl.clear();
-                                  setState(() => _searchResults = []);
-                                },
-                              )
-                            : null),
-                  ),
-                ),
-                if (_searchResults.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  const Divider(height: 1),
-                  ..._searchResults.map((m) => _SearchResultRow(
-                        member: m,
-                        processing: _processing,
-                        onCheckIn: () => _processManual(m['id'] as String),
-                      )),
-                ],
-                if (_searchCtrl.text.isNotEmpty && _searchResults.isEmpty && !_searching) ...[
-                  const SizedBox(height: 12),
-                  const Center(
-                    child: Text(
-                      'No members found',
-                      style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Recent check-ins card
-          Container(
-            decoration: AppTheme.cardDecoration(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Recent Check-ins',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                          color: AppTheme.ink,
-                        ),
-                      ),
-                      const Spacer(),
-                      const Icon(Icons.history, size: 16, color: AppTheme.inkHint),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                recentAsync.when(
-                  loading: () => const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                  error: (e, _) => Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text('Error: $e', style: const TextStyle(color: AppTheme.statusDanger)),
-                  ),
-                  data: (list) {
-                    if (list.isEmpty) {
-                      return const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Center(
-                          child: Text(
-                            'No check-ins yet today',
-                            style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
-                          ),
-                        ),
-                      );
-                    }
-                    return Column(
-                      children: list.map((c) {
-                        final isOpen = c['checked_out_at'] == null;
-                        final member = c['members'] as Map<String, dynamic>?;
-                        final name = '${member?['first_name'] ?? ''} ${member?['last_name'] ?? ''}'.trim();
-                        return _RecentCheckInRow(
-                          checkIn: c,
-                          onCheckOut: isOpen && !_processing
-                              ? () => _processCheckOut(c['id'] as String, name.isNotEmpty ? name : 'Member')
-                              : null,
-                        );
-                      }).toList(),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -787,26 +807,22 @@ class _MemberAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (url == null || url!.isEmpty) return _InitialsAvatar(size: size);
-    return FutureBuilder<String?>(
-      future: MemberPhotoService.signedUrl(url),
-      builder: (context, snap) {
-        final signed = snap.data;
-        if (signed == null) return _InitialsAvatar(size: size);
-        return CachedNetworkImage(
-          imageUrl: signed,
-          imageBuilder: (_, img) => Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              image: DecorationImage(image: img, fit: BoxFit.cover),
-            ),
-          ),
-          placeholder: (_, __) => _InitialsAvatar(size: size),
-          errorWidget: (_, __, ___) => _InitialsAvatar(size: size),
-        );
-      },
+    final photoUrl = MemberPhotoService.photoUrl(url);
+    if (photoUrl == null) return _InitialsAvatar(size: size);
+    return CachedNetworkImage(
+      imageUrl: photoUrl,
+      httpHeaders: MemberPhotoService.authHeaders(),
+      cacheKey: MemberPhotoService.pathFrom(url),
+      imageBuilder: (_, img) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          image: DecorationImage(image: img, fit: BoxFit.cover),
+        ),
+      ),
+      placeholder: (_, __) => _InitialsAvatar(size: size),
+      errorWidget: (_, __, ___) => _InitialsAvatar(size: size),
     );
   }
 }

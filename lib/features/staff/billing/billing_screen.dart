@@ -3,9 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/invoice_pdf.dart';
 import '../../../shared/models/invoice.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
 final _invoicesProvider = FutureProvider.family<List<Invoice>, String>((ref, status) async {
@@ -14,7 +17,7 @@ final _invoicesProvider = FutureProvider.family<List<Invoice>, String>((ref, sta
 
   var query = client
       .from('invoices')
-      .select('*, members(first_name, last_name, email)')
+      .select('*, members(first_name, last_name, email, phone)')
       .eq('gym_id', gymId);
 
   if (status != 'all') query = query.eq('status', status);
@@ -46,22 +49,23 @@ final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
       .order('first_name');
 });
 
-// KPI provider: 30-day revenue + pending amount
-final _billingKpiProvider = FutureProvider<Map<String, double>>((ref) async {
+// KPI provider: this-month collected + pending dues, with counts.
+final _billingKpiProvider = FutureProvider<Map<String, num>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
-  final thirtyDaysAgo = DateTime.now().subtract(const Duration(days: 30));
+  final now = DateTime.now();
+  final startOfMonth = DateTime(now.year, now.month, 1).toIso8601String();
 
   final paidFuture = client
       .from('invoices')
       .select('amount')
       .eq('gym_id', gymId)
       .eq('status', 'paid')
-      .gte('paid_at', thirtyDaysAgo.toIso8601String());
+      .gte('paid_at', startOfMonth);
   final pendingFuture = client
       .from('invoices')
-      .select('amount')
+      .select('amount, member_id')
       .eq('gym_id', gymId)
       .eq('status', 'open');
 
@@ -71,8 +75,14 @@ final _billingKpiProvider = FutureProvider<Map<String, double>>((ref) async {
 
   final revenue = paid.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
   final pendingAmt = pending.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
+  final pendingMembers = pending.map((r) => r['member_id']).toSet().length;
 
-  return {'revenue': revenue, 'pending': pendingAmt};
+  return {
+    'revenue': revenue,
+    'pending': pendingAmt,
+    'paidCount': paid.length,
+    'pendingMembers': pendingMembers,
+  };
 });
 
 class BillingScreen extends ConsumerStatefulWidget {
@@ -82,21 +92,9 @@ class BillingScreen extends ConsumerStatefulWidget {
   ConsumerState<BillingScreen> createState() => _BillingScreenState();
 }
 
-class _BillingScreenState extends ConsumerState<BillingScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabs = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabs.dispose();
-    super.dispose();
-  }
+class _BillingScreenState extends ConsumerState<BillingScreen> {
+  static const _monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   @override
   Widget build(BuildContext context) {
@@ -104,65 +102,77 @@ class _BillingScreenState extends ConsumerState<BillingScreen>
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Billing'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showCreateInvoiceSheet(context),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: const [Tab(text: 'Invoices'), Tab(text: 'Plans')],
-        ),
-      ),
-      body: Column(
-        children: [
-          // KPI row
-          kpi.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-            data: (data) => _buildKpiRow(data),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabs,
-              children: [
-                _InvoicesTab(ref: ref),
-                _PlansTab(ref: ref),
-              ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              child: Row(
+                children: [
+                  const Text('Payments',
+                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => _PlansTab(ref: ref)),
+                    ),
+                    child: Container(
+                      width: 38, height: 38,
+                      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
+                      child: const Icon(Icons.sell_outlined, size: 19, color: AppTheme.ink),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _showCreateInvoiceSheet(context),
+                    child: Container(
+                      width: 38, height: 38,
+                      decoration: BoxDecoration(
+                        color: AppTheme.accent,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [BoxShadow(color: Color(0x33DF5B34), blurRadius: 10, offset: Offset(0, 3))],
+                      ),
+                      child: const Icon(Icons.add, size: 21, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            kpi.when(
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (data) => _buildKpiRow(data),
+            ),
+            Expanded(child: _InvoicesTab(ref: ref)),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildKpiRow(Map<String, double> data) {
-    return Container(
-      color: AppTheme.surface,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppTheme.border)),
-      ),
+  Widget _buildKpiRow(Map<String, num> data) {
+    final month = _monthsShort[DateTime.now().month - 1];
+    final pendingMembers = (data['pendingMembers'] ?? 0).toInt();
+    final paidCount = (data['paidCount'] ?? 0).toInt();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Row(
         children: [
           Expanded(
-            child: _KpiTile(
-              label: '30-Day Revenue',
-              value: formatCurrency(data['revenue'] ?? 0),
-              icon: Icons.trending_up,
-              iconColor: AppTheme.statusActive,
+            child: _KpiCard(
+              label: 'Pending dues',
+              value: formatCurrency((data['pending'] ?? 0).toDouble()),
+              valueColor: AppTheme.statusDanger,
+              sub: '$pendingMembers member${pendingMembers == 1 ? '' : 's'}',
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: _KpiTile(
-              label: 'Pending Amount',
-              value: formatCurrency(data['pending'] ?? 0),
-              icon: Icons.schedule,
-              iconColor: AppTheme.statusWarn,
+            child: _KpiCard(
+              label: 'Collected · $month',
+              value: formatCurrency((data['revenue'] ?? 0).toDouble()),
+              valueColor: AppTheme.statusActive,
+              sub: '$paidCount payment${paidCount == 1 ? '' : 's'}',
             ),
           ),
         ],
@@ -180,49 +190,31 @@ class _BillingScreenState extends ConsumerState<BillingScreen>
   }
 }
 
-// ── KPI Tile ──────────────────────────────────────────────────────────────────
+// ── KPI Card ──────────────────────────────────────────────────────────────────
 
-class _KpiTile extends StatelessWidget {
+class _KpiCard extends StatelessWidget {
   final String label;
   final String value;
-  final IconData icon;
-  final Color iconColor;
-  const _KpiTile({required this.label, required this.value, required this.icon, required this.iconColor});
+  final Color valueColor;
+  final String sub;
+  const _KpiCard({required this.label, required this.value, required this.valueColor, required this.sub});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.all(14),
       decoration: AppTheme.cardDecoration(),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: iconColor, size: 18),
+          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(value, style: AppTheme.numberStyle(fontSize: 22, color: valueColor)),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink),
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 11, color: AppTheme.inkHint, fontWeight: FontWeight.w500),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 4),
+          Text(sub, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkHint)),
         ],
       ),
     );
@@ -240,59 +232,51 @@ class _InvoicesTab extends StatefulWidget {
 }
 
 class _InvoicesTabState extends State<_InvoicesTab> {
-  String _filter = 'all';
+  String _filter = 'open';
 
   @override
   Widget build(BuildContext context) {
     final invoices = widget.ref.watch(_invoicesProvider(_filter));
+    final dueCount = widget.ref.watch(_invoicesProvider('open')).valueOrNull?.length;
 
     return Column(
       children: [
-        // Filter chips bar
-        Container(
-          color: AppTheme.surface,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: ['all', 'open', 'paid', 'failed', 'void'].map((f) {
-                final selected = _filter == f;
-                final label = f[0].toUpperCase() + f.substring(1);
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    onTap: () => setState(() => _filter = f),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: selected ? AppTheme.ink : AppTheme.activeBg,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                          color: selected ? Colors.white : AppTheme.inkSoft,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
+        // Underline tabs: Due (n) · Collected · All
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: Row(
+            children: [
+              _UnderlineTab(
+                label: dueCount != null ? 'Due ($dueCount)' : 'Due',
+                selected: _filter == 'open',
+                onTap: () => setState(() => _filter = 'open'),
+              ),
+              const SizedBox(width: 20),
+              _UnderlineTab(
+                label: 'Collected',
+                selected: _filter == 'paid',
+                onTap: () => setState(() => _filter = 'paid'),
+              ),
+              const SizedBox(width: 20),
+              _UnderlineTab(
+                label: 'All',
+                selected: _filter == 'all',
+                onTap: () => setState(() => _filter = 'all'),
+              ),
+              const Spacer(),
+            ],
           ),
         ),
         Expanded(
           child: invoices.when(
             loading: () => _BillingShimmer(),
-            error: (e, _) => const Center(child: Text('Could not load invoices. Pull to retry.', style: TextStyle(color: Color(0xFF666666)))),
+            error: (e, _) => const Center(child: Text('Could not load invoices. Pull to retry.', style: TextStyle(color: AppTheme.inkSoft))),
             data: (list) => list.isEmpty
                 ? const Center(
                     child: Text('No invoices', style: TextStyle(color: AppTheme.inkHint, fontSize: 14)),
                   )
                 : RefreshIndicator(
+                    color: AppTheme.accent,
                     onRefresh: () async => widget.ref.invalidate(_invoicesProvider(_filter)),
                     child: ListView.builder(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -322,117 +306,128 @@ class _InvoicesTabState extends State<_InvoicesTab> {
 
 // ── Invoice Card ──────────────────────────────────────────────────────────────
 
+class _UnderlineTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _UnderlineTab({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+              color: selected ? AppTheme.ink : AppTheme.inkHint,
+            )),
+          const SizedBox(height: 6),
+          Container(
+            height: 2.5,
+            width: 34,
+            decoration: BoxDecoration(
+              color: selected ? AppTheme.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InvoiceCard extends StatelessWidget {
   final Invoice invoice;
   final VoidCallback onTap;
   final VoidCallback onMarkPaid;
   const _InvoiceCard({required this.invoice, required this.onTap, required this.onMarkPaid});
 
-  static (Color, Color) _statusColors(String status) => switch (status) {
-        'paid'    => (AppTheme.statusActiveBg, AppTheme.statusActive),
-        'open'    => (AppTheme.statusWarnBg, AppTheme.statusWarn),
-        'pending' => (AppTheme.statusWarnBg, AppTheme.statusWarn),
-        'failed'  => (AppTheme.statusDangerBg, AppTheme.statusDanger),
-        'overdue' => (AppTheme.statusDangerBg, AppTheme.statusDanger),
-        _         => (AppTheme.statusNeutralBg, AppTheme.statusNeutral),
-      };
+  String get _subtitle {
+    final parts = <String>[];
+    if (invoice.description != null && invoice.description!.isNotEmpty) {
+      parts.add(invoice.description!);
+    }
+    if (invoice.status == 'paid') {
+      if (invoice.paidAt != null) parts.add('Paid ${formatDateFromString(invoice.paidAt)}');
+    } else if (invoice.dueAt != null) {
+      final due = DateTime.tryParse(invoice.dueAt!);
+      if (due != null) {
+        final days = due.difference(DateTime.now()).inDays;
+        if (days < 0) {
+          parts.add('${days.abs()} day${days == -1 ? '' : 's'} overdue');
+        } else if (days == 0) {
+          parts.add('due today');
+        } else if (days == 1) {
+          parts.add('due tomorrow');
+        } else {
+          parts.add('due in $days days');
+        }
+      }
+    }
+    return parts.join(' · ');
+  }
 
   @override
   Widget build(BuildContext context) {
-    final (statusBg, statusFg) = _statusColors(invoice.status);
+    final open = invoice.status == 'open';
+    final overdue = open &&
+        invoice.dueAt != null &&
+        (DateTime.tryParse(invoice.dueAt!)?.isBefore(DateTime.now()) ?? false);
+    final name = invoice.member?.fullName ?? 'Unknown';
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: AppTheme.cardDecoration(),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: AppTheme.cardDecoration(),
+        child: Row(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Left: member info
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        invoice.member?.fullName ?? 'Unknown',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        invoice.member?.email ?? '',
-                        style: const TextStyle(color: AppTheme.inkSoft, fontSize: 12),
-                      ),
-                      if (invoice.description != null && invoice.description!.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(invoice.description!, style: const TextStyle(color: AppTheme.inkHint, fontSize: 12)),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Right: amount + status
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      formatCurrency(invoice.amount),
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink),
-                    ),
-                    const SizedBox(height: 5),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(6)),
-                      child: Text(
-                        invoice.status.toUpperCase(),
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: statusFg),
-                      ),
-                    ),
+            InitialsAvatar(name: name, size: 44),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
+                  if (_subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(_subtitle,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: invoice.status == 'paid'
+                            ? AppTheme.inkSoft
+                            : overdue ? AppTheme.statusDanger : AppTheme.statusWarn,
+                      )),
                   ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Created ${formatDateFromString(invoice.createdAt)}',
-                  style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
-                ),
-                if (invoice.dueAt != null)
-                  Text(
-                    'Due ${formatDateFromString(invoice.dueAt)}',
-                    style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
-                  ),
-              ],
-            ),
-            if (invoice.status == 'open') ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 36,
-                child: ElevatedButton(
-                  onPressed: onMarkPaid,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: Size.zero,
-                    backgroundColor: AppTheme.ink,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    elevation: 0,
-                  ),
-                  child: const Text('Record Payment', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ),
+                ],
               ),
-            ],
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(formatCurrency(invoice.amount),
+                  style: AppTheme.numberStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                if (open)
+                  PillButton(label: 'Collect', onTap: onMarkPaid)
+                else
+                  StatusPill.active(label: invoice.status[0].toUpperCase() + invoice.status.substring(1)),
+              ],
+            ),
           ],
         ),
       ),
-    ),
     );
   }
 }
@@ -559,6 +554,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final methodIndex = _methods.indexWhere((m) => m.$1 == _method).clamp(0, _methods.length - 1);
     return Padding(
       padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
@@ -566,108 +562,51 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Record Payment',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-              ],
+            SheetHeader(
+              title: 'Record payment',
+              subtitle: '${widget.invoice.member?.fullName ?? 'Member'}'
+                  '${widget.invoice.description != null ? ' · ${widget.invoice.description}' : ''}',
             ),
-            const SizedBox(height: 12),
-            // Invoice summary card
+            const SizedBox(height: 18),
+            const FieldLabel('Amount'),
             Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.activeBg,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.invoice.member?.fullName ?? 'Member',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink),
-                      ),
-                      if (widget.invoice.description != null)
-                        Text(widget.invoice.description!,
-                            style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                    ],
-                  ),
-                  Text(
-                    formatCurrency(widget.invoice.amount),
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppTheme.ink),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text('Payment method',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _methods.map((m) {
-                final selected = _method == m.$1;
-                return GestureDetector(
-                  onTap: () => setState(() => _method = m.$1),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: selected ? AppTheme.ink : AppTheme.surface,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: selected ? AppTheme.ink : AppTheme.border,
-                        width: selected ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(m.$3, size: 16, color: selected ? Colors.white : AppTheme.inkSoft),
-                        const SizedBox(width: 6),
-                        Text(
-                          m.$2,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: selected ? Colors.white : AppTheme.ink,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: AppTheme.cardDecoration(),
+              child: Text(formatCurrency(widget.invoice.amount),
+                  style: AppTheme.numberStyle(fontSize: 22)),
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _refCtrl,
-              decoration: InputDecoration(
-                labelText: switch (_method) {
-                  'upi' => 'UPI Transaction ID (optional)',
-                  'bank_transfer' => 'UTR number (optional)',
-                  _ => 'Reference / Receipt no. (optional)',
-                },
+            const FieldLabel('Method'),
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _methods.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => PillChip(
+                  label: _methods[i].$2,
+                  selected: methodIndex == i,
+                  onTap: () => setState(() => _method = _methods[i].$1),
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _notesCtrl,
-              maxLines: 2,
-              decoration: const InputDecoration(labelText: 'Notes (optional)'),
-            ),
+            const SizedBox(height: 16),
+            FieldLabel(switch (_method) {
+              'upi' => 'UPI transaction ID (optional)',
+              'bank_transfer' => 'UTR number (optional)',
+              _ => 'Reference / receipt no. (optional)',
+            }),
+            TextFormField(controller: _refCtrl),
+            const SizedBox(height: 14),
+            const FieldLabel('Notes (optional)'),
+            TextFormField(controller: _notesCtrl, maxLines: 2),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _loading ? null : _save,
               child: _loading
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Confirm Payment'),
+                  : Text('Record ${formatCurrency(widget.invoice.amount)}'),
             ),
           ],
         ),
@@ -687,6 +626,7 @@ class _CreateInvoiceSheet extends ConsumerStatefulWidget {
 
 class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
   final _amountCtrl = TextEditingController();
+  final _discountCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   String? _selectedMemberId;
   String? _dueAt;
@@ -696,6 +636,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
   @override
   void dispose() {
     _amountCtrl.dispose();
+    _discountCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
   }
@@ -757,10 +698,16 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
       final gymId = await ref.read(gymIdProvider.future);
       final client = Supabase.instance.client;
 
+      final originalAmount = double.parse(_amountCtrl.text.trim());
+      final discountAmount = double.tryParse(_discountCtrl.text.trim()) ?? 0.0;
+      final finalAmount = (originalAmount - discountAmount).clamp(0.0, double.infinity);
+
       await client.from('invoices').insert({
         'member_id': _selectedMemberId,
         'gym_id': gymId,
-        'amount': double.parse(_amountCtrl.text.trim()),
+        'original_amount': originalAmount,
+        'discount_amount': discountAmount,
+        'amount': finalAmount,
         if (_descCtrl.text.trim().isNotEmpty) 'description': _descCtrl.text.trim(),
         if (_dueAt != null) 'due_at': _dueAt,
         'status': 'open',
@@ -779,6 +726,10 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
   Widget build(BuildContext context) {
     final members = ref.watch(_membersListProvider);
 
+    final originalAmount = double.tryParse(_amountCtrl.text.trim());
+    final discountAmount = double.tryParse(_discountCtrl.text.trim()) ?? 0.0;
+    final total = originalAmount == null ? null : (originalAmount - discountAmount).clamp(0.0, double.infinity);
+
     return Padding(
       padding: EdgeInsets.only(
         left: 16, right: 16, top: 16,
@@ -789,24 +740,14 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Create Invoice',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-              ],
-            ),
-            const SizedBox(height: 16),
+            const SheetHeader(title: 'Create invoice'),
+            const SizedBox(height: 18),
+            const FieldLabel('Member'),
             members.when(
               loading: () => const LinearProgressIndicator(),
               error: (e, _) => const SizedBox.shrink(),
               data: (list) => DropdownButtonFormField<String>(
                 value: _selectedMemberId,
-                decoration: const InputDecoration(
-                  labelText: 'Member *',
-                  prefixIcon: Icon(Icons.person_outline),
-                ),
                 isExpanded: true,
                 hint: const Text('Select member'),
                 items: list.map((m) {
@@ -819,32 +760,65 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                 },
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
+            const FieldLabel('Amount'),
             TextFormField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Amount (₹) *',
-                prefixIcon: Icon(Icons.currency_rupee),
-              ),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(prefixText: '₹ '),
             ),
             if (_planHint != null) ...[
               const SizedBox(height: 4),
               Text('Auto-filled from active plan: $_planHint',
-                  style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft)),
+                  style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Discount (optional)'),
             TextFormField(
-              controller: _descCtrl,
-              decoration: const InputDecoration(labelText: 'Description (optional)'),
+              controller: _discountCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(prefixText: '₹ '),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Description (optional)'),
+            TextFormField(controller: _descCtrl),
+            const SizedBox(height: 16),
+            if (total != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: AppTheme.cardDecoration(),
+                child: Column(children: [
+                  Row(children: [
+                    const Text('Amount', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+                    const Spacer(),
+                    Text(formatCurrency(originalAmount!), style: const TextStyle(fontSize: 13, color: AppTheme.ink)),
+                  ]),
+                  if (discountAmount > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      const Text('Discount', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+                      const Spacer(),
+                      Text('− ${formatCurrency(discountAmount)}', style: const TextStyle(fontSize: 13, color: AppTheme.statusActive)),
+                    ]),
+                  ],
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1)),
+                  Row(children: [
+                    const Text('Total', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                    const Spacer(),
+                    Text(formatCurrency(total), style: AppTheme.numberStyle(fontSize: 16)),
+                  ]),
+                ]),
+              ),
+              const SizedBox(height: 16),
+            ],
+            const FieldLabel('Due date (optional)'),
             InkWell(
               onTap: _pickDueDate,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(14),
               child: InputDecorator(
                 decoration: InputDecoration(
-                  labelText: 'Due date (optional)',
                   suffixIcon: _dueAt != null
                       ? IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () => setState(() => _dueAt = null))
                       : const Icon(Icons.calendar_today_outlined, size: 16),
@@ -860,9 +834,114 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               onPressed: _loading ? null : _create,
               child: _loading
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Create Invoice'),
+                  : const Text('Create & send invoice'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── WhatsApp Invoice Button ───────────────────────────────────────────────────
+
+class _WhatsAppInvoiceButton extends StatefulWidget {
+  final Invoice invoice;
+  const _WhatsAppInvoiceButton({required this.invoice});
+
+  @override
+  State<_WhatsAppInvoiceButton> createState() => _WhatsAppInvoiceButtonState();
+}
+
+class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
+  bool _loading = false;
+
+  Future<void> _share() async {
+    final phone = widget.invoice.member?.phone ?? '';
+    if (phone.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No phone number saved for this member. Add it in their profile first.')),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      final client = Supabase.instance.client;
+
+      // 1. Fetch full invoice data (gym header needed for PDF)
+      final data = await client
+          .from('invoices')
+          .select('*, members(first_name, last_name, email, phone), gyms(name, settings)')
+          .eq('id', widget.invoice.id)
+          .single();
+
+      // 2. Generate PDF bytes
+      final bytes  = await buildInvoicePdf(data);
+      final invNum = invoiceNumber(widget.invoice.id, widget.invoice.createdAt);
+
+      // 3. Upload to Supabase Storage (upsert so same invoice never duplicates)
+      await client.storage.from('invoice-pdfs').uploadBinary(
+        '${widget.invoice.id}.pdf',
+        bytes,
+        fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
+      );
+
+      // 4. Get public download URL
+      final downloadUrl = client.storage
+          .from('invoice-pdfs')
+          .getPublicUrl('${widget.invoice.id}.pdf');
+
+      // 5. Build WhatsApp message with download link
+      final name   = widget.invoice.member?.fullName ?? 'there';
+      final amount = formatCurrency(widget.invoice.amount);
+      final text   = widget.invoice.status == 'paid'
+          ? 'Hi $name, we have received your payment of $amount for invoice $invNum. Download your receipt here: $downloadUrl'
+          : 'Hi $name, your invoice $invNum for $amount is due. Download it here: $downloadUrl';
+
+      // 6. Open WhatsApp directly to member's chat
+      final clean  = phone.replaceAll(RegExp(r'\D'), '');
+      final number = clean.startsWith('91') ? clean : '91$clean';
+      final uri    = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(text)}');
+
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open WhatsApp')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not generate or upload invoice PDF')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: OutlinedButton.icon(
+        onPressed: _loading ? null : _share,
+        icon: _loading
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF25D366)),
+              )
+            : const Icon(Icons.chat_bubble_outline, size: 14, color: Color(0xFF25D366)),
+        label: const Text('WhatsApp', style: TextStyle(fontSize: 12)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF25D366),
+          side: const BorderSide(color: Color(0xFF25D366)),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ),
     );
@@ -905,38 +984,56 @@ class _PlansTab extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
+      appBar: AppBar(title: const Text('Plans & pricing'), leading: const BackButton()),
       body: plans.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (list) => RefreshIndicator(
+          color: AppTheme.accent,
           onRefresh: () async => ref.invalidate(_plansProvider),
-          child: list.isEmpty
-              ? const Center(child: Text('No plans yet', style: TextStyle(color: AppTheme.inkHint, fontSize: 14)))
-              : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) => _PlanCard(
-                    plan: list[i],
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            children: [
+              if (list.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(child: Text('No plans yet', style: TextStyle(color: AppTheme.inkHint, fontSize: 14))),
+                )
+              else
+                CardList(
+                  children: list.map((plan) => _PlanCard(
+                    plan: plan,
                     onEdit: () => showModalBottomSheet(
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
-                      builder: (_) => _PlanFormSheet(plan: list[i]),
+                      builder: (_) => _PlanFormSheet(plan: plan),
                     ).then((_) => ref.invalidate(_plansProvider)),
+                  )).toList(),
+                ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  builder: (_) => const _PlanFormSheet(),
+                ).then((_) => ref.invalidate(_plansProvider)),
+                child: DottedBorderBox(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.add, size: 18, color: AppTheme.accent),
+                      SizedBox(width: 6),
+                      Text('Add new plan',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                    ],
                   ),
                 ),
+              ),
+            ],
+          ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          builder: (_) => const _PlanFormSheet(),
-        ).then((_) => ref.invalidate(_plansProvider)),
-        backgroundColor: AppTheme.ink,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Add Plan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -957,94 +1054,56 @@ class _PlanCard extends StatelessWidget {
     final intervalLabel = interval == 'custom' && months != null ? '$months months' : interval;
     final isActive = plan['is_active'] as bool? ?? true;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: AppTheme.cardDecoration(),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onEdit,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
+    return InkWell(
+      onTap: onEdit,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            plan['name'] as String,
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink),
-                          ),
-                          const SizedBox(height: 3),
-                          Row(
-                            children: [
-                              Text(
-                                formatCurrency(plan['price'] as num),
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.ink),
-                              ),
-                              Text(
-                                ' / $intervalLabel',
-                                style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13, color: AppTheme.inkSoft),
-                              ),
-                            ],
-                          ),
-                        ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        plan['name'] as String,
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5, color: AppTheme.ink),
                       ),
-                    ),
-                    Row(
-                      children: [
-                        // Active / Inactive chip
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: isActive ? AppTheme.statusActiveBg : AppTheme.statusNeutralBg,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            isActive ? 'ACTIVE' : 'INACTIVE',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: isActive ? AppTheme.statusActive : AppTheme.statusNeutral,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.edit_outlined, size: 16, color: AppTheme.inkHint),
-                      ],
-                    ),
-                  ],
-                ),
-                if (plan['max_classes'] != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'Up to ${plan['max_classes']} classes',
-                    style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+                      const SizedBox(height: 3),
+                      if (plan['max_classes'] != null)
+                        Text('Up to ${plan['max_classes']} classes',
+                          style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+                    ],
                   ),
-                ],
-                if (features.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  ...features.map((f) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.check_circle_outline, size: 14, color: AppTheme.statusActive),
-                            const SizedBox(width: 6),
-                            Text(f, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
-                          ],
-                        ),
-                      )),
-                ],
+                ),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Row(children: [
+                    Text(formatCurrency(plan['price'] as num), style: AppTheme.numberStyle(fontSize: 15)),
+                    Text(' / $intervalLabel',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                  ]),
+                  const SizedBox(height: 4),
+                  isActive ? StatusPill.active() : StatusPill.neutral(label: 'Inactive'),
+                ]),
               ],
             ),
-          ),
+            if (features.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              ...features.map((f) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check, size: 14, color: AppTheme.statusActive),
+                        const SizedBox(width: 6),
+                        Text(f, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+                      ],
+                    ),
+                  )),
+            ],
+          ],
         ),
       ),
     );
@@ -1148,52 +1207,54 @@ class _PlanFormSheetState extends ConsumerState<_PlanFormSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _isEdit ? 'Edit Plan' : 'New Plan',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppTheme.ink),
-                  ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-                ],
-              ),
-              const SizedBox(height: 16),
+              SheetHeader(title: _isEdit ? 'Edit plan' : 'New plan'),
+              const SizedBox(height: 18),
+              const FieldLabel('Plan name'),
               TextFormField(
                 controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Plan name *'),
                 validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _priceCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Price (₹) *', prefixIcon: Icon(Icons.currency_rupee)),
-                validator: (v) {
-                  if (v?.trim().isEmpty ?? true) return 'Required';
-                  if (double.tryParse(v!) == null) return 'Enter a valid price';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _interval,
-                decoration: const InputDecoration(labelText: 'Billing interval'),
-                items: const [
-                  DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                  DropdownMenuItem(value: 'quarterly', child: Text('Quarterly (3 months)')),
-                  DropdownMenuItem(value: 'biannual', child: Text('6 Months')),
-                  DropdownMenuItem(value: 'annual', child: Text('Yearly')),
-                  DropdownMenuItem(value: 'custom', child: Text('Custom…')),
-                ],
-                onChanged: (v) => setState(() => _interval = v!),
-              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('Price'),
+                    TextFormField(
+                      controller: _priceCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(prefixText: '₹ '),
+                      validator: (v) {
+                        if (v?.trim().isEmpty ?? true) return 'Required';
+                        if (double.tryParse(v!) == null) return 'Enter a valid price';
+                        return null;
+                      },
+                    ),
+                  ]),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('Duration'),
+                    DropdownButtonFormField<String>(
+                      value: _interval,
+                      items: const [
+                        DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                        DropdownMenuItem(value: 'quarterly', child: Text('Quarterly')),
+                        DropdownMenuItem(value: 'biannual', child: Text('6 months')),
+                        DropdownMenuItem(value: 'annual', child: Text('Yearly')),
+                        DropdownMenuItem(value: 'custom', child: Text('Custom…')),
+                      ],
+                      onChanged: (v) => setState(() => _interval = v!),
+                    ),
+                  ]),
+                ),
+              ]),
               if (_interval == 'custom') ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
+                const FieldLabel('Duration (months)'),
                 TextFormField(
                   controller: _monthsCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Duration (months) *'),
                   validator: (v) {
                     if (_interval != 'custom') return null;
                     if (v?.trim().isEmpty ?? true) return 'Required for custom interval';
@@ -1202,60 +1263,48 @@ class _PlanFormSheetState extends ConsumerState<_PlanFormSheet> {
                   },
                 ),
               ],
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _maxClassesCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Max classes (blank = unlimited)'),
-              ),
-              const SizedBox(height: 16),
-              const Text('Features',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
+              const FieldLabel('Max classes (blank = unlimited)'),
+              TextFormField(controller: _maxClassesCtrl, keyboardType: TextInputType.number),
+              const SizedBox(height: 18),
+              const FieldLabel('Includes'),
               Row(
                 children: [
                   Expanded(
                     child: TextFormField(
                       controller: _featureCtrl,
-                      decoration: const InputDecoration(labelText: 'Add feature', isDense: true),
+                      decoration: const InputDecoration(hintText: 'Add a feature', isDense: true),
                       onFieldSubmitted: (_) => _addFeature(),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _addFeature,
-                    icon: const Icon(Icons.add_circle_outline, color: AppTheme.ink),
-                  ),
+                  RoundIconButton(icon: Icons.add, onTap: _addFeature, bg: AppTheme.accentSoft, fg: AppTheme.accent),
                 ],
               ),
-              if (_features.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                ..._features.asMap().entries.map((e) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.check, size: 14, color: AppTheme.statusActive),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(e.value, style: const TextStyle(fontSize: 13, color: AppTheme.ink))),
-                          IconButton(
-                            icon: const Icon(Icons.close, size: 14, color: AppTheme.inkHint),
-                            onPressed: () => setState(() => _features.removeAt(e.key)),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                        ],
+              if (_features.isNotEmpty)
+                CardList(
+                  children: _features.asMap().entries.map((e) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: Row(children: [
+                      const Icon(Icons.check, size: 15, color: AppTheme.statusActive),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(e.value, style: const TextStyle(fontSize: 13.5, color: AppTheme.ink))),
+                      GestureDetector(
+                        onTap: () => setState(() => _features.removeAt(e.key)),
+                        child: const Icon(Icons.close, size: 16, color: AppTheme.inkHint),
                       ),
-                    )),
-              ],
-              const SizedBox(height: 12),
+                    ]),
+                  )).toList(),
+                ),
+              const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Active', style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink)),
+                  const Text('Active', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
                   Switch(
                     value: _isActive,
                     onChanged: (v) => setState(() => _isActive = v),
-                    activeColor: AppTheme.ink,
+                    activeColor: AppTheme.accent,
                   ),
                 ],
               ),
@@ -1264,7 +1313,7 @@ class _PlanFormSheetState extends ConsumerState<_PlanFormSheet> {
                 onPressed: _loading ? null : _save,
                 child: _loading
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text(_isEdit ? 'Save Changes' : 'Create Plan'),
+                    : const Text('Save plan'),
               ),
             ],
           ),

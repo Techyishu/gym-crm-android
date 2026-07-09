@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -169,7 +170,7 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
     } on MissingPluginException {
       // The file picker ships as native code; an over-the-air patch can't add
       // it. Surface a clear message instead of crashing until the next release.
-      _toast('CSV import needs the latest app version — please update from the Play Store.');
+      _toast('CSV import needs the latest app version — please update from the ${Platform.isIOS ? 'App Store' : 'Play Store'}.');
       return;
     } on PlatformException catch (e) {
       _toast('Could not open the file picker: ${e.message ?? e.code}');
@@ -236,14 +237,14 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       }
 
       var imported = 0;
-      final memberIds = <String>[];
+      final insertedMembers = <Map<String, dynamic>>[]; // {id, joined_at}
       // Insert in batches of 100.
       for (var i = 0; i < toInsert.length; i += 100) {
         final batch = toInsert.sublist(i, (i + 100).clamp(0, toInsert.length));
         try {
-          final inserted = await client.from('members').insert(batch).select('id');
+          final inserted = await client.from('members').insert(batch).select('id, joined_at');
           imported += batch.length;
-          memberIds.addAll((inserted as List).map((m) => m['id'] as String));
+          insertedMembers.addAll((inserted as List).cast<Map<String, dynamic>>());
         } catch (e) {
           debugPrint('[GymCRM] CSV batch insert error: $e');
           for (var j = 0; j < batch.length; j++) {
@@ -251,19 +252,21 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           }
         }
       }
-
       // Optionally assign a plan to every imported member.
-      if (_planId != null && memberIds.isNotEmpty) {
+      if (_planId != null && insertedMembers.isNotEmpty) {
         setState(() => _importingLabel = 'Assigning membership plans…');
-        final memberships = memberIds
-            .map((id) => {
-                  'member_id': id,
-                  'plan_id': _planId,
-                  'status': 'active',
-                  'starts_at': DateTime.now().toUtc().toIso8601String(),
-                  'ends_at': null,
-                })
-            .toList();
+        // Plan cycle starts on each member's join date, not the import date.
+        // Membership is open-ended — next_payment_date tracks renewal, not ends_at.
+        final memberships = insertedMembers.map((mem) {
+          final startsAt = DateTime.tryParse(mem['joined_at'] as String) ?? DateTime.now().toUtc();
+          return {
+            'member_id': mem['id'],
+            'plan_id': _planId,
+            'status': 'active',
+            'starts_at': startsAt.toIso8601String(),
+            'ends_at': null,
+          };
+        }).toList();
         try {
           await client.from('memberships').insert(memberships);
         } catch (e) {
@@ -293,18 +296,30 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Import Members'),
+        title: const Text('Import members'),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context, _phase == _Phase.done),
         ),
       ),
-      body: switch (_phase) {
-        _Phase.upload => _buildUpload(),
-        _Phase.preview => _buildPreview(),
-        _Phase.importing => _buildImporting(),
-        _Phase.done => _buildDone(),
-      },
+      body: Column(
+        children: [
+          _StepIndicator(step: switch (_phase) {
+            _Phase.upload => 0,
+            _Phase.preview => 1,
+            _Phase.importing => 1,
+            _Phase.done => 2,
+          }),
+          Expanded(
+            child: switch (_phase) {
+              _Phase.upload => _buildUpload(),
+              _Phase.preview => _buildPreview(),
+              _Phase.importing => _buildImporting(),
+              _Phase.done => _buildDone(),
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -611,6 +626,59 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Step indicator (1 Upload — 2 Map — 3 Done) ────────────────────────────────
+
+class _StepIndicator extends StatelessWidget {
+  final int step; // 0-based current step
+  const _StepIndicator({required this.step});
+
+  static const _labels = ['Upload', 'Map', 'Done'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Row(
+        children: [
+          for (var i = 0; i < _labels.length; i++) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: i == step
+                    ? AppTheme.accent
+                    : i < step
+                        ? AppTheme.statusActiveBg
+                        : AppTheme.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                i < step ? '${i + 1} ${_labels[i]} ✓' : '${i + 1} ${_labels[i]}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: i == step
+                      ? Colors.white
+                      : i < step
+                          ? AppTheme.statusActive
+                          : AppTheme.inkHint,
+                ),
+              ),
+            ),
+            if (i < _labels.length - 1)
+              Expanded(
+                child: Container(
+                  height: 2,
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  color: i < step ? AppTheme.accent : AppTheme.border,
+                ),
+              ),
+          ],
+        ],
+      ),
     );
   }
 }

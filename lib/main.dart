@@ -1,10 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'core/services/onesignal_service.dart';
+import 'core/services/revenue_cat_service.dart';
 
 const _supabaseUrl = 'https://orlqjhqxeyukvfzsursl.supabase.co';
 const _supabaseAnonKey =
@@ -12,8 +13,6 @@ const _supabaseAnonKey =
 
 const _sentryDsn =
     'https://01a220921e1bfadef6df0380bfacec1f@o4511580229402624.ingest.us.sentry.io/4511580238774272';
-
-const _smsChannel = MethodChannel('com.gymcrm/sms');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,8 +27,23 @@ Future<void> main() async {
       options.dsn = _sentryDsn;
       options.environment = kReleaseMode ? 'production' : 'development';
       options.tracesSampleRate = kReleaseMode ? 0.1 : 1.0;
-      options.attachScreenshot = true;
-      options.attachViewHierarchy = true;
+      options.attachScreenshot = false;
+      options.attachViewHierarchy = false;
+      options.beforeSend = (event, hint) {
+        // Drop OS-level network interruptions caused by the device sleeping or
+        // Android killing idle sockets. These are not actionable.
+        final exceptions = event.exceptions;
+        if (exceptions != null) {
+          for (final ex in exceptions) {
+            final value = ex.value ?? '';
+            if (value.contains('Connection closed while receiving data') ||
+                value.contains('Connection reset by peer')) {
+              return null;
+            }
+          }
+        }
+        return event;
+      };
     },
     appRunner: () async {
       FlutterError.onError = (details) {
@@ -42,42 +56,45 @@ Future<void> main() async {
         anonKey: _supabaseAnonKey,
       );
 
+      // Initialize RevenueCat before runApp so the customerInfoStream is ready.
+      await RevenueCatService.initialize();
+
+      await OneSignalService.initialize();
+
+      // If a session already exists at cold-start, log the user into RC / OneSignal.
+      final existingSession = Supabase.instance.client.auth.currentSession;
+      if (existingSession != null) {
+        await RevenueCatService.loginUser(existingSession.user.id);
+        await OneSignalService.loginUser(existingSession.user.id);
+      }
+
       runApp(const ProviderScope(child: GymCRMApp()));
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await _syncNativeCredentials();
-        Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
-          if (data.event == AuthChangeEvent.tokenRefreshed ||
-              data.event == AuthChangeEvent.signedIn) {
-            await _syncNativeCredentials();
-          }
-        });
+        Supabase.instance.client.auth.onAuthStateChange.listen(
+          (data) async {
+            if (data.event == AuthChangeEvent.tokenRefreshed ||
+                data.event == AuthChangeEvent.signedIn) {
+              if (data.session != null) {
+                await RevenueCatService.loginUser(data.session!.user.id);
+                await OneSignalService.loginUser(data.session!.user.id);
+              }
+            }
+            if (data.event == AuthChangeEvent.signedOut) {
+              await RevenueCatService.logoutUser();
+              await OneSignalService.logoutUser();
+            }
+          },
+          onError: (error, stack) async {
+            // Stale/revoked refresh token — sign out cleanly so the
+            // router redirects to login instead of crashing.
+            if (error is AuthApiException) {
+              await Supabase.instance.client.auth.signOut();
+            }
+            Sentry.captureException(error, stackTrace: stack);
+          },
+        );
       });
     },
   );
-}
-
-Future<void> _syncNativeCredentials() async {
-  try {
-    final client = Supabase.instance.client;
-    final session = client.auth.currentSession;
-    if (session == null) return;
-
-    final profile = await client
-        .from('profiles')
-        .select('gym_id')
-        .eq('id', session.user.id)
-        .maybeSingle();
-    final gymId = profile?['gym_id'] as String?;
-    if (gymId == null) return;
-
-    await _smsChannel.invokeMethod('storeCredentials', {
-      'accessToken': session.accessToken,
-      'refreshToken': session.refreshToken,
-      'gymId': gymId,
-    });
-  } catch (e, stack) {
-    debugPrint('[GymCRM] _syncNativeCredentials error: $e');
-    Sentry.captureException(e, stackTrace: stack);
-  }
 }

@@ -43,7 +43,7 @@ class _TermsContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: const [
-        _UpdatedChip(date: 'Last updated: June 2025'),
+        _UpdatedChip(date: 'Last updated: 2 July 2026'),
         SizedBox(height: 16),
         _Heading('Terms of Service — GymCRM'),
         _Body(
@@ -62,7 +62,7 @@ class _TermsContent extends StatelessWidget {
           body:
               'You must be at least 18 years old to create an account. You are responsible for maintaining '
               'the security of your account credentials and for all activity that occurs under your account. '
-              'Notify us immediately at support@gymcrm.in if you suspect unauthorised access.',
+              'Notify us immediately at shashanksingh67567@gmail.com if you suspect unauthorised access.',
         ),
         _Section(
           title: '3. Free Trial & Subscriptions',
@@ -73,20 +73,27 @@ class _TermsContent extends StatelessWidget {
               'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',
         ),
         _Section(
-          title: '4. In-App Purchases (iOS)',
+          title: '4. Subscription Management',
           body:
-              'On iOS, subscriptions are managed via gymcrm.in in a web browser. We do not process '
-              'payments through Apple In-App Purchase. Tapping "Open gymcrm.in" will take you to our '
-              'website where you can subscribe or manage your plan.',
+              'Subscriptions are managed at gymcrm.in. Tap "Open gymcrm.in" to visit the website '
+              'where you can start or manage your plan. Your subscription status applies automatically '
+              'across all your devices.',
         ),
         _Section(
           title: '5. Acceptable Use',
           body:
+              'GymCRM is intended exclusively for legitimate fitness businesses (gyms, fitness centres, personal training studios, and similar). '
+              'By using GymCRM you confirm that your business is a genuine fitness or wellness operation.\n\n'
               'You agree not to:\n'
-              '• Use GymCRM for any unlawful purpose.\n'
+              '• Use GymCRM for any unlawful, fraudulent, or deceptive purpose.\n'
+              '• Register a gym account to manage contacts who are not actual members or clients of a real fitness business.\n'
+              '• Use the communication features to send unsolicited messages, spam, or content unrelated to your members\' fitness services.\n'
+              '• Misrepresent your business type, name, or purpose to obtain access to the platform.\n'
+              '• Use member data stored in GymCRM for any purpose other than managing your legitimate gym operations.\n'
               '• Upload malware, spam, or abusive content.\n'
               '• Reverse engineer, decompile, or attempt to extract source code from the app.\n'
-              '• Resell or sublicense access to GymCRM without written permission.',
+              '• Resell or sublicense access to GymCRM without written permission.\n\n'
+              'We reserve the right to investigate suspicious activity and terminate accounts that we reasonably believe are operating outside a legitimate fitness business context, without prior notice.',
         ),
         _Section(
           title: '6. Your Data',
@@ -113,8 +120,8 @@ class _TermsContent extends StatelessWidget {
           title: '9. Termination',
           body:
               'We may suspend or terminate your account if you violate these Terms or engage in conduct '
-              'that harms the service or other users. You may delete your account at any time from Settings → Sign Out, '
-              'or by contacting support@gymcrm.in.',
+              'that harms the service or other users. You may delete your account at any time from '
+              'Settings → Delete Account in the app, or by contacting shashanksingh67567@gmail.com.',
         ),
         _Section(
           title: '10. Governing Law',
@@ -130,7 +137,7 @@ class _TermsContent extends StatelessWidget {
         ),
         _Section(
           title: '12. Contact',
-          body: 'GymCRM\nEmail: support@gymcrm.in\nWebsite: gymcrm.in',
+          body: 'GymCRM — Operated by Shashank Kumar\nEmail: shashanksingh67567@gmail.com\nWhatsApp: +91 75410 04076\nWebsite: gymcrm.in',
         ),
       ],
     );

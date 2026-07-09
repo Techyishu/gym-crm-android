@@ -24,11 +24,13 @@ import '../features/staff/reports/reports_screen.dart';
 import '../features/staff/settings/settings_screen.dart';
 import '../features/staff/communications/communications_screen.dart';
 import '../features/staff/staff/staff_screen.dart';
-import '../features/staff/reminders/reminder_settings_screen.dart';
+import '../features/staff/workout/staff_workout_plans_screen.dart';
+import '../features/staff/diet/staff_diet_plans_screen.dart';
 import '../features/member/portal/portal_home_screen.dart';
 import '../features/member/bookings/bookings_screen.dart';
 import '../features/member/billing/member_billing_screen.dart';
 import '../features/member/workout/workout_screen.dart';
+import '../features/member/diet/diet_screen.dart';
 import '../features/member/attendance/heatmap_screen.dart';
 import '../features/member/qr/qr_screen.dart';
 import '../features/legal/privacy_policy_screen.dart';
@@ -37,7 +39,7 @@ import '../features/shared/invoice_detail_screen.dart';
 import 'shells/staff_shell.dart';
 import 'shells/member_shell.dart';
 
-final _rootNavigatorKey = GlobalKey<NavigatorState>();
+final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _staffNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'staff');
 final _memberNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'member');
 
@@ -61,7 +63,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(refreshStream.dispose);
 
   return GoRouter(
-    navigatorKey: _rootNavigatorKey,
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/onboarding',
     // Also refresh when the signup handshake guard flips, so the redirect is
     // re-evaluated the moment it releases.
@@ -73,6 +75,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (signupHandshakeInProgress.value) return null;
 
       final prefs = _sharedPrefs ??= await SharedPreferences.getInstance();
+
+      // External deep links (gymcrm://payment-success, io.supabase.gymcrm://
+      // login-callback) get forwarded here by the Android engine as a raw
+      // location string, but no GoRoute declares that path — it would 404.
+      // These are already handled by dedicated listeners (app_links stream /
+      // supabase_flutter's own auth callback), so just land somewhere valid.
+      if (state.uri.scheme.isNotEmpty &&
+          state.uri.scheme != 'http' &&
+          state.uri.scheme != 'https') {
+        return prefs.getString('home_route') ?? '/login';
+      }
+
       final onboardingDone = prefs.getBool('onboarding_done') ?? false;
       final user = Supabase.instance.client.auth.currentUser;
 
@@ -90,7 +104,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isAuthRoute = loc.startsWith('/login') ||
           loc.startsWith('/signup') ||
           loc.startsWith('/forgot-password') ||
-          loc == '/onboarding';
+          loc == '/onboarding' ||
+          loc.startsWith('/legal/');
 
       if (user == null) {
         // Stale cache from a previous account must not survive sign-out.
@@ -102,7 +117,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Resolve where this user belongs only when it matters (leaving an auth
       // route, or guarding /gym-setup) so we don't hit the DB on every nav.
-      if (isAuthRoute || loc == '/gym-setup') {
+      if ((isAuthRoute && !loc.startsWith('/legal/')) || loc == '/gym-setup') {
         // Cold-start fast path: the destination was resolved on a previous
         // launch — skip the network round trips that made startup slow.
         final cached = prefs.getString('home_route');
@@ -218,12 +233,12 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Non-shell staff routes (full screen)
       GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
+        parentNavigatorKey: rootNavigatorKey,
         path: '/staff/upcoming-payments',
         builder: (_, __) => const UpcomingPaymentsScreen(),
       ),
       GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
+        parentNavigatorKey: rootNavigatorKey,
         path: '/staff/subscription',
         builder: (_, __) => const SubscriptionScreen(),
       ),
@@ -233,7 +248,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/staff/settings', builder: (_, __) => const SettingsScreen()),
       GoRoute(path: '/staff/communications', builder: (_, __) => const CommunicationsScreen()),
       GoRoute(path: '/staff/staff', builder: (_, __) => const StaffScreen()),
-      GoRoute(path: '/staff/reminders', builder: (_, __) => const ReminderSettingsScreen()),
+      GoRoute(path: '/staff/workout-plans', builder: (_, __) => const StaffWorkoutPlansScreen()),
+      GoRoute(path: '/staff/diet-plans', builder: (_, __) => const StaffDietPlansScreen()),
 
       // Member shell with bottom nav
       StatefulShellRoute.indexedStack(
@@ -272,6 +288,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/portal/diet',
+                builder: (_, __) => const DietScreen(),
+              ),
+            ],
+          ),
         ],
       ),
 
@@ -286,19 +310,19 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Invoice detail — accessible from both staff billing and member billing
       GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
+        parentNavigatorKey: rootNavigatorKey,
         path: '/invoice/:id',
         builder: (_, state) => InvoiceDetailScreen(invoiceId: state.pathParameters['id']!),
       ),
 
       // Legal routes — accessible from signup + settings (no auth required)
       GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
+        parentNavigatorKey: rootNavigatorKey,
         path: '/legal/privacy',
         builder: (_, __) => const PrivacyPolicyScreen(),
       ),
       GoRoute(
-        parentNavigatorKey: _rootNavigatorKey,
+        parentNavigatorKey: rootNavigatorKey,
         path: '/legal/terms',
         builder: (_, __) => const TermsScreen(),
       ),

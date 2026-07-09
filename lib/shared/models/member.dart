@@ -92,6 +92,7 @@ class Membership {
   final String startsAt;
   final String? endsAt;
   final MembershipPlan? plan;
+  final double discountAmount;
 
   const Membership({
     required this.id,
@@ -101,7 +102,10 @@ class Membership {
     required this.startsAt,
     this.endsAt,
     this.plan,
+    this.discountAmount = 0,
   });
+
+  bool get hasDiscount => discountAmount > 0;
 
   factory Membership.fromJson(Map<String, dynamic> j) {
     final id = j['id'] as String?;
@@ -114,6 +118,7 @@ class Membership {
       status: j['status'] as String? ?? 'unknown',
       startsAt: j['starts_at'] as String? ?? '',
       endsAt: j['ends_at'] as String?,
+      discountAmount: (j['discount_amount'] as num?)?.toDouble() ?? 0.0,
       plan: j['membership_plans'] != null
           ? MembershipPlan.fromJson(
               j['membership_plans'] as Map<String, dynamic>)

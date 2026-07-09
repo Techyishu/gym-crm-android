@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm show 0eca362 -- app/api/staff/route.ts)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm status)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm log origin/main..HEAD --oneline)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm remote -v)",
+      "Bash(echo \"Flutter run started in background PID: $!\")",
+      "Bash(wait 85157)",
+      "Bash(adb -s 9e3e1281 logcat -d)",
+      "Bash(adb -s 9e3e1281 uninstall com.gymcrm.gym_crm)",
+      "Bash(adb -s 9e3e1281 install build/app/outputs/flutter-apk/app-debug.apk)",
+      "Bash(adb -s 9e3e1281 logcat -c)",
+      "Bash(adb -s 9e3e1281 logcat)",
+      "Bash(adb -s 9e3e1281 logcat \"*:V\" -d)",
+      "Bash(adb -s 9e3e1281 logcat -v time)",
+      "Bash(adb -s 9e3e1281 logcat -d \"*:V\")",
+      "Bash(adb -s 9e3e1281 install -r build/app/outputs/flutter-apk/app-debug.apk)",
+      "Bash(adb -s 9e3e1281 shell \"ps | grep gym\")",
+      "Bash(adb -s 9e3e1281 logcat --pid=10828)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm log --oneline -3)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm log --all --oneline -- middleware.ts)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm log --oneline d1dbd87..HEAD)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm show --stat c0bbb2a)",
+      "Bash(git -C /Users/wiredtechie/Desktop/gym-crm show --stat cb7542f)",
+      "Bash(/opt/homebrew/bin/pod install *)"
+    ],
+    "additionalDirectories": [
+      "/Users/wiredtechie/Desktop/gym-crm/app/api/staff",
+      "/Users/wiredtechie/Desktop/gym-crm/lib/supabase",
+      "/Users/wiredtechie/Desktop/gym-crm/app/c/[token]",
+      "/Users/wiredtechie/Desktop/gym-crm/app/api/public/checkin"
+    ]
+  }
+}

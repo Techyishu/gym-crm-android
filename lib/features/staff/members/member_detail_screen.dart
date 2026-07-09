@@ -8,12 +8,17 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
+import '../../../core/services/member_photo_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/validators.dart';
 import '../../../features/auth/providers/auth_provider.dart';
+import '../../../features/staff/workout/workout_plan_sheet.dart';
+import '../../../features/staff/diet/diet_plan_sheet.dart';
 import '../../../shared/models/member.dart';
 import '../../../shared/widgets/member_photo.dart';
+import '../../../shared/widgets/redesign.dart';
+import 'member_plan_viewer.dart';
 
 // Active membership plans for the current gym (for assign/change actions).
 final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -27,16 +32,6 @@ final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
       .order('price');
   return (data as List).cast<Map<String, dynamic>>();
 });
-
-String _detailPlanLabel(Map<String, dynamic> p) {
-  final price = (p['price'] as num?)?.toStringAsFixed(0) ?? '0';
-  final interval = p['billing_interval'] as String? ?? '';
-  const short = {'monthly': 'mo', 'quarterly': 'qtr', 'biannual': '6mo', 'annual': 'yr'};
-  final unit = interval == 'custom'
-      ? '${p['billing_interval_months'] ?? ''}mo'
-      : (short[interval] ?? interval);
-  return '${p['name']} — ₹$price/$unit';
-}
 
 final _memberDetailProvider = FutureProvider.family<Member?, String>((ref, id) async {
   final gymId = await ref.read(gymIdProvider.future);
@@ -72,10 +67,12 @@ final _memberInvoicesProvider = FutureProvider.family<List<Map<String, dynamic>>
 });
 
 final _memberBatchesProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+  final gymId = await ref.read(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('class_enrollments')
       .select('id, enrolled_at, classes(id, name, color, default_start_time, default_end_time)')
       .eq('member_id', id)
+      .eq('gym_id', gymId)
       .order('enrolled_at', ascending: false);
   return (data as List).cast<Map<String, dynamic>>();
 });
@@ -94,6 +91,20 @@ final _memberWorkoutPlansProvider = FutureProvider.family<List<Map<String, dynam
   }
 });
 
+final _memberDietPlansProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+  try {
+    final data = await Supabase.instance.client
+        .from('diet_plans')
+        .select('id, name, goal, calories, meals, created_at')
+        .eq('member_id', id)
+        .order('created_at', ascending: false);
+    return (data as List).cast<Map<String, dynamic>>();
+  } catch (e) {
+    debugPrint('[GymCRM] Load diet plans error: $e');
+    return [];
+  }
+});
+
 class MemberDetailScreen extends ConsumerWidget {
   final String memberId;
   const MemberDetailScreen({super.key, required this.memberId});
@@ -107,60 +118,33 @@ class MemberDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Member Detail'),
-        leading: const BackButton(),
-        actions: [
-          if (canEdit)
-            member.whenOrNull(
-              data: (m) => m != null
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            useSafeArea: true,
-                            builder: (_) => _EditMemberSheet(member: m),
-                          ).then((_) => ref.invalidate(_memberDetailProvider(memberId))),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, color: AppTheme.statusDanger),
-                          onPressed: () => _confirmDeleteMember(context, ref, m),
-                        ),
-                      ],
-                    )
-                  : const SizedBox.shrink(),
-            ) ?? const SizedBox.shrink(),
-        ],
-      ),
       body: member.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (m) {
           if (m == null) return const Center(child: Text('Member not found'));
           return RefreshIndicator(
+            color: AppTheme.accent,
             onRefresh: () async => ref.invalidate(_memberDetailProvider(memberId)),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
                 children: [
-                  _buildHeader(context, m, canPii: canPii),
-                  _MemberQuickActions(member: m, canPii: canPii),
+                  _buildHeader(context, ref, m, canPii: canPii, canEdit: canEdit),
                   const SizedBox(height: 16),
                   _buildMembershipCard(context, m),
+                  const SizedBox(height: 12),
+                  _buildStatTiles(ref),
+                  const SizedBox(height: 12),
+                  _buildQuickLinks(context, ref, m, role),
+                  const SizedBox(height: 12),
+                  _MemberQuickActions(member: m, canPii: canPii),
                   const SizedBox(height: 12),
                   if (canPii) _buildContactInfo(context, m),
                   const SizedBox(height: 12),
                   _buildBatches(ref),
                   const SizedBox(height: 12),
-                  _buildInvoices(ref),
-                  const SizedBox(height: 12),
                   _buildCheckInHistory(ref),
-                  const SizedBox(height: 12),
-                  _buildWorkoutPlans(ref),
                   const SizedBox(height: 12),
                   _buildMemberId(context, m),
                   const SizedBox(height: 24),
@@ -174,21 +158,12 @@ class MemberDetailScreen extends ConsumerWidget {
   }
 
   Future<void> _confirmDeleteMember(BuildContext context, WidgetRef ref, Member m) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Delete member?'),
-        content: Text(
-          'Permanently delete ${m.fullName}? All their data (memberships, invoices, check-ins) will be removed. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Delete', style: TextStyle(color: AppTheme.statusDanger)),
-          ),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Delete member?',
+      body: 'Permanently delete ${m.fullName}? All their data (memberships, invoices, check-ins) will be removed. This cannot be undone.',
+      confirmLabel: 'Delete',
+      icon: Icons.delete_outline,
     );
     if (ok != true || !context.mounted) return;
     try {
@@ -204,70 +179,299 @@ class MemberDetailScreen extends ConsumerWidget {
     }
   }
 
-  Widget _buildHeader(BuildContext context, Member m, {required bool canPii}) {
+  Future<void> _call(String? phone) async {
+    if (phone == null || phone.isEmpty) return;
+    final url = Uri.parse('tel:$phone');
+    if (await canLaunchUrl(url)) await launchUrl(url);
+  }
+
+  Future<void> _whatsApp(Member m) async {
+    final phone = m.phone;
+    if (phone == null || phone.isEmpty) return;
+    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
+    final url = Uri.parse('https://wa.me/91$cleaned');
+    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
+  }
+
+  Widget _buildHeader(BuildContext context, WidgetRef ref, Member m,
+      {required bool canPii, required bool canEdit}) {
+    final topPad = MediaQuery.of(context).padding.top;
+    final hasPhone = canPii && (m.phone?.isNotEmpty ?? false);
     return Container(
       width: double.infinity,
-      color: AppTheme.surface,
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+      color: AppTheme.darkCard,
+      padding: EdgeInsets.fromLTRB(16, topPad + 4, 16, 16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Large avatar
-          Container(
-            width: 84,
-            height: 84,
-            decoration: const BoxDecoration(
-              color: Color(0xFFF0F0F0),
-              shape: BoxShape.circle,
-            ),
-            child: MemberPhoto(
-              stored: m.avatarUrl,
-              fallback: Center(
-                child: Text(
-                  initials(m.firstName, m.lastName),
-                  style: const TextStyle(
-                    color: Color(0xFF111111),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 28,
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: AppTheme.onDark),
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+              const Spacer(),
+              if (canEdit)
+                IconButton(
+                  icon: const Icon(Icons.more_vert, size: 22, color: AppTheme.onDark),
+                  onPressed: () => showModalBottomSheet(
+                    context: context,
+                    builder: (ctx) => SafeArea(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        ListTile(
+                          leading: const Icon(Icons.edit_outlined, color: AppTheme.ink),
+                          title: const Text('Edit member'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              builder: (_) => _EditMemberSheet(member: m),
+                            ).then((_) => ref.invalidate(_memberDetailProvider(memberId)));
+                          },
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.delete_outline, color: AppTheme.statusDanger),
+                          title: const Text('Delete member', style: TextStyle(color: AppTheme.statusDanger)),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _confirmDeleteMember(context, ref, m);
+                          },
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: AppTheme.darkCard2,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: MemberPhoto(
+                  stored: m.avatarUrl,
+                  fallback: Center(
+                    child: Text(
+                      initials(m.firstName, m.lastName),
+                      style: const TextStyle(color: AppTheme.mintOnDark, fontWeight: FontWeight.w800, fontSize: 28),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            m.fullName,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20, color: AppTheme.ink),
-            textAlign: TextAlign.center,
-          ),
-          if (canPii) ...[
-            const SizedBox(height: 4),
-            Text(
-              m.email,
-              style: const TextStyle(color: AppTheme.inkSoft, fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-          ],
-          const SizedBox(height: 14),
-          _StatusChip(status: m.status),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.calendar_today_outlined, size: 13, color: AppTheme.inkHint),
-              const SizedBox(width: 4),
-              Text(
-                'Joined ${formatDateFromString(m.joinedAt)}',
-                style: const TextStyle(color: AppTheme.inkHint, fontSize: 13),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(m.fullName,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: AppTheme.onDark, letterSpacing: -0.3)),
+                    const SizedBox(height: 4),
+                    Text(
+                      [
+                        if (hasPhone) m.phone!,
+                        'Member since ${formatDateFromString(m.joinedAt)}',
+                      ].join(' · '),
+                      maxLines: 2,
+                      style: const TextStyle(color: AppTheme.onDarkSoft, fontSize: 12.5),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
+          if (hasPhone) ...[
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _call(m.phone),
+                  child: Container(
+                    height: 46,
+                    decoration: BoxDecoration(color: AppTheme.darkCard2, borderRadius: BorderRadius.circular(14)),
+                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.call_outlined, size: 17, color: AppTheme.onDark),
+                      SizedBox(width: 8),
+                      Text('Call', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.onDark)),
+                    ]),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _whatsApp(m),
+                  child: Container(
+                    height: 46,
+                    decoration: BoxDecoration(color: const Color(0xFF2E7D4F), borderRadius: BorderRadius.circular(14)),
+                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.chat_bubble_outline, size: 17, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text('WhatsApp', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+                    ]),
+                  ),
+                ),
+              ),
+            ]),
+          ],
         ],
       ),
     );
   }
 
+  Widget _buildStatTiles(WidgetRef ref) {
+    final checkIns = ref.watch(_memberCheckInsProvider(memberId));
+    final list = checkIns.valueOrNull ?? const <Map<String, dynamic>>[];
+    final now = DateTime.now();
+    final monthCount = list.where((ci) {
+      final dt = DateTime.tryParse(ci['checked_in_at'] as String? ?? '');
+      return dt != null && dt.year == now.year && dt.month == now.month;
+    }).length;
+    String lastVisit = '—';
+    if (list.isNotEmpty) {
+      final dt = DateTime.tryParse(list.first['checked_in_at'] as String? ?? '');
+      if (dt != null) {
+        final days = now.difference(dt).inDays;
+        lastVisit = days == 0 ? 'Today' : days == 1 ? '1d ago' : '${days}d ago';
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(children: [
+        Expanded(child: StatTileLight(label: 'Check-ins / month', value: '$monthCount')),
+        const SizedBox(width: 10),
+        Expanded(child: StatTileLight(label: 'Last visit', value: lastVisit)),
+      ]),
+    );
+  }
+
+  // ── Quick links: Workout plan · Diet plan · Payment history ────────────────
+
+  Widget _buildQuickLinks(BuildContext context, WidgetRef ref, Member m, String? role) {
+    final workoutPlans = ref.watch(_memberWorkoutPlansProvider(memberId)).valueOrNull ?? const [];
+    final dietPlans = ref.watch(_memberDietPlansProvider(memberId)).valueOrNull ?? const [];
+    final invoices = ref.watch(_memberInvoicesProvider(memberId)).valueOrNull ?? const [];
+    final canWorkout = RoleAccess.canManageWorkoutPlans(role);
+    final canDiet = RoleAccess.canManageDietPlans(role);
+
+    String workoutSummary() {
+      if (workoutPlans.isEmpty) return canWorkout ? 'Add plan' : '—';
+      return workoutPlans.first['name'] as String? ?? 'View';
+    }
+
+    String dietSummary() {
+      if (dietPlans.isEmpty) return canDiet ? 'Add plan' : '—';
+      final kcal = dietPlans.first['calories'] as int?;
+      return kcal != null ? '$kcal kcal' : (dietPlans.first['name'] as String? ?? 'View');
+    }
+
+    Future<void> openWorkout() async {
+      if (workoutPlans.isEmpty) {
+        if (!canWorkout) return;
+        final saved = await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => WorkoutPlanSheet(memberId: memberId, memberName: m.fullName),
+        );
+        if (saved == true) ref.invalidate(_memberWorkoutPlansProvider(memberId));
+        return;
+      }
+      final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => WorkoutPlanViewerPage(
+          plan: workoutPlans.first,
+          memberId: memberId,
+          memberName: m.fullName,
+          canManage: canWorkout,
+        )),
+      );
+      if (changed == true) ref.invalidate(_memberWorkoutPlansProvider(memberId));
+    }
+
+    Future<void> openDiet() async {
+      if (dietPlans.isEmpty) {
+        if (!canDiet) return;
+        final saved = await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => DietPlanSheet(memberId: memberId, memberName: m.fullName),
+        );
+        if (saved == true) ref.invalidate(_memberDietPlansProvider(memberId));
+        return;
+      }
+      final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => DietPlanViewerPage(
+          plan: dietPlans.first,
+          memberId: memberId,
+          memberName: m.fullName,
+          canManage: canDiet,
+        )),
+      );
+      if (changed == true) ref.invalidate(_memberDietPlansProvider(memberId));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: CardList(children: [
+        _QuickLinkRow(
+          icon: Icons.fitness_center_outlined,
+          iconBg: AppTheme.accentSoft,
+          iconColor: AppTheme.accent,
+          label: 'Workout plan',
+          summary: workoutSummary(),
+          onTap: openWorkout,
+        ),
+        _QuickLinkRow(
+          icon: Icons.restaurant_menu_outlined,
+          iconBg: AppTheme.statusActiveBg,
+          iconColor: AppTheme.statusActive,
+          label: 'Diet plan',
+          summary: dietSummary(),
+          onTap: openDiet,
+        ),
+        _QuickLinkRow(
+          icon: Icons.receipt_long_outlined,
+          iconBg: AppTheme.statusNeutralBg,
+          iconColor: AppTheme.statusNeutral,
+          label: 'Payment history',
+          summary: '${invoices.length} payment${invoices.length == 1 ? '' : 's'}',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => _PaymentHistoryPage(
+              memberId: memberId,
+              memberName: m.fullName,
+            )),
+          ),
+        ),
+      ]),
+    );
+  }
+
   Widget _buildMembershipCard(BuildContext context, Member m) {
     final ms = m.currentMembership;
+    final npd = m.nextPaymentDate != null ? DateTime.tryParse(m.nextPaymentDate!) : null;
+    final started = ms != null ? DateTime.tryParse(ms.startsAt) : null;
+    int? daysLeft;
+    double? progress;
+    if (npd != null) {
+      daysLeft = npd.difference(DateTime.now()).inDays;
+      if (started != null && npd.isAfter(started)) {
+        final total = npd.difference(started).inDays;
+        progress = total > 0 ? ((total - daysLeft) / total).clamp(0.0, 1.0) : null;
+      }
+    }
+    final planTitle = ms?.plan != null
+        ? '${ms!.plan!.name} · ${formatCurrency(ms.plan!.price)}'
+        : 'No active plan';
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -277,21 +481,51 @@ class MemberDetailScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SectionHeader(title: 'Membership'),
-              const SizedBox(height: 12),
-              if (ms == null)
-                const Text('No active membership', style: TextStyle(color: AppTheme.inkHint))
-              else ...[
-                _InfoRow(label: 'Plan', value: ms.plan?.name ?? '-'),
-                _InfoRow(
-                  label: 'Price',
-                  value: ms.plan != null
-                      ? '${formatCurrency(ms.plan!.price)} / ${ms.plan!.billingInterval}'
-                      : '-',
+              const Text('Current plan',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: Text(planTitle,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
                 ),
-                _InfoRow(label: 'Status', value: ms.status),
-                _InfoRow(label: 'Started', value: formatDateFromString(ms.startsAt)),
-                if (ms.endsAt != null) _InfoRow(label: 'Expires', value: formatDateFromString(ms.endsAt)),
+                const SizedBox(width: 8),
+                _StatusChip(status: m.status),
+              ]),
+              if (ms?.hasDiscount ?? false) ...[
+                const SizedBox(height: 4),
+                Text('− ${formatCurrency(ms!.discountAmount)} per invoice',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.statusActive)),
+              ],
+              if (progress != null) ...[
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(99),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 6,
+                    backgroundColor: AppTheme.surface2,
+                    valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.statusActive),
+                  ),
+                ),
+              ],
+              if (npd != null) ...[
+                const SizedBox(height: 10),
+                Row(children: [
+                  Text('Renews ${formatDateFromString(m.nextPaymentDate)}',
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+                  const Spacer(),
+                  Text(
+                    daysLeft != null && daysLeft >= 0 ? '$daysLeft days left'
+                        : '${daysLeft!.abs()} days overdue',
+                    style: TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w800,
+                      color: daysLeft >= 0 ? AppTheme.ink : AppTheme.statusDanger,
+                      fontFeatures: AppTheme.tabularFigures,
+                    ),
+                  ),
+                ]),
               ],
             ],
           ),
@@ -316,8 +550,6 @@ class MemberDetailScreen extends ConsumerWidget {
                 _InfoRow(label: 'Member ID', value: m.customId!),
               _InfoRow(label: 'Email', value: m.email),
               _InfoRow(label: 'Phone', value: m.phone ?? '-'),
-              if (m.nextPaymentDate != null)
-                _InfoRow(label: 'Next payment', value: formatDateFromString(m.nextPaymentDate)),
               if (m.notes != null && m.notes!.isNotEmpty)
                 _InfoRow(label: 'Notes', value: m.notes!),
             ],
@@ -371,105 +603,6 @@ class MemberDetailScreen extends ConsumerWidget {
                                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink)),
                                 if (timeStr != null)
                                   Text(timeStr, style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInvoices(WidgetRef ref) {
-    final invoices = ref.watch(_memberInvoicesProvider(memberId));
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        decoration: AppTheme.cardDecoration(),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionHeader(title: 'Invoices'),
-              const SizedBox(height: 12),
-              invoices.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => const SizedBox.shrink(),
-                data: (list) => list.isEmpty
-                    ? const Text('No invoices yet', style: TextStyle(color: AppTheme.inkHint))
-                    : ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: list.length,
-                        separatorBuilder: (_, __) => const Divider(color: AppTheme.border, height: 1),
-                        itemBuilder: (_, i) {
-                          final inv = list[i];
-                          final status = inv['status'] as String? ?? 'open';
-                          final isPaid = status == 'paid';
-                          final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
-                          final desc = inv['description'] as String?;
-                          final dateStr = isPaid
-                              ? inv['paid_at'] as String?
-                              : inv['due_at'] as String?;
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        desc ?? '—',
-                                        style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: AppTheme.ink,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      if (dateStr != null)
-                                        Text(
-                                          '${isPaid ? 'Paid' : 'Due'} ${formatDateFromString(dateStr)}',
-                                          style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      formatCurrency(amount),
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppTheme.ink,
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: isPaid ? AppTheme.statusActiveBg : AppTheme.statusWarnBg,
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        isPaid ? 'Paid' : status[0].toUpperCase() + status.substring(1),
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: isPaid ? AppTheme.statusActive : AppTheme.statusWarn,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
                               ],
                             ),
                           );
@@ -549,28 +682,6 @@ class MemberDetailScreen extends ConsumerWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWorkoutPlans(WidgetRef ref) {
-    final plans = ref.watch(_memberWorkoutPlansProvider(memberId));
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: _ExpandableSection(
-        title: 'Workout Plans',
-        child: plans.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) => const SizedBox.shrink(),
-          data: (list) => list.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text('No workout plans yet.', style: TextStyle(color: AppTheme.inkHint)),
-                )
-              : Column(
-                  children: list.map((plan) => _WorkoutPlanTile(plan: plan)).toList(),
-                ),
         ),
       ),
     );
@@ -662,59 +773,74 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => Padding(
-          padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('WhatsApp — ${m.firstName}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink)),
-              const SizedBox(height: 16),
-              const Text('Template', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                value: tpl,
-                decoration: const InputDecoration(isDense: true),
-                items: const [
-                  DropdownMenuItem(value: 'custom',  child: Text('Custom message')),
-                  DropdownMenuItem(value: 'expiry',  child: Text('Expiry reminder')),
-                  DropdownMenuItem(value: 'payment', child: Text('Payment reminder')),
-                  DropdownMenuItem(value: 'welcome', child: Text('Welcome')),
-                  DropdownMenuItem(value: 'checkin', child: Text("Haven't seen you lately")),
-                ],
-                onChanged: (v) { if (v != null) setS(() { tpl = v; msg = defaultMsg(v); }); },
-              ),
-              const SizedBox(height: 12),
-              const Text('Message', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
-              const SizedBox(height: 6),
-              TextFormField(
-                initialValue: msg,
-                maxLines: 4,
-                onChanged: (v) => msg = v,
-                decoration: const InputDecoration(hintText: 'Type a message...'),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  Navigator.pop(ctx);
-                  final clean = m.phone!.replaceAll(RegExp(r'\D'), '');
-                  final number = clean.startsWith('91') ? clean : '91$clean';
-                  final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(msg)}');
-                  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-                    _toast('Could not open WhatsApp');
-                  }
-                },
-                icon: const Icon(Icons.send_outlined, size: 16),
-                label: const Text('Open WhatsApp'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF25D366),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 48),
+        builder: (ctx, setS) {
+          const templates = [
+            ('custom', 'Custom'),
+            ('expiry', 'Fee reminder'),
+            ('payment', 'Payment'),
+            ('welcome', 'Welcome'),
+            ('checkin', 'Renewal'),
+          ];
+          final tplIndex = templates.indexWhere((t) => t.$1 == tpl).clamp(0, templates.length - 1);
+          return Padding(
+            padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: const Color(0xFF25D366), borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.chat_bubble, size: 18, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Send WhatsApp',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: AppTheme.ink)),
+                ]),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 40,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: templates.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) => PillChip(
+                      label: templates[i].$2,
+                      selected: tplIndex == i,
+                      onTap: () => setS(() { tpl = templates[i].$1; msg = defaultMsg(templates[i].$1); }),
+                    ),
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ),
+                const SizedBox(height: 14),
+                TextFormField(
+                  initialValue: msg,
+                  maxLines: 4,
+                  onChanged: (v) => msg = v,
+                  decoration: const InputDecoration(hintText: 'Type a message…'),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    final clean = m.phone!.replaceAll(RegExp(r'\D'), '');
+                    final number = clean.startsWith('91') ? clean : '91$clean';
+                    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(msg)}');
+                    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+                      _toast('Could not open WhatsApp');
+                    }
+                  },
+                  icon: const Icon(Icons.send_outlined, size: 16),
+                  label: const Text('Send on WhatsApp'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF25D366),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -768,16 +894,12 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   Future<void> _cancelPlan() async {
     final ms = m.currentMembership;
     if (ms == null || ms.status != 'active') return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Cancel membership?'),
-        content: Text("Cancel ${m.firstName}'s current plan?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Cancel plan')),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Cancel membership?',
+      body: "${m.firstName}'s current plan will be cancelled. This can't be undone.",
+      cancelLabel: 'Keep plan',
+      confirmLabel: 'Cancel it',
     );
     if (ok != true) return;
     setState(() => _busy = true);
@@ -803,29 +925,87 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       _toast('No active plans. Create one in Billing first.');
       return;
     }
+    final currentPlanId = m.currentMembership?.plan?.id;
+    var picked = currentPlanId ?? (plans.isNotEmpty ? plans.first['id'] as String : null);
     final selected = await showModalBottomSheet<String>(
       context: context,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Select a plan',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setS) {
+          return Padding(
+            padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SheetHeader(title: 'Change plan'),
+                const SizedBox(height: 16),
+                ...plans.map((p) {
+                  final id = p['id'] as String;
+                  final selected = picked == id;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: GestureDetector(
+                      onTap: () => setS(() => picked = id),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: selected ? AppTheme.accentSoft : AppTheme.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
+                        ),
+                        child: Row(children: [
+                          Expanded(
+                            child: Text(p['name'] as String? ?? '',
+                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                          ),
+                          Text(formatCurrency((p['price'] as num?)?.toDouble() ?? 0),
+                            style: AppTheme.numberStyle(fontSize: 14.5)),
+                        ]),
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: picked == null ? null : () => Navigator.pop(context, picked),
+                  child: const Text('Switch plan'),
+                ),
+              ],
             ),
-            ...plans.map((p) => ListTile(
-                  title: Text(_detailPlanLabel(p)),
-                  onTap: () => Navigator.pop(context, p['id'] as String),
-                )),
-            const SizedBox(height: 8),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (selected == null) return;
+
+    // Optional recurring discount for this member.
+    final discountCtrl = TextEditingController();
+    final discount = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _DiscountSheet(
+        title: 'Recurring Discount',
+        helperText: 'Fixed amount deducted from every auto-generated invoice for this member.',
+        controller: discountCtrl,
+        confirmLabel: 'Confirm',
+        skipLabel: 'No Discount',
+        onSkip: () => Navigator.pop(ctx, 0.0),
+        onConfirm: () {
+          final v = double.tryParse(discountCtrl.text.trim()) ?? 0.0;
+          Navigator.pop(ctx, v < 0 ? 0.0 : v);
+        },
+      ),
+    );
+    discountCtrl.dispose();
+
     setState(() => _busy = true);
     try {
+      // Plan cycle starts on the member's join date, not on assignment date.
+      // Membership is open-ended — next_payment_date tracks renewal, not ends_at.
+      final startsAt = DateTime.tryParse(m.joinedAt) ?? DateTime.now().toUtc();
+
       // Cancel any existing active membership, then assign the new plan.
       await _client.from('memberships').update({
         'status': 'cancelled',
@@ -835,8 +1015,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
         'member_id': m.id,
         'plan_id': selected,
         'status': 'active',
-        'starts_at': DateTime.now().toUtc().toIso8601String(),
+        'starts_at': startsAt.toIso8601String(),
         'ends_at': null,
+        'discount_amount': discount ?? 0.0,
       });
       // Activate the member if they were expired or cancelled.
       if (m.status == 'expired' || m.status == 'cancelled') {
@@ -847,6 +1028,48 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     } catch (e) {
       debugPrint('[GymCRM] Assign plan error: $e');
       _toast('Failed to assign plan');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editDiscount() async {
+    final ms = m.currentMembership;
+    if (ms == null) return;
+
+    final discountCtrl = TextEditingController(
+      text: ms.discountAmount > 0 ? ms.discountAmount.toStringAsFixed(0) : '',
+    );
+    final newDiscount = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => _DiscountSheet(
+        title: 'Edit Recurring Discount',
+        helperText: 'Fixed amount deducted from every auto-generated invoice. Set to 0 to remove.',
+        controller: discountCtrl,
+        confirmLabel: 'Save',
+        skipLabel: 'Cancel',
+        onSkip: () => Navigator.pop(ctx),
+        onConfirm: () {
+          final v = double.tryParse(discountCtrl.text.trim()) ?? 0.0;
+          Navigator.pop(ctx, v < 0 ? 0.0 : v);
+        },
+      ),
+    );
+    discountCtrl.dispose();
+    if (newDiscount == null) return;
+
+    setState(() => _busy = true);
+    try {
+      await _client
+          .from('memberships')
+          .update({'discount_amount': newDiscount})
+          .eq('id', ms.id);
+      ref.invalidate(_memberDetailProvider(m.id));
+      _toast('Discount updated');
+    } catch (e) {
+      debugPrint('[GymCRM] Edit discount error: $e');
+      _toast('Failed to update discount');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -863,83 +1086,152 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     if (!canPii && !canEdit) {
       return const SizedBox.shrink();
     }
-    return Container(
-      color: AppTheme.surface,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        children: [
-          if (showWhatsApp || showHold) ...[
-            Row(
-              children: [
-                if (showWhatsApp)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _whatsapp,
-                      icon: const Icon(Icons.chat_bubble_outline, size: 16, color: Color(0xFF25D366)),
-                      label: const Text('WhatsApp'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF25D366),
-                        side: const BorderSide(color: Color(0xFF25D366)),
-                        minimumSize: const Size(0, 44),
-                      ),
-                    ),
-                  ),
-                if (showWhatsApp && showHold)
-                  const SizedBox(width: 10),
-                if (showHold)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _toggleHold,
-                      icon: Icon(m.status == 'frozen' ? Icons.play_arrow : Icons.pause, size: 16),
-                      label: Text(m.status == 'frozen' ? 'Remove hold' : 'Hold'),
-                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
+    final rows = <Widget>[
+      if (showWhatsApp)
+        _ActionRow(
+          icon: Icons.chat_bubble_outline,
+          iconBg: const Color(0xFFDDEFE2),
+          iconColor: const Color(0xFF25D366),
+          label: 'WhatsApp',
+          onTap: _busy ? null : _whatsapp,
+        ),
+      if (showHold)
+        _ActionRow(
+          icon: m.status == 'frozen' ? Icons.play_arrow : Icons.pause,
+          iconBg: AppTheme.surface2,
+          iconColor: AppTheme.inkSoft,
+          label: m.status == 'frozen' ? 'Remove hold' : 'Hold membership',
+          onTap: _busy ? null : _toggleHold,
+        ),
+      if (canEdit)
+        _ActionRow(
+          icon: Icons.credit_card,
+          iconBg: AppTheme.accentSoft,
+          iconColor: AppTheme.accent,
+          label: hasActivePlan ? 'Change plan' : 'Assign plan',
+          onTap: _busy ? null : _managePlan,
+        ),
+      if (canEdit && hasActivePlan)
+        _ActionRow(
+          icon: Icons.edit_outlined,
+          iconBg: AppTheme.surface2,
+          iconColor: AppTheme.inkSoft,
+          label: m.currentMembership?.hasDiscount == true
+              ? 'Edit recurring discount (${formatCurrency(m.currentMembership!.discountAmount)} off)'
+              : 'Add recurring discount',
+          onTap: _busy ? null : _editDiscount,
+        ),
+      if (showInvite)
+        _ActionRow(
+          icon: Icons.mail_outline,
+          iconBg: AppTheme.surface2,
+          iconColor: AppTheme.inkSoft,
+          label: 'Send portal invite',
+          onTap: _busy ? null : _sendInvite,
+        ),
+      if (canEdit && hasActivePlan)
+        _ActionRow(
+          icon: Icons.delete_outline,
+          iconBg: AppTheme.statusDangerBg,
+          iconColor: AppTheme.statusDanger,
+          label: 'Cancel plan',
+          labelColor: AppTheme.statusDanger,
+          onTap: _busy ? null : _cancelPlan,
+        ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: AppTheme.cardDecoration(),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            for (int i = 0; i < rows.length; i++) ...[
+              if (i > 0) const Divider(height: 1, color: AppTheme.border),
+              rows[i],
+            ],
           ],
-          if (canEdit) Row(
+        ),
+      ),
+    );
+  }
+}
+
+// ── Discount bottom sheet ──────────────────────────────────────────────────────
+
+class _DiscountSheet extends StatelessWidget {
+  final String title;
+  final String helperText;
+  final TextEditingController controller;
+  final String confirmLabel;
+  final String skipLabel;
+  final VoidCallback onSkip;
+  final VoidCallback onConfirm;
+
+  const _DiscountSheet({
+    required this.title,
+    required this.helperText,
+    required this.controller,
+    required this.confirmLabel,
+    required this.skipLabel,
+    required this.onSkip,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StatefulBuilder(
+      builder: (ctx, setS) {
+        final discount = double.tryParse(controller.text.trim()) ?? 0;
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16, right: 16, top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : _managePlan,
-                  icon: const Icon(Icons.credit_card, size: 16),
-                  label: Text(hasActivePlan ? 'Change plan' : 'Assign plan'),
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+              SheetHeader(title: title, subtitle: helperText),
+              const SizedBox(height: 18),
+              const FieldLabel('Discount amount'),
+              TextField(
+                controller: controller,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                autofocus: true,
+                onChanged: (_) => setS(() {}),
+                decoration: const InputDecoration(hintText: '0', prefixText: '₹ '),
+              ),
+              if (discount > 0) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: AppTheme.cardDecoration(),
+                  child: Row(children: [
+                    const Text('Discount applied', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+                    const Spacer(),
+                    Text('− ${formatCurrency(discount)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.statusActive)),
+                  ]),
+                ),
+              ],
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: onConfirm,
+                child: Text(confirmLabel),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: onSkip,
+                  child: Text(skipLabel, style: const TextStyle(color: AppTheme.inkSoft)),
                 ),
               ),
-              if (hasActivePlan) ...[
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _cancelPlan,
-                    icon: const Icon(Icons.delete_outline, size: 16, color: AppTheme.statusDanger),
-                    label: const Text('Cancel plan'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.statusDanger,
-                      side: BorderSide(color: AppTheme.statusDanger.withValues(alpha: 0.4)),
-                      minimumSize: const Size(0, 44),
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
-          if (showInvite) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : _sendInvite,
-                icon: const Icon(Icons.mail_outline, size: 16),
-                label: const Text('Send portal invite'),
-                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
-              ),
-            ),
-          ],
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -958,171 +1250,6 @@ Color _parseColor(String? hex) {
 }
 
 // ── Expandable Section ─────────────────────────────────────────────────────────
-
-class _ExpandableSection extends StatefulWidget {
-  final String title;
-  final Widget child;
-  const _ExpandableSection({required this.title, required this.child});
-
-  @override
-  State<_ExpandableSection> createState() => _ExpandableSectionState();
-}
-
-class _ExpandableSectionState extends State<_ExpandableSection> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(widget.title,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                  ),
-                  Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: AppTheme.inkHint, size: 20),
-                ],
-              ),
-            ),
-          ),
-          if (_expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: widget.child,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Workout Plan Tile ──────────────────────────────────────────────────────────
-
-class _WorkoutPlanTile extends StatefulWidget {
-  final Map<String, dynamic> plan;
-  const _WorkoutPlanTile({required this.plan});
-
-  @override
-  State<_WorkoutPlanTile> createState() => _WorkoutPlanTileState();
-}
-
-class _WorkoutPlanTileState extends State<_WorkoutPlanTile> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final name = widget.plan['name'] as String? ?? 'Plan';
-    final type = (widget.plan['type'] as String? ?? 'weekly').toLowerCase();
-    final rawDays = widget.plan['days'];
-    final days = rawDays is List ? rawDays.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
-    final totalEx = days.fold<int>(0, (s, d) {
-      final exList = d['exercises'];
-      return s + (exList is List ? exList.length : 0);
-    });
-
-    final (typeBg, typeFg) = switch (type) {
-      'daily'   => (const Color(0xFFE8F5E9), const Color(0xFF2E7D32)),
-      'monthly' => (const Color(0xFFFFF8E1), const Color(0xFF8A6800)),
-      _         => (const Color(0xFFE3F2FD), const Color(0xFF1565C0)),
-    };
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppTheme.border),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: typeBg, borderRadius: BorderRadius.circular(20)),
-                    child: Text(type.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: typeFg, letterSpacing: 0.8)),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink))),
-                  Text('$totalEx ex', style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
-                  const SizedBox(width: 6),
-                  Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 18, color: AppTheme.inkHint),
-                ],
-              ),
-            ),
-          ),
-          if (_expanded && days.isNotEmpty)
-            Container(
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: AppTheme.border)),
-              ),
-              child: Column(
-                children: days.where((d) {
-                  final exList = d['exercises'];
-                  return exList is List && exList.isNotEmpty;
-                }).map((day) {
-                  final label = day['label'] as String? ?? '';
-                  final exercises = (day['exercises'] as List).cast<Map<String, dynamic>>();
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(label.toUpperCase(),
-                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 0.8)),
-                        const SizedBox(height: 6),
-                        ...exercises.asMap().entries.map((e) {
-                          final ex = e.value;
-                          final parts = <String>[
-                            if ((ex['sets'] as String? ?? '').isNotEmpty) '${ex['sets']} sets',
-                            if ((ex['reps'] as String? ?? '').isNotEmpty) '${ex['reps']} reps',
-                            if ((ex['weight'] as String? ?? '').isNotEmpty) ex['weight'] as String,
-                          ];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('${e.key + 1}. ', style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(ex['name'] as String? ?? '—', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppTheme.ink)),
-                                      if (parts.isNotEmpty)
-                                        Text(parts.join(' · '), style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Section Header ─────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -1177,7 +1304,8 @@ class _StatusChip extends StatelessWidget {
 class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
-  const _InfoRow({required this.label, required this.value});
+  final Color? valueColor;
+  const _InfoRow({required this.label, required this.value, this.valueColor});
 
   @override
   Widget build(BuildContext context) {
@@ -1191,7 +1319,7 @@ class _InfoRow extends StatelessWidget {
             child: Text(label, style: const TextStyle(color: AppTheme.inkSoft, fontSize: 13, fontWeight: FontWeight.w500)),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink, fontSize: 13)),
+            child: Text(value, style: TextStyle(fontWeight: FontWeight.w600, color: valueColor ?? AppTheme.ink, fontSize: 13)),
           ),
         ],
       ),
@@ -1281,15 +1409,14 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   Future<String?> _uploadAvatar() async {
     if (_avatarFile == null) return null;
     final gymId = widget.member.gymId;
-    final client = Supabase.instance.client;
     final ext = _avatarFile!.path.split('.').last.toLowerCase();
     final mime = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
-    final filename = '$gymId/${DateTime.now().millisecondsSinceEpoch}.$ext';
+    // Stable per-member path: re-uploads overwrite the same object instead of
+    // accumulating a new orphaned file (and egress cost) on every edit.
+    final filename = '$gymId/${widget.member.id}.$ext';
     final bytes = await _avatarFile!.readAsBytes();
-    await client.storage
-        .from('member-photos')
-        .uploadBinary(filename, bytes, fileOptions: FileOptions(contentType: mime));
-    // Private bucket: store the path; display resolves a signed URL.
+    await MemberPhotoService.upload(path: filename, bytes: bytes, contentType: mime);
+    // Stored value is the bare path; display resolves it via the photo Worker.
     return filename;
   }
 
@@ -1367,15 +1494,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Edit Member',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-              ],
-            ),
-            const SizedBox(height: 16),
+            const SheetHeader(title: 'Edit member'),
+            const SizedBox(height: 12),
             // Photo picker
             Center(
               child: GestureDetector(
@@ -1386,16 +1506,16 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF0F0F0),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppTheme.border, width: 1.5),
+                        color: AppTheme.surface2,
+                        borderRadius: BorderRadius.circular(26),
                       ),
+                      clipBehavior: Clip.antiAlias,
                       child: _avatarFile != null
-                          ? ClipOval(child: Image.file(_avatarFile!, fit: BoxFit.cover))
+                          ? Image.file(_avatarFile!, fit: BoxFit.cover)
                           : MemberPhoto(
                               stored: widget.member.avatarUrl,
                               fallback: Center(child: Text(initials(widget.member.firstName, widget.member.lastName),
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 22, color: AppTheme.ink))),
+                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, color: AppTheme.ink))),
                             ),
                     ),
                     Positioned(
@@ -1404,7 +1524,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                       child: Container(
                         width: 26,
                         height: 26,
-                        decoration: const BoxDecoration(color: AppTheme.ink, shape: BoxShape.circle),
+                        decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(9)),
                         child: const Icon(Icons.edit_outlined, size: 14, color: Colors.white),
                       ),
                     ),
@@ -1412,19 +1532,29 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             Row(
               children: [
-                Expanded(child: TextFormField(controller: _firstCtrl, decoration: const InputDecoration(labelText: 'First name'))),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('First name'),
+                    TextFormField(controller: _firstCtrl),
+                  ]),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: TextFormField(controller: _lastCtrl, decoration: const InputDecoration(labelText: 'Last name'))),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('Last name'),
+                    TextFormField(controller: _lastCtrl),
+                  ]),
+                ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Email (optional)'),
             TextFormField(
               controller: _emailCtrl,
               keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Email (optional)'),
               onChanged: (_) => setState(() {}),
             ),
             if (_emailCtrl.text.trim().isEmpty) ...[
@@ -1434,22 +1564,16 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                 style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Phone (optional)'),
             TextFormField(
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone (optional)'),
               onChanged: (_) => setState(() {}),
             ),
-            if (_phoneCtrl.text.trim().isEmpty) ...[
-              const SizedBox(height: 4),
-              const Text(
-                '⚠ Without phone number, SMS reminders won\'t be sent.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
-              ),
-            ],
-            const SizedBox(height: 12),
-            TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(labelText: 'Member ID (optional)', hintText: 'e.g. GYM-001', counterText: '')),
+            const SizedBox(height: 14),
+            const FieldLabel('Member ID (optional)'),
+            TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(hintText: 'e.g. GYM-001', counterText: '')),
             // BIOMETRIC HIDDEN — re-enable when ready to launch
             // const SizedBox(height: 12),
             // TextFormField(
@@ -1464,90 +1588,87 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             //     helperText: 'Employee number enrolled on fingerprint machine',
             //   ),
             // ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
-                  child: InkWell(
-                    onTap: () => _pickDate(isJoined: true),
-                    borderRadius: BorderRadius.circular(10),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Joining date', suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
-                      child: Text(
-                        _joinedAt != null ? formatDateFromString(_joinedAt) : 'Not set',
-                        style: TextStyle(color: _joinedAt != null ? AppTheme.ink : AppTheme.inkHint),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('Joining date'),
+                    InkWell(
+                      onTap: () => _pickDate(isJoined: true),
+                      borderRadius: BorderRadius.circular(14),
+                      child: InputDecorator(
+                        decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
+                        child: Text(
+                          _joinedAt != null ? formatDateFromString(_joinedAt) : 'Not set',
+                          style: TextStyle(color: _joinedAt != null ? AppTheme.ink : AppTheme.inkHint),
+                        ),
                       ),
                     ),
-                  ),
+                  ]),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: InkWell(
-                    onTap: () => _pickDate(isJoined: false),
-                    borderRadius: BorderRadius.circular(10),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Next payment date', suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
-                      child: Text(
-                        _nextPaymentDate != null ? formatDateFromString(_nextPaymentDate) : 'Not set',
-                        style: TextStyle(color: _nextPaymentDate != null ? AppTheme.ink : AppTheme.inkHint),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('Next payment'),
+                    InkWell(
+                      onTap: () => _pickDate(isJoined: false),
+                      borderRadius: BorderRadius.circular(14),
+                      child: InputDecorator(
+                        decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
+                        child: Text(
+                          _nextPaymentDate != null ? formatDateFromString(_nextPaymentDate) : 'Not set',
+                          style: TextStyle(color: _nextPaymentDate != null ? AppTheme.ink : AppTheme.inkHint),
+                        ),
                       ),
                     ),
-                  ),
+                  ]),
                 ),
               ],
             ),
             if (_nextPaymentDate != null) ...[
-              const SizedBox(height: 12),
-              const Text('Payment Interval', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [1, 2, 3, 6, 12].map((m) {
-                  final selected = _billingIntervalMonths == m;
-                  return GestureDetector(
-                    onTap: () => setState(() => _billingIntervalMonths = m),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: selected ? AppTheme.ink : Colors.transparent,
-                        border: Border.all(color: selected ? AppTheme.ink : AppTheme.border),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        _intervalLabel(m),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: selected ? Colors.white : AppTheme.ink,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+              const SizedBox(height: 14),
+              const FieldLabel('Payment interval'),
+              SizedBox(
+                height: 40,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: 5,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final months = [1, 2, 3, 6, 12][i];
+                    return PillChip(
+                      label: _intervalLabel(months),
+                      selected: _billingIntervalMonths == months,
+                      onTap: () => setState(() => _billingIntervalMonths = months),
+                    );
+                  },
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 'Invoices will be generated every ${_intervalLabel(_billingIntervalMonths).toLowerCase()} starting ${formatDateFromString(_nextPaymentDate)}.',
-                style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
+                style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Status'),
             DropdownButtonFormField<String>(
               value: _status,
-              decoration: const InputDecoration(labelText: 'Status'),
               items: ['active', 'frozen', 'expired', 'cancelled']
                   .map((s) => DropdownMenuItem(value: s, child: Text(s[0].toUpperCase() + s.substring(1))))
                   .toList(),
               onChanged: (v) => setState(() => _status = v!),
             ),
-            const SizedBox(height: 12),
-            TextFormField(controller: _notesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Notes')),
+            const SizedBox(height: 14),
+            const FieldLabel('Notes'),
+            TextFormField(controller: _notesCtrl, maxLines: 2),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _loading ? null : _save,
               child: _loading
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Save Changes'),
+                  : const Text('Save changes'),
             ),
           ],
         ),
@@ -1556,3 +1677,179 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   }
 }
 
+// ── Diet plan tile ────────────────────────────────────────────────────────────
+
+class _ActionRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+  final String label;
+  final Color? labelColor;
+  final VoidCallback? onTap;
+
+  const _ActionRow({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.label,
+    this.labelColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(11)),
+            child: Icon(icon, size: 17, color: iconColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: onTap == null ? AppTheme.inkHint : (labelColor ?? AppTheme.ink),
+              ),
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
+        ]),
+      ),
+    );
+  }
+}
+
+class _QuickLinkRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+  final String label;
+  final String summary;
+  final VoidCallback onTap;
+
+  const _QuickLinkRow({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.label,
+    required this.summary,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, size: 18, color: iconColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(label,
+              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(summary,
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+          ),
+          const SizedBox(width: 4),
+          const Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── Payment history page ──────────────────────────────────────────────────────
+
+class _PaymentHistoryPage extends ConsumerWidget {
+  final String memberId;
+  final String memberName;
+  const _PaymentHistoryPage({required this.memberId, required this.memberName});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final invoices = ref.watch(_memberInvoicesProvider(memberId));
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(title: Text(memberName, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      body: invoices.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (list) {
+          if (list.isEmpty) {
+            return const Center(child: Text('No payments yet',
+              style: TextStyle(color: AppTheme.inkHint)));
+          }
+          return ListView(
+            padding: const EdgeInsets.all(14),
+            children: [
+              Container(
+                decoration: AppTheme.cardDecoration(),
+                child: Column(
+                  children: list.asMap().entries.map((e) {
+                    final inv = e.value;
+                    final status = inv['status'] as String? ?? 'open';
+                    final isPaid = status == 'paid';
+                    final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
+                    final dateStr = isPaid
+                        ? inv['paid_at'] as String?
+                        : inv['due_at'] as String?;
+                    return Container(
+                      decoration: BoxDecoration(
+                        border: e.key == list.length - 1
+                            ? null
+                            : const Border(bottom: BorderSide(color: AppTheme.border, width: 0.7)),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Row(children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(
+                              inv['description'] as String? ?? 'Membership payment',
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                            if (dateStr != null) ...[
+                              const SizedBox(height: 2),
+                              Text('${isPaid ? 'Paid' : 'Due'} ${formatDateFromString(dateStr)}',
+                                style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                            ],
+                          ]),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                          Text(formatCurrency(amount),
+                            style: AppTheme.numberStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 3),
+                          if (isPaid)
+                            StatusPill.active(label: 'Paid')
+                          else
+                            StatusPill.warn(label: status[0].toUpperCase() + status.substring(1)),
+                        ]),
+                      ]),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}

@@ -90,7 +90,7 @@ class PortalHomeScreen extends ConsumerWidget {
         ],
       ),
       body: RefreshIndicator(
-        color: AppTheme.ink,
+        color: AppTheme.accent,
         onRefresh: () async {
           ref.invalidate(memberRecordProvider);
           ref.invalidate(_memberCheckInsProvider);
@@ -196,37 +196,35 @@ class _GreetingHeader extends StatelessWidget {
         statusFg = AppTheme.statusNeutral;
     }
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: AppTheme.cardDecoration(),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$greeting,',
-                  style: const TextStyle(fontSize: 13, color: AppTheme.inkHint, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  firstName,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.ink),
-                ),
-              ],
-            ),
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$greeting,',
+                style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                firstName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.4),
+              ),
+            ],
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(20)),
-            child: Text(
-              status[0].toUpperCase() + status.substring(1),
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusFg),
-            ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(999)),
+          child: Text(
+            status[0].toUpperCase() + status.substring(1),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusFg),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -286,14 +284,14 @@ class _MembershipStatusCard extends StatelessWidget {
     }
 
     return Container(
-      decoration: AppTheme.cardDecoration(),
+      decoration: AppTheme.darkCardDecoration(),
       child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             child: Row(
               children: [
-                const Text('Your Membership', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF212121))),
+                const Text('Your membership', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.onDarkSoft)),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -306,7 +304,7 @@ class _MembershipStatusCard extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1, color: AppTheme.border),
+          Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 16), color: Colors.white.withValues(alpha: 0.08)),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -315,11 +313,11 @@ class _MembershipStatusCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(planName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                    Text(planName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.onDark)),
                     if (price != null && billingInterval != null)
                       Text(
                         '${formatCurrency(price is num ? price : num.tryParse(price.toString()) ?? 0)} / $billingInterval',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft),
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft),
                       ),
                   ],
                 ),
@@ -339,7 +337,7 @@ class _MembershipStatusCard extends StatelessWidget {
                         child: _MsDetailCell(
                           label: 'Days left',
                           value: daysLeft > 0 ? '$daysLeft' : 'Expired',
-                          valueColor: daysLeft <= 7 ? AppTheme.statusDanger : daysLeft <= 14 ? AppTheme.statusWarn : AppTheme.statusActive,
+                          valueColor: daysLeft <= 7 ? const Color(0xFFF2A08B) : daysLeft <= 14 ? const Color(0xFFE7C77C) : AppTheme.mintOnDark,
                         ),
                       ),
                   ],
@@ -365,11 +363,15 @@ class _MsDetailCell extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.inkHint, fontWeight: FontWeight.w500)),
+        Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.onDarkSoft, fontWeight: FontWeight.w500)),
         const SizedBox(height: 2),
         Text(
           value,
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: valueColor ?? AppTheme.ink),
+          style: TextStyle(
+            fontSize: 13.5, fontWeight: FontWeight.w800,
+            fontFeatures: AppTheme.tabularFigures,
+            color: valueColor ?? AppTheme.onDark,
+          ),
         ),
       ],
     );
@@ -431,11 +433,11 @@ class _QuickStatsRow extends StatelessWidget {
                 Container(
                   width: 36,
                   height: 36,
-                  decoration: const BoxDecoration(color: Color(0xFFF0F0F0), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(12)),
                   child: const Icon(Icons.calendar_today_outlined, size: 18, color: AppTheme.inkSoft),
                 ),
                 const SizedBox(height: 10),
-                Text('$monthVisits', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: Color(0xFF8a6800))),
+                Text('$monthVisits', style: AppTheme.numberStyle(fontSize: 24)),
                 const SizedBox(height: 2),
                 const Text('This month', style: TextStyle(fontSize: 12, color: AppTheme.inkHint, fontWeight: FontWeight.w500)),
               ],
@@ -453,11 +455,11 @@ class _QuickStatsRow extends StatelessWidget {
                 Container(
                   width: 36,
                   height: 36,
-                  decoration: const BoxDecoration(color: Color(0xFFFFF3E0), shape: BoxShape.circle),
-                  child: const Icon(Icons.local_fire_department_outlined, size: 18, color: AppTheme.statusWarn),
+                  decoration: BoxDecoration(color: AppTheme.accentSoft, borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.local_fire_department_outlined, size: 18, color: AppTheme.accent),
                 ),
                 const SizedBox(height: 10),
-                Text('$streak', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: Color(0xFF8a6800))),
+                Text('$streak', style: AppTheme.numberStyle(fontSize: 24)),
                 const SizedBox(height: 2),
                 const Text('Day streak', style: TextStyle(fontSize: 12, color: AppTheme.inkHint, fontWeight: FontWeight.w500)),
               ],
@@ -492,7 +494,7 @@ class _QuickLinksGrid extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 14, 16, 14),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('Quick Access', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF212121))),
+              child: Text('Quick Access', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
             ),
           ),
           const Divider(height: 1, color: AppTheme.border),
@@ -575,7 +577,7 @@ class _RecentCheckInsCard extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 14, 16, 14),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('Recent Check-ins', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF212121))),
+              child: Text('Recent Check-ins', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
             ),
           ),
           const Divider(height: 1, color: AppTheme.border),

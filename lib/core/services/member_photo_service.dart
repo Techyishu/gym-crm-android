@@ -1,43 +1,52 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// The member-photos bucket is private: stored values are storage paths
-/// (legacy rows may still hold full public URLs) and must be resolved to a
-/// short-lived signed URL before rendering.
+/// Member photos are served by a Cloudflare Worker backed by R2 (not
+/// Supabase Storage — moved off it to avoid Supabase egress billing). The
+/// Worker checks the caller's gym_id against the path's gymId prefix in
+/// place of the RLS check Supabase Storage used to do, so every request
+/// must carry the user's current Supabase access token.
 class MemberPhotoService {
   MemberPhotoService._();
 
-  static const _bucket = 'member-photos';
-  static const _signedUrlExpiry = 3600; // seconds
-  static const _cacheTtl = Duration(minutes: 55);
+  static const _workerBase = 'https://gym-crm-photo-proxy.ishansingh687.workers.dev';
 
-  static final Map<String, (DateTime, Future<String?>)> _cache = {};
-
-  /// Resolves a stored avatar value (path or legacy public URL) to a signed
-  /// URL. Results are cached below the signed-URL expiry and shared between
-  /// concurrent callers, so lists don't re-sign per row.
-  static Future<String?> signedUrl(String? stored) {
+  /// Builds the Worker URL for a stored avatar value. Accepts plain paths
+  /// ('gymId/file.png') and legacy Supabase public/signed URLs.
+  static String? photoUrl(String? stored) {
     final path = pathFrom(stored);
-    if (path == null) return Future.value(null);
-
-    final hit = _cache[path];
-    if (hit != null && DateTime.now().difference(hit.$1) < _cacheTtl) {
-      return hit.$2;
-    }
-
-    final future = Supabase.instance.client.storage
-        .from(_bucket)
-        .createSignedUrl(path, _signedUrlExpiry)
-        .then<String?>((url) => url)
-        .catchError((_) {
-      _cache.remove(path);
-      return null;
-    });
-    _cache[path] = (DateTime.now(), future);
-    return future;
+    if (path == null) return null;
+    return '$_workerBase/$path';
   }
 
-  /// Extracts the storage path from a stored value. Accepts plain paths
-  /// ('gymId/file.png') and legacy public/signed URLs.
+  /// Auth header required by the Worker on every request.
+  static Map<String, String> authHeaders() {
+    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    if (token == null) return {};
+    return {'Authorization': 'Bearer $token'};
+  }
+
+  /// Uploads photo bytes to the given storage path via the Worker.
+  static Future<void> upload({
+    required String path,
+    required List<int> bytes,
+    required String contentType,
+  }) async {
+    final res = await http.put(
+      Uri.parse('$_workerBase/$path'),
+      headers: {...authHeaders(), 'Content-Type': contentType},
+      body: bytes,
+    );
+    if (res.statusCode != 204) {
+      throw Exception('Photo upload failed (${res.statusCode})');
+    }
+    // path is a stable per-member key for re-uploads (member_detail_screen),
+    // so evict it or every CachedNetworkImage keyed on this path keeps
+    // serving the old bytes until the disk cache naturally expires.
+    await CachedNetworkImage.evictFromCache('$_workerBase/$path', cacheKey: path);
+  }
+
   static String? pathFrom(String? stored) {
     if (stored == null || stored.isEmpty) return null;
     if (!stored.startsWith('http')) return stored;

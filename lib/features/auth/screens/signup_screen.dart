@@ -738,7 +738,7 @@ class _ErrorBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.statusDangerBg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFECACA)),
+        border: Border.all(color: const Color(0xFFEBC0B2)),
       ),
       child: Row(
         children: [

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/gym_class.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
@@ -117,11 +118,18 @@ String _formatTime(DateTime dt) {
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
-class ClassesScreen extends ConsumerWidget {
+class ClassesScreen extends ConsumerStatefulWidget {
   const ClassesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ClassesScreen> createState() => _ClassesScreenState();
+}
+
+class _ClassesScreenState extends ConsumerState<ClassesScreen> {
+  late int _selectedDay = DateTime.now().weekday; // 1=Mon … 7=Sun
+
+  @override
+  Widget build(BuildContext context) {
     final classesAsync = ref.watch(_classesProvider);
     final sessionsAsync = ref.watch(_upcomingSessionsProvider);
 
@@ -139,10 +147,23 @@ class ClassesScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Batches'),
+        title: const Text('Classes'),
         leading: const BackButton(),
         actions: [
-          IconButton(icon: const Icon(Icons.add), onPressed: openAddSheet),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: GestureDetector(
+              onTap: openAddSheet,
+              child: Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.accent,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.add, size: 22, color: Colors.white),
+              ),
+            ),
+          ),
         ],
       ),
       body: classesAsync.when(
@@ -158,15 +179,31 @@ class ClassesScreen extends ConsumerWidget {
             orElse: () => <String, List<ClassSession>>{},
           );
 
+          // Classes with no schedule days always show; others only on their days.
+          final visible = classes.where((c) =>
+              c.scheduleDays.isEmpty || c.scheduleDays.contains(_selectedDay)).toList();
+
           return RefreshIndicator(
+            color: AppTheme.accent,
             onRefresh: () async {
               ref.invalidate(_classesProvider);
               ref.invalidate(_upcomingSessionsProvider);
             },
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              itemCount: classes.length,
-              itemBuilder: (_, i) => _ClassCard(
+              itemCount: visible.length + 1,
+              itemBuilder: (_, idx) {
+                if (idx == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: _WeekDayStrip(
+                      selected: _selectedDay,
+                      onSelect: (d) => setState(() => _selectedDay = d),
+                    ),
+                  );
+                }
+                final i = classes.indexOf(visible[idx - 1]);
+                return _ClassCard(
                 gymClass: classes[i],
                 sessions: sessionMap[classes[i].id] ?? [],
                 onEdit: () =>
@@ -206,28 +243,12 @@ class ClassesScreen extends ConsumerWidget {
                       _BatchEnrollmentSheet(gymClass: classes[i]),
                 ),
                 onDelete: () async {
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Delete batch'),
-                      content: Text(
-                        'Delete "${classes[i].name}"? All sessions and enrollments will also be removed. This cannot be undone.',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.statusDanger,
-                            foregroundColor: Colors.white,
-                          ),
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text('Delete'),
-                        ),
-                      ],
-                    ),
+                  final confirmed = await showConfirmDialog(
+                    context,
+                    title: 'Delete batch',
+                    body: 'Delete "${classes[i].name}"? All sessions and enrollments will also be removed. This cannot be undone.',
+                    confirmLabel: 'Delete',
+                    icon: Icons.delete_outline,
                   );
                   if (confirmed != true) return;
                   try {
@@ -245,10 +266,65 @@ class ClassesScreen extends ConsumerWidget {
                     }
                   }
                 },
-              ),
+              );
+              },
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ── Week day strip ────────────────────────────────────────────────────────────
+
+class _WeekDayStrip extends StatelessWidget {
+  final int selected; // 1=Mon … 7=Sun
+  final ValueChanged<int> onSelect;
+  const _WeekDayStrip({required this.selected, required this.onSelect});
+
+  static const _labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final monday = now.subtract(Duration(days: now.weekday - 1));
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: List.generate(7, (i) {
+          final day = i + 1;
+          final date = monday.add(Duration(days: i));
+          final isSel = day == selected;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => onSelect(day),
+              child: Container(
+                width: 52,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSel ? AppTheme.accent : AppTheme.surface,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(children: [
+                  Text(_labels[i],
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: isSel ? Colors.white : AppTheme.inkHint,
+                    )),
+                  const SizedBox(height: 2),
+                  Text('${date.day}',
+                    style: AppTheme.numberStyle(
+                      fontSize: 16,
+                      color: isSel ? Colors.white : AppTheme.ink,
+                    )),
+                ]),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -354,63 +430,36 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Add Session — ${widget.gymClass.name}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                  color: AppTheme.ink,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
+          SheetHeader(title: 'Add session', subtitle: widget.gymClass.name),
+          const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
-                child: InkWell(
-                  onTap: _pickDate,
-                  borderRadius: BorderRadius.circular(10),
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Date',
-                      suffixIcon: Icon(Icons.calendar_today_outlined, size: 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const FieldLabel('Date'),
+                  InkWell(
+                    onTap: _pickDate,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InputDecorator(
+                      decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
+                      child: Text(formatDateFromString(_date.toIso8601String())),
                     ),
-                    child: Text(formatDateFromString(_date.toIso8601String())),
                   ),
-                ),
+                ]),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: InkWell(
-                  onTap: _pickTime,
-                  borderRadius: BorderRadius.circular(10),
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Start time',
-                      suffixIcon: Icon(Icons.access_time_outlined, size: 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const FieldLabel('Time'),
+                  InkWell(
+                    onTap: _pickTime,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InputDecorator(
+                      decoration: const InputDecoration(suffixIcon: Icon(Icons.access_time_outlined, size: 16)),
+                      child: Text(_start.format(context)),
                     ),
-                    child: Text(_start.format(context)),
                   ),
-                ),
+                ]),
               ),
             ],
           ),
@@ -426,7 +475,7 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
                       strokeWidth: 2,
                     ),
                   )
-                : const Text('Add Session'),
+                : const Text('Add session'),
           ),
         ],
       ),
@@ -571,9 +620,46 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                                 color: AppTheme.inkSoft,
                               ),
                             ),
+                            const Spacer(),
+                            Builder(builder: (context) {
+                              final enrolled = _enrolledCount(ref);
+                              final full = cls.capacity > 0 && enrolled >= cls.capacity;
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: full ? AppTheme.statusWarnBg : AppTheme.statusActiveBg,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '$enrolled/${cls.capacity}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    fontFeatures: AppTheme.tabularFigures,
+                                    color: full ? AppTheme.statusWarn : AppTheme.statusActive,
+                                  ),
+                                ),
+                              );
+                            }),
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(99),
+                          child: LinearProgressIndicator(
+                            value: cls.capacity > 0
+                                ? (_enrolledCount(ref) / cls.capacity).clamp(0.0, 1.0)
+                                : 0,
+                            minHeight: 5,
+                            backgroundColor: AppTheme.surface2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              cls.capacity > 0 && _enrolledCount(ref) >= cls.capacity
+                                  ? AppTheme.statusWarn
+                                  : AppTheme.statusActive,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
 
                         // Schedule info
                         Row(
@@ -1030,47 +1116,18 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Handle
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.border,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _isEdit ? 'Edit Batch' : 'New Batch',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 17,
-                      color: AppTheme.ink,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
+              SheetHeader(title: _isEdit ? 'Edit class' : 'Add class'),
+              const SizedBox(height: 18),
+              const FieldLabel('Class name'),
               TextFormField(
                 controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Class name *'),
                 validator: (v) =>
                     (v?.trim().isEmpty ?? true) ? 'Required' : null,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
+              const FieldLabel('Type'),
               DropdownButtonFormField<String>(
                 value: _type,
-                decoration: const InputDecoration(labelText: 'Type'),
                 items: _classTypes
                     .map(
                       (t) => DropdownMenuItem(
@@ -1081,67 +1138,60 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                     .toList(),
                 onChanged: (v) => setState(() => _type = v!),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _trainerCtrl,
-                decoration: const InputDecoration(labelText: 'Trainer name'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _capacityCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Capacity'),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
-                    child: InkWell(
-                      onTap: () => _pickTime(true),
-                      borderRadius: BorderRadius.circular(10),
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Start time',
-                          suffixIcon: Icon(
-                            Icons.access_time_outlined,
-                            size: 16,
-                          ),
-                        ),
-                        child: Text(_formatTod(_startTime)),
-                      ),
-                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const FieldLabel('Coach'),
+                      TextFormField(controller: _trainerCtrl),
+                    ]),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: InkWell(
-                      onTap: () => _pickTime(false),
-                      borderRadius: BorderRadius.circular(10),
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'End time',
-                          suffixIcon: Icon(
-                            Icons.access_time_outlined,
-                            size: 16,
-                          ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const FieldLabel('Capacity'),
+                      TextFormField(controller: _capacityCtrl, keyboardType: TextInputType.number),
+                    ]),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const FieldLabel('Time'),
+                      InkWell(
+                        onTap: () => _pickTime(true),
+                        borderRadius: BorderRadius.circular(14),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(suffixIcon: Icon(Icons.access_time_outlined, size: 16)),
+                          child: Text(_formatTod(_startTime)),
                         ),
-                        child: Text(_formatTod(_endTime)),
                       ),
-                    ),
+                    ]),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const FieldLabel('Duration'),
+                      InkWell(
+                        onTap: () => _pickTime(false),
+                        borderRadius: BorderRadius.circular(14),
+                        child: InputDecorator(
+                          decoration: const InputDecoration(suffixIcon: Icon(Icons.access_time_outlined, size: 16)),
+                          child: Text(_formatTod(_endTime)),
+                        ),
+                      ),
+                    ]),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
 
               // Runs-on day selector (drives auto-generated sessions)
-              const Text(
-                'Runs on',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.inkSoft,
-                ),
-              ),
-              const SizedBox(height: 10),
+              const FieldLabel('Runs on'),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: _days.map((d) {
@@ -1157,11 +1207,8 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                       height: 38,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: active ? AppTheme.ink : AppTheme.surface,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: active ? AppTheme.ink : AppTheme.border,
-                        ),
+                        color: active ? AppTheme.accent : AppTheme.surface2,
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         d.$2,
@@ -1181,21 +1228,13 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                   _scheduleDays.isEmpty
                       ? 'No days selected — add sessions manually from the calendar.'
                       : '${_scheduleDays.length} day${_scheduleDays.length > 1 ? 's' : ''} selected',
-                  style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                  style: const TextStyle(fontSize: 11.5, color: AppTheme.inkHint),
                 ),
               ),
               const SizedBox(height: 16),
 
               // Color picker
-              const Text(
-                'Colour',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.inkSoft,
-                ),
-              ),
-              const SizedBox(height: 10),
+              const FieldLabel('Colour'),
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
@@ -1233,15 +1272,9 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                   );
                 }).toList(),
               ),
-              const SizedBox(height: 12),
-
-              TextFormField(
-                controller: _descCtrl,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Description (optional)',
-                ),
-              ),
+              const SizedBox(height: 14),
+              const FieldLabel('Description (optional)'),
+              TextFormField(controller: _descCtrl, maxLines: 2),
               const SizedBox(height: 20),
 
               ElevatedButton(
@@ -1255,7 +1288,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                           strokeWidth: 2,
                         ),
                       )
-                    : Text(_isEdit ? 'Save Changes' : 'Create Batch'),
+                    : Text(_isEdit ? 'Save changes' : 'Save class'),
               ),
             ],
           ),
@@ -1393,26 +1426,12 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
   }
 
   Future<void> _remove(String memberId, String name) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Remove from batch'),
-        content: Text('Remove $name from ${widget.gymClass.name}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.statusDanger,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Remove from batch',
+      body: 'Remove $name from ${widget.gymClass.name}?',
+      confirmLabel: 'Remove',
+      icon: Icons.person_remove_outlined,
     );
     if (confirmed != true) return;
 
@@ -1479,53 +1498,30 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
               child: Container(
                 width: 36,
                 height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: AppTheme.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
             Row(
               children: [
-                Container(
-                  width: 4,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: _parseColor(widget.gymClass.color),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Members · ${widget.gymClass.name}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                          color: AppTheme.ink,
-                        ),
-                      ),
-                      Text(
-                        enrollmentsAsync.maybeWhen(
-                          data: (rows) =>
-                              '${rows.length} member${rows.length != 1 ? 's' : ''} enrolled',
-                          orElse: () => '…',
-                        ),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.inkSoft,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    widget.gymClass.name,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: AppTheme.ink),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
+                enrollmentsAsync.maybeWhen(
+                  data: (rows) {
+                    final cap = widget.gymClass.capacity;
+                    final full = cap > 0 && rows.length >= cap;
+                    return full
+                        ? StatusPill.warn(label: '${rows.length}/$cap full')
+                        : StatusPill.active(label: '${rows.length}/$cap');
+                  },
+                  orElse: () => const SizedBox.shrink(),
                 ),
               ],
             ),
@@ -1535,28 +1531,18 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
               controller: _searchCtrl,
               enabled: !_loadingMembers,
               decoration: InputDecoration(
-                labelText: _loadingMembers ? 'Loading members…' : 'Add member',
-                hintText: 'Search by name or phone',
+                hintText: _loadingMembers ? 'Loading members…' : 'Search members',
                 prefixIcon: const Icon(Icons.search, size: 18),
               ),
               onChanged: (v) => setState(() => _search = v),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Add member',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
                     if (_loadingMembers)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 16),
@@ -1569,61 +1555,39 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                           query.isEmpty
                               ? 'All members are already enrolled.'
                               : 'No members found',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppTheme.inkSoft,
-                          ),
+                          style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
                         ),
                       )
                     else
-                      for (final m in results)
-                        ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            '${m['first_name']} ${m['last_name']}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          subtitle: Text(
-                            (m['phone'] as String?) ??
-                                (m['email'] as String?) ??
-                                '—',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.inkSoft,
-                            ),
-                          ),
-                          trailing: _busyMemberId == m['id']
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : IconButton(
-                                  icon: const Icon(
-                                    Icons.person_add_outlined,
-                                    size: 20,
-                                  ),
-                                  onPressed: () => _enroll(m),
-                                ),
-                        ),
-                    const SizedBox(height: 12),
-                    const Divider(),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Enrolled members',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.ink,
+                      CardList(
+                        children: results.map((m) {
+                          final name = '${m['first_name']} ${m['last_name']}';
+                          final busy = _busyMemberId == m['id'];
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            child: Row(children: [
+                              InitialsAvatar(name: name, size: 38),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(name,
+                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                              ),
+                              busy
+                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : RoundIconButton(
+                                      icon: Icons.add,
+                                      bg: AppTheme.accentSoft,
+                                      fg: AppTheme.accent,
+                                      size: 34,
+                                      onTap: () => _enroll(m),
+                                    ),
+                            ]),
+                          );
+                        }).toList(),
                       ),
-                    ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 20),
+                    const SectionHeader(title: 'Enrolled'),
+                    const SizedBox(height: 10),
                     ...enrollmentsAsync.maybeWhen(
                       data: (rows) {
                         if (rows.isEmpty) {
@@ -1632,59 +1596,42 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                               padding: EdgeInsets.symmetric(vertical: 12),
                               child: Text(
                                 'No members enrolled yet — add one above.',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: AppTheme.inkSoft,
-                                ),
+                                style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
                               ),
                             ),
                           ];
                         }
-                        return rows.map((row) {
-                          final member =
-                              row['members'] as Map<String, dynamic>?;
-                          if (member == null) return const SizedBox.shrink();
-                          final memberId = member['id'] as String;
-                          final name =
-                              '${member['first_name']} ${member['last_name']}';
-                          final busy = _busyMemberId == memberId;
-                          return ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text(
-                              name,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            subtitle: Text(
-                              (member['phone'] as String?) ??
-                                  (member['email'] as String?) ??
-                                  '—',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.inkSoft,
-                              ),
-                            ),
-                            trailing: busy
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : IconButton(
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      size: 20,
-                                      color: AppTheme.statusDanger,
-                                    ),
-                                    onPressed: () => _remove(memberId, name),
+                        return [
+                          CardList(
+                            children: rows.map((row) {
+                              final member = row['members'] as Map<String, dynamic>?;
+                              if (member == null) return const SizedBox.shrink();
+                              final memberId = member['id'] as String;
+                              final name = '${member['first_name']} ${member['last_name']}';
+                              final busy = _busyMemberId == memberId;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Row(children: [
+                                  InitialsAvatar(name: name, size: 38),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(name,
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
                                   ),
-                          );
-                        }).toList();
+                                  busy
+                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                      : RoundIconButton(
+                                          icon: Icons.close,
+                                          bg: AppTheme.statusDangerBg,
+                                          fg: AppTheme.statusDanger,
+                                          size: 34,
+                                          onTap: () => _remove(memberId, name),
+                                        ),
+                                ]),
+                              );
+                            }).toList(),
+                          ),
+                        ];
                       },
                       orElse: () => [],
                     ),

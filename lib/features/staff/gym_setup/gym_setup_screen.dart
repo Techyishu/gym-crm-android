@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class GymSetupScreen extends ConsumerStatefulWidget {
@@ -167,7 +168,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                   decoration: BoxDecoration(
-                      color: AppTheme.ink, borderRadius: BorderRadius.circular(10)),
+                      color: AppTheme.accent, borderRadius: BorderRadius.circular(14)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: const [
@@ -285,36 +286,12 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                             runSpacing: 8,
                             children: _gymTypes.map((t) {
                               final sel = _gymType == t.$1;
-                              return GestureDetector(
+                              return PillChip(
+                                label: '${t.$2}  ${t.$3}',
+                                selected: sel,
                                 onTap: () => setState(() {
                                   _gymType = sel ? '' : t.$1;
                                 }),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: sel ? AppTheme.ink : AppTheme.background,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                        color:
-                                            sel ? AppTheme.ink : AppTheme.border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(t.$2,
-                                          style: const TextStyle(fontSize: 14)),
-                                      const SizedBox(width: 6),
-                                      Text(t.$3,
-                                          style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: sel
-                                                  ? Colors.white
-                                                  : AppTheme.ink)),
-                                    ],
-                                  ),
-                                ),
                               );
                             }).toList(),
                           ),
@@ -367,7 +344,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                 decoration: BoxDecoration(
-                    color: AppTheme.ink, borderRadius: BorderRadius.circular(10)),
+                    color: AppTheme.accent, borderRadius: BorderRadius.circular(14)),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: const [
@@ -411,9 +388,9 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                           width: 24,
                           decoration: BoxDecoration(
                             color: done || active
-                                ? AppTheme.ink
+                                ? AppTheme.accent
                                 : AppTheme.surface2,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           alignment: Alignment.center,
                           child: done

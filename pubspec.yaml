@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.0+19
+version: 1.0.0+31
 
 environment:
   sdk: ^3.10.7
@@ -25,11 +25,14 @@ dependencies:
   shimmer: ^3.0.0
 
   # QR code scanning & generation
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.2.0
   qr_flutter: ^4.1.0
 
   # Charts
   fl_chart: ^0.69.2
+
+  # Guided tour tooltips (coach marks)
+  showcaseview: ^5.1.0
 
   # Utils
   intl: ^0.19.0
@@ -37,15 +40,24 @@ dependencies:
   file_picker: ^8.1.6
   url_launcher: ^6.3.1
   http: ^1.2.2
+  app_links: ^6.3.2
   share_plus: ^10.1.4
   path_provider: ^2.1.5
-  permission_handler: ^11.3.1
+  pdf: ^3.11.1
+  printing: ^5.13.2
   shared_preferences: ^2.3.3
 
   cupertino_icons: ^1.0.8
 
   # Error monitoring
   sentry_flutter: ^9.0.0
+
+  # In-App Purchase (iOS only — RevenueCat)
+  purchases_flutter: ^8.7.6
+  purchases_ui_flutter: ^8.7.6
+
+  # Push notifications
+  onesignal_flutter: ^5.3.3
 
 dev_dependencies:
   flutter_test:

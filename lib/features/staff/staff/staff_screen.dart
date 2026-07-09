@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -39,16 +40,8 @@ class StaffScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Staff'),
+        title: const Text('Staff & roles'),
         leading: const BackButton(),
-        actions: [
-          if (isOwner)
-            IconButton(
-              icon: const Icon(Icons.person_add_outlined),
-              tooltip: 'Invite staff',
-              onPressed: () => _showInviteSheet(context, ref),
-            ),
-        ],
       ),
       body: staffAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -80,6 +73,28 @@ class StaffScreen extends ConsumerWidget {
                 isSelf:   m['id'] == currentId,
                 onRemove: () => _confirmRemove(context, ref, m),
               )),
+            if (isOwner) ...[
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => _showInviteSheet(context, ref),
+                child: CustomPaint(
+                  painter: _DashedBorderPainter(),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add, size: 18, color: AppTheme.accent),
+                        SizedBox(width: 6),
+                        Text('Invite staff member',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 32),
           ],
         ),
@@ -100,21 +115,12 @@ class StaffScreen extends ConsumerWidget {
       BuildContext context, WidgetRef ref, Map<String, dynamic> member) async {
     final first = member['first_name'] as String? ?? '';
     final last  = member['last_name']  as String? ?? '';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Remove staff member'),
-        content: Text('Remove $first $last? They will lose access immediately.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.statusDanger, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Remove $first $last?',
+      body: "They'll lose access to this gym's dashboard immediately.",
+      confirmLabel: 'Remove',
+      icon: Icons.delete_outline,
     );
     if (confirmed != true || !context.mounted) return;
 
@@ -293,7 +299,7 @@ class _RoleBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final (bg, fg) = switch (role) {
       'owner'   => (const Color(0xFFF0F0F0), const Color(0xFF111111)),
-      'manager' => (const Color(0xFFFFF3E0), const Color(0xFFE65100)),
+      'manager' => (const Color(0xFFF4E8CD), const Color(0xFFB07C1F)),
       'trainer' => (const Color(0xFFF3E8FF), const Color(0xFF7C3AED)),
       _         => (AppTheme.activeBg,       AppTheme.ink),
     };
@@ -394,88 +400,51 @@ class _InviteStaffSheetState extends State<_InviteStaffSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Invite Staff Member',
-                  style: TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-          const Text(
-            'They\'ll receive an email to set their password and log in.',
-            style: TextStyle(fontSize: 13, color: AppTheme.inkSoft, height: 1.4),
-          ),
-          const SizedBox(height: 20),
+          const SheetHeader(title: 'Invite staff', subtitle: "They'll receive an email to set their password and log in."),
+          const SizedBox(height: 18),
 
           // Name row
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: _firstCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(labelText: 'First name', hintText: 'Rahul'),
-                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const FieldLabel('First name'),
+                  TextField(controller: _firstCtrl, textCapitalization: TextCapitalization.words),
+                ]),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextField(
-                  controller: _lastCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(labelText: 'Last name', hintText: 'Sharma'),
-                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const FieldLabel('Last name'),
+                  TextField(controller: _lastCtrl, textCapitalization: TextCapitalization.words),
+                ]),
               ),
             ],
           ),
           const SizedBox(height: 14),
 
-          // Email
+          const FieldLabel('Email'),
           TextField(
             controller: _emailCtrl,
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
-            decoration: const InputDecoration(
-                labelText: 'Email', hintText: 'staff@example.com'),
+            decoration: const InputDecoration(hintText: 'staff@example.com'),
           ),
           const SizedBox(height: 16),
 
           // Role chips
-          const Text('Role',
-              style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-          const SizedBox(height: 8),
+          const FieldLabel('Role'),
           Row(
-            children: _kRoles.map((r) {
-              final selected = _role == r.$1;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () => setState(() => _role = r.$1),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected ? AppTheme.ink : AppTheme.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: selected ? AppTheme.ink : AppTheme.border),
-                    ),
-                    child: Text(r.$2,
-                        style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w600,
-                          color: selected ? Colors.white : AppTheme.inkSoft,
-                        )),
-                  ),
-                ),
-              );
-            }).toList(),
+            children: _kRoles.map((r) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: PillChip(
+                label: r.$2,
+                selected: _role == r.$1,
+                onTap: () => setState(() => _role = r.$1),
+              ),
+            )).toList(),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             _kRoles.firstWhere((r) => r.$1 == _role).$3,
             style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.4),
@@ -484,10 +453,10 @@ class _InviteStaffSheetState extends State<_InviteStaffSheet> {
           if (_error != null) ...[
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                   color: AppTheme.statusDangerBg,
-                  borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(12)),
               child: Text(_error!,
                   style: const TextStyle(fontSize: 13, color: AppTheme.statusDanger)),
             ),
@@ -504,15 +473,35 @@ class _InviteStaffSheetState extends State<_InviteStaffSheet> {
                       height: 18, width: 18,
                       child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.send_outlined, size: 18),
-              label: Text(_sending ? 'Sending invite…' : 'Send Invite'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50),
-                textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-              ),
+              label: Text(_sending ? 'Sending invite…' : 'Send invite'),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+// ─── Dashed border painter (invite button) ────────────────────────────────────
+class _DashedBorderPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppTheme.inkHint
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(16));
+    final path = Path()..addRRect(rrect);
+    const dash = 6.0, gap = 5.0;
+    for (final metric in path.computeMetrics()) {
+      var dist = 0.0;
+      while (dist < metric.length) {
+        canvas.drawPath(metric.extractPath(dist, dist + dash), paint);
+        dist += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

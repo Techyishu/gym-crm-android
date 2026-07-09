@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/lead.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
 Future<void> _dialPhone(String phone) async {
@@ -72,12 +73,22 @@ class LeadsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Leads'),
+        title: const Text('Enquiries'),
         leading: const BackButton(),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add_outlined),
-            onPressed: () => _showAddSheet(context, ref),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: GestureDetector(
+              onTap: () => _showAddSheet(context, ref),
+              child: Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.accent,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.add, size: 22, color: Colors.white),
+              ),
+            ),
           ),
         ],
       ),
@@ -91,9 +102,43 @@ class LeadsScreen extends ConsumerWidget {
           for (final l in list) {
             counts[l.status] = (counts[l.status] ?? 0) + 1;
           }
+          final followUpCount = list.where((l) {
+            if (l.status == 'converted' || l.status == 'lost') return false;
+            final fu = l.followUpAt;
+            if (fu == null) return l.status == 'new';
+            final d = DateTime.tryParse(fu);
+            return d != null && !d.isAfter(DateTime.now());
+          }).length;
 
           return Column(
             children: [
+              if (followUpCount > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentSoft,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(children: [
+                      Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(13)),
+                        child: const Icon(Icons.schedule, size: 20, color: Colors.white),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('$followUpCount to follow up today',
+                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                          const Text('GymCRM tells you exactly who to call',
+                            style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                ),
               _SummaryStrip(counts: counts),
               Expanded(
                 child: RefreshIndicator(
@@ -215,8 +260,6 @@ class _LeadCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final inits = initials(lead.firstName, lead.lastName);
-
     return GestureDetector(
       onTap: () => _showStatusPicker(context),
       child: Container(
@@ -231,18 +274,7 @@ class _LeadCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Avatar
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: AppTheme.activeBg,
-                  child: Text(
-                    inits,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: AppTheme.ink,
-                    ),
-                  ),
-                ),
+                InitialsAvatar(name: lead.name, size: 44),
                 const SizedBox(width: 12),
                 // Name + source + date
                 Expanded(
@@ -308,31 +340,16 @@ class _LeadCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, size: 16, color: AppTheme.inkHint),
-                      onSelected: (v) {
+                      onSelected: (v) async {
                         if (v == 'delete') {
-                          showDialog(
-                            context: context,
-                            builder: (_) => AlertDialog(
-                              title: const Text('Delete Lead'),
-                              content: Text('Delete ${lead.name}? This cannot be undone.'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: const Text('Cancel'),
-                                ),
-                                TextButton(
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    onDelete();
-                                  },
-                                  child: const Text(
-                                    'Delete',
-                                    style: TextStyle(color: AppTheme.statusDanger),
-                                  ),
-                                ),
-                              ],
-                            ),
+                          final ok = await showConfirmDialog(
+                            context,
+                            title: 'Delete enquiry?',
+                            body: 'Delete ${lead.name}? This cannot be undone.',
+                            confirmLabel: 'Delete',
+                            icon: Icons.delete_outline,
                           );
+                          if (ok == true) onDelete();
                         }
                       },
                       itemBuilder: (_) => [
@@ -430,48 +447,52 @@ class _LeadCard extends StatelessWidget {
   void _showStatusPicker(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppTheme.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Move to stage',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.ink),
-              ),
-            ),
-          ),
-          ..._statuses.map((s) => ListTile(
-                leading: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(color: _statusFg(s), shape: BoxShape.circle),
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SheetHeader(title: 'Update status'),
+            const SizedBox(height: 16),
+            ..._statuses.map((s) {
+              final selected = s == lead.status;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    onStatusChange(s);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: selected ? AppTheme.accentSoft : AppTheme.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
+                    ),
+                    child: Row(children: [
+                      Container(
+                        width: 20, height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: selected ? AppTheme.accent : Colors.transparent,
+                          border: Border.all(color: selected ? AppTheme.accent : AppTheme.inkHint, width: 1.5),
+                        ),
+                        child: selected ? const Icon(Icons.check, size: 13, color: Colors.white) : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(_capitalize(s),
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
+                    ]),
+                  ),
                 ),
-                title: Text(
-                  _capitalize(s),
-                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-                ),
-                trailing: s == lead.status
-                    ? const Icon(Icons.check, size: 16, color: AppTheme.ink)
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  onStatusChange(s);
-                },
-              )),
-          const SizedBox(height: 16),
-        ],
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
@@ -622,69 +643,35 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Add Lead',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 17,
-                    color: AppTheme.ink,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+            const SheetHeader(title: 'Add enquiry'),
+            const SizedBox(height: 18),
             Row(
               children: [
                 Expanded(
-                  child: TextFormField(
-                    controller: _firstCtrl,
-                    decoration: const InputDecoration(labelText: 'First name *'),
-                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('First name'),
+                    TextFormField(controller: _firstCtrl),
+                  ]),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextFormField(
-                    controller: _lastCtrl,
-                    decoration: const InputDecoration(labelText: 'Last name'),
-                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const FieldLabel('Last name'),
+                    TextFormField(controller: _lastCtrl),
+                  ]),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _emailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Email'),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone'),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Phone'),
+            TextFormField(controller: _phoneCtrl, keyboardType: TextInputType.phone),
+            const SizedBox(height: 14),
+            const FieldLabel('Email'),
+            TextFormField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress),
+            const SizedBox(height: 14),
+            const FieldLabel('Source'),
             DropdownButtonFormField<String>(
               value: _source,
-              decoration: const InputDecoration(labelText: 'Source'),
               items: _sources
                   .map((s) => DropdownMenuItem(
                         value: s,
@@ -693,10 +680,10 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                   .toList(),
               onChanged: (v) => setState(() => _source = v!),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Initial status'),
             DropdownButtonFormField<String>(
               value: _status,
-              decoration: const InputDecoration(labelText: 'Initial status'),
               items: _statuses
                   .map((s) => DropdownMenuItem(
                         value: s,
@@ -705,13 +692,13 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                   .toList(),
               onChanged: (v) => setState(() => _status = v!),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            const FieldLabel('Follow-up date (optional)'),
             InkWell(
               onTap: _pickFollowUp,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(14),
               child: InputDecorator(
                 decoration: InputDecoration(
-                  labelText: 'Follow-up date (optional)',
                   suffixIcon: _followUpAt != null
                       ? IconButton(
                           icon: const Icon(Icons.clear, size: 18),
@@ -729,12 +716,9 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _notesCtrl,
-              maxLines: 2,
-              decoration: const InputDecoration(labelText: 'Notes'),
-            ),
+            const SizedBox(height: 14),
+            const FieldLabel('Notes'),
+            TextFormField(controller: _notesCtrl, maxLines: 2),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: _loading ? null : _save,
@@ -745,7 +729,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2),
                     )
-                  : const Text('Add Lead'),
+                  : const Text('Save enquiry'),
             ),
           ],
         ),

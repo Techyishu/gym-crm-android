@@ -118,12 +118,12 @@ class _InvoiceItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = invoice['status'] as String;
     final statusColors = {
-      'open': (const Color(0xFFFEF3C7), AppTheme.warning),
+      'open': (const Color(0xFFF4E8CD), AppTheme.warning),
       'paid': (AppTheme.primaryLight, AppTheme.primary),
-      'failed': (const Color(0xFFFEF2F2), AppTheme.error),
-      'void': (const Color(0xFFF1F5F9), AppTheme.textSecondary),
+      'failed': (const Color(0xFFF8DFD7), AppTheme.error),
+      'void': (const Color(0xFFE9E6DD), AppTheme.textSecondary),
     };
-    final sc = statusColors[status] ?? (const Color(0xFFF1F5F9), AppTheme.textSecondary);
+    final sc = statusColors[status] ?? (const Color(0xFFE9E6DD), AppTheme.textSecondary);
 
     return GestureDetector(
       onTap: onTap,

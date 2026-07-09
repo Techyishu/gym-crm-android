@@ -20,8 +20,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       title: 'Manage Your\nGym Smarter',
       subtitle:
           'Run memberships, schedules, billing, and staff — all from one powerful app built for gym owners.',
-      illustrationColor: Color(0xFFEFF6FF),
-      accentColor: Color(0xFF2563EB),
+      illustrationColor: Color(0xFFE9E6DD),
+      accentColor: Color(0xFF2C6E7A),
       iconData: Icons.fitness_center_rounded,
       badgeItems: [
         _BadgeItem(Icons.people_rounded, '142 Members'),
@@ -33,8 +33,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       title: 'Track Every\nMember Visit',
       subtitle:
           'Instant QR-code check-ins, member profiles with photos, and real-time attendance logs.',
-      illustrationColor: Color(0xFFF0FDF4),
-      accentColor: Color(0xFF059669),
+      illustrationColor: Color(0xFFDDEFE2),
+      accentColor: Color(0xFF2E7D4F),
       iconData: Icons.qr_code_scanner_rounded,
       badgeItems: [
         _BadgeItem(Icons.check_circle_rounded, '23 Today'),
@@ -46,8 +46,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       title: 'Grow Your\nBusiness',
       subtitle:
           'Smart invoicing, automated reminders, and a leads pipeline to convert prospects into members.',
-      illustrationColor: Color(0xFFFFFBEB),
-      accentColor: Color(0xFFD97706),
+      illustrationColor: Color(0xFFF4E8CD),
+      accentColor: Color(0xFFB07C1F),
       iconData: Icons.bar_chart_rounded,
       badgeItems: [
         _BadgeItem(Icons.receipt_rounded, '₹ Billing'),

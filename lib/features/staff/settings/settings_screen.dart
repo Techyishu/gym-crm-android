@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
 /// Public base URL for member self-registration links (matches the web app).
@@ -137,6 +139,16 @@ class SettingsScreen extends ConsumerWidget {
                   builder: (_) => const _PaymentsSheet(),
                 ),
               ),
+              _SettingsRow(
+                icon: Icons.notifications_outlined,
+                label: 'Push Reminders',
+                onTap: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  builder: (_) => const _PushRemindersSheet(),
+                ),
+              ),
               // BIOMETRIC HIDDEN — re-enable when ready to launch
               // _SettingsRow(
               //   icon: Icons.fingerprint,
@@ -155,14 +167,6 @@ class SettingsScreen extends ConsumerWidget {
             // ── APP section ──────────────────────────────────────────────────
             _SectionLabel(label: 'APP'),
             _SettingsCard(items: [
-              // SMS reminders send via the device's SMS (Android-only). iOS
-              // can't send SMS silently, so the row is hidden there.
-              if (!Platform.isIOS)
-                _SettingsRow(
-                  icon: Icons.sms_outlined,
-                  label: 'SMS Reminders',
-                  onTap: () => context.push('/staff/reminders'),
-                ),
               _SettingsRow(
                 icon: Icons.lock_outline,
                 label: 'Privacy Policy',
@@ -208,6 +212,30 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
 
+            const SizedBox(height: 12),
+
+            // ── Delete Account ────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () => _confirmDeleteAccount(context, ref),
+                  icon: const Icon(Icons.logout,
+                      color: AppTheme.statusDanger, size: 18),
+                  label: const Text(
+                    'Delete Account',
+                    style: TextStyle(
+                        color: AppTheme.statusDanger, fontSize: 13),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.statusDanger,
+                    minimumSize: const Size(double.infinity, 44),
+                  ),
+                ),
+              ),
+            ),
+
             const SizedBox(height: 40),
           ],
         ),
@@ -237,6 +265,139 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _confirmDeleteAccount(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (_) => _DeleteAccountDialog(
+        onDeleted: () => ref.read(authNotifierProvider.notifier).signOut(),
+      ),
+    );
+  }
+}
+
+// ─── Delete Account dialog ────────────────────────────────────────────────────
+class _DeleteAccountDialog extends StatefulWidget {
+  final VoidCallback onDeleted;
+  const _DeleteAccountDialog({required this.onDeleted});
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final _ctrl = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _delete() async {
+    if (_ctrl.text.trim() != 'DELETE') {
+      setState(() => _error = 'Type DELETE (all caps) to confirm');
+      return;
+    }
+
+    setState(() { _loading = true; _error = null; });
+
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) throw Exception('Not signed in');
+
+      final response = await http.delete(
+        Uri.parse('https://www.gymcrm.in/api/account/delete'),
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) Navigator.pop(context);
+        widget.onDeleted();
+      } else {
+        setState(() {
+          _error = 'Failed to delete account. Please contact support.';
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Error: $e';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 56, height: 56,
+            decoration: BoxDecoration(color: AppTheme.statusDangerBg, borderRadius: BorderRadius.circular(18)),
+            child: const Icon(Icons.delete_outline, size: 26, color: AppTheme.statusDanger),
+          ),
+          const SizedBox(height: 16),
+          const Text('Delete gym account?', textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+          const SizedBox(height: 8),
+          const Text(
+            'All member records, plans and payment history will be permanently erased.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft, height: 1.4),
+          ),
+          const SizedBox(height: 18),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            textAlign: TextAlign.center,
+            decoration: const InputDecoration(hintText: 'Type DELETE to confirm'),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: AppTheme.statusDanger, fontSize: 12)),
+          ],
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: _loading ? null : () => Navigator.pop(context),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(14)),
+                  alignment: Alignment.center,
+                  child: const Text('Cancel', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: GestureDetector(
+                onTap: _loading ? null : _delete,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(color: AppTheme.statusDanger, borderRadius: BorderRadius.circular(14)),
+                  alignment: Alignment.center,
+                  child: _loading
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Delete', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+              ),
+            ),
+          ]),
+        ]),
       ),
     );
   }
@@ -334,57 +495,67 @@ class _ProfileHeader extends StatelessWidget {
     final role      = profile['role']        as String? ?? 'staff';
     final gym       = profile['gyms']        as Map<String, dynamic>?;
 
-    return Container(
-      color: AppTheme.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 32,
-            backgroundColor: AppTheme.activeBg,
-            child: Text(
-              '${firstName.isNotEmpty ? firstName[0] : ''}${lastName.isNotEmpty ? lastName[0] : ''}'
-                  .toUpperCase(),
-              style: const TextStyle(
-                color: AppTheme.ink,
-                fontWeight: FontWeight.w700,
-                fontSize: 20,
+    final gymName = gym?['name'] as String? ?? '$firstName $lastName'.trim();
+    final gymInitials = gymName.trim().split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .take(2)
+        .map((p) => p[0].toUpperCase())
+        .join();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: AppTheme.darkCardDecoration(),
+        child: Row(
+          children: [
+            Container(
+              width: 52, height: 52,
+              decoration: BoxDecoration(
+                color: AppTheme.darkCard2,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                gymInitials.isEmpty ? '?' : gymInitials,
+                style: const TextStyle(
+                  color: AppTheme.mintOnDark,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$firstName $lastName'.trim(),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 18,
-                    color: AppTheme.ink,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  role[0].toUpperCase() + role.substring(1),
-                  style: const TextStyle(
-                    color: AppTheme.inkSoft,
-                    fontSize: 13,
-                  ),
-                ),
-                if (gym != null)
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    gym['name'] as String? ?? '',
+                    gymName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: AppTheme.inkSoft,
-                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 17,
+                      color: AppTheme.onDark,
                     ),
                   ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      '$firstName $lastName'.trim(),
+                      role[0].toUpperCase() + role.substring(1),
+                    ].where((s) => s.isNotEmpty).join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppTheme.onDarkSoft, fontSize: 12.5),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const Icon(Icons.chevron_right, color: AppTheme.onDarkSoft, size: 20),
+          ],
+        ),
       ),
     );
   }
@@ -460,37 +631,34 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
   @override
   Widget build(BuildContext context) {
     return _SheetScaffold(
-      title: 'Edit Profile',
+      title: 'Edit profile',
       child: Column(
         children: [
           if (_error != null) _ErrorBox(message: _error!),
           Row(
             children: [
               Expanded(
-                child: TextFormField(
-                  controller: _firstCtrl,
-                  decoration: const InputDecoration(labelText: 'First name'),
-                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const FieldLabel('First name'),
+                  TextFormField(controller: _firstCtrl),
+                ]),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextFormField(
-                  controller: _lastCtrl,
-                  decoration: const InputDecoration(labelText: 'Last name'),
-                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const FieldLabel('Last name'),
+                  TextFormField(controller: _lastCtrl),
+                ]),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(labelText: 'Phone (optional)'),
-          ),
+          const SizedBox(height: 14),
+          const FieldLabel('Phone (optional)'),
+          TextFormField(controller: _phoneCtrl, keyboardType: TextInputType.phone),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _loading ? null : _save,
-            child: _loading ? const _Spinner() : const Text('Save Changes'),
+            child: _loading ? const _Spinner() : const Text('Save profile'),
           ),
         ],
       ),
@@ -547,17 +715,19 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
   @override
   Widget build(BuildContext context) {
     return _SheetScaffold(
-      title: 'Change Password',
+      title: 'Change password',
       child: _done
           ? Column(
               children: [
-                const Icon(Icons.check_circle,
-                    color: AppTheme.statusActive, size: 56),
+                Container(
+                  width: 64, height: 64,
+                  decoration: BoxDecoration(color: AppTheme.statusActiveBg, borderRadius: BorderRadius.circular(20)),
+                  child: const Icon(Icons.check, color: AppTheme.statusActive, size: 30),
+                ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Password updated successfully!',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                  'Password updated',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppTheme.ink),
                 ),
                 const SizedBox(height: 20),
                 OutlinedButton(
@@ -569,11 +739,11 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
           : Column(
               children: [
                 if (_error != null) _ErrorBox(message: _error!),
+                const FieldLabel('New password'),
                 TextFormField(
                   controller: _newCtrl,
                   obscureText: _obscureNew,
                   decoration: InputDecoration(
-                    labelText: 'New password',
                     suffixIcon: IconButton(
                       icon: Icon(_obscureNew
                           ? Icons.visibility_outlined
@@ -583,12 +753,12 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
+                const FieldLabel('Confirm new password'),
                 TextFormField(
                   controller: _confirmCtrl,
                   obscureText: _obscureConfirm,
                   decoration: InputDecoration(
-                    labelText: 'Confirm new password',
                     suffixIcon: IconButton(
                       icon: Icon(_obscureConfirm
                           ? Icons.visibility_outlined
@@ -603,7 +773,7 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
                   onPressed: _loading ? null : _save,
                   child: _loading
                       ? const _Spinner()
-                      : const Text('Update Password'),
+                      : const Text('Update password'),
                 ),
               ],
             ),
@@ -632,6 +802,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   bool _initialized = false;
   File? _logoFile;
   String? _logoUrl;
+  bool _pickingLogo = false;
 
   @override
   void initState() {
@@ -657,13 +828,25 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   }
 
   Future<void> _pickLogo() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 512,
-      imageQuality: 90,
-    );
-    if (picked != null && mounted) {
-      setState(() => _logoFile = File(picked.path));
+    if (_pickingLogo) return;
+    setState(() => _pickingLogo = true);
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        imageQuality: 90,
+      );
+      if (picked != null && mounted) {
+        setState(() => _logoFile = File(picked.path));
+      }
+    } on PlatformException catch (e) {
+      if (mounted && e.code != 'already_active') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open gallery: ${e.message}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pickingLogo = false);
     }
   }
 
@@ -726,13 +909,14 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
-      title: 'Gym Details',
+      title: 'Gym details',
       child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Text('Error: $e'),
         data: (gym) {
           if (gym == null) return const Text('Gym not found');
           if (!_initialized) _seed(gym);
+          final hasLogo = _logoFile != null || (_logoUrl != null && _logoUrl!.isNotEmpty);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -741,104 +925,52 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
               Center(
                 child: GestureDetector(
                   onTap: _pickLogo,
-                  child: Stack(
-                    children: [
-                      Container(
-                        width: 96,
-                        height: 96,
-                        decoration: BoxDecoration(
-                          color: AppTheme.surface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppTheme.border),
-                          image: _logoFile != null
-                              ? DecorationImage(
-                                  image: FileImage(_logoFile!),
-                                  fit: BoxFit.cover,
-                                )
-                              : (_logoUrl != null && _logoUrl!.isNotEmpty)
-                                  ? DecorationImage(
-                                      image: NetworkImage(_logoUrl!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : null,
-                        ),
-                        child: (_logoFile == null &&
-                                (_logoUrl == null || _logoUrl!.isEmpty))
-                            ? const Icon(Icons.upload_file_outlined,
-                                size: 32, color: AppTheme.inkHint)
-                            : null,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Container(
+                      width: 84, height: 84,
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(28),
+                        border: Border.all(color: AppTheme.inkHint, width: 1.2),
+                        image: _logoFile != null
+                            ? DecorationImage(image: FileImage(_logoFile!), fit: BoxFit.cover)
+                            : (hasLogo ? DecorationImage(image: NetworkImage(_logoUrl!), fit: BoxFit.cover) : null),
                       ),
-                      Positioned(
-                        right: 4,
-                        bottom: 4,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(
-                            color: AppTheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.edit_outlined, size: 12, color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
+                      child: hasLogo ? null : const Icon(Icons.photo_camera_outlined, size: 30, color: AppTheme.inkHint),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Upload logo',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                  ]),
                 ),
               ),
-              const SizedBox(height: 6),
-              const Center(
-                child: Text('Gym Logo',
-                    style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-              ),
+              const SizedBox(height: 20),
+              const FieldLabel('Gym name'),
+              TextFormField(controller: _nameCtrl),
+              const SizedBox(height: 14),
+              const FieldLabel('Address (optional)'),
+              TextFormField(controller: _addressCtrl),
+              const SizedBox(height: 14),
+              const FieldLabel('Phone (optional)'),
+              TextFormField(controller: _phoneCtrl, keyboardType: TextInputType.phone),
+              const SizedBox(height: 14),
+              const FieldLabel('Website URL (optional)'),
+              TextFormField(controller: _websiteCtrl, keyboardType: TextInputType.url, decoration: const InputDecoration(hintText: 'https://')),
+              const SizedBox(height: 14),
+              const FieldLabel('Description (optional)'),
+              TextFormField(controller: _descCtrl, maxLines: 2),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Gym name *'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _addressCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'Address (optional)'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Phone (optional)'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _websiteCtrl,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'Website URL (optional)',
-                  hintText: 'https://',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descCtrl,
-                maxLines: 2,
-                decoration:
-                    const InputDecoration(labelText: 'Description (optional)'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                readOnly: true,
-                initialValue: gym['slug'] as String? ?? '',
-                decoration: const InputDecoration(labelText: 'Slug (read-only)'),
-                style: const TextStyle(color: AppTheme.inkSoft),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                readOnly: true,
-                initialValue: (() {
-                  final p = gym['plan'] as String? ?? 'starter';
-                  return p[0].toUpperCase() + p.substring(1);
-                })(),
-                decoration:
-                    const InputDecoration(labelText: 'Plan (read-only)'),
-                style: const TextStyle(color: AppTheme.inkSoft),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: AppTheme.cardDecoration(),
+                child: Column(children: [
+                  _ReadOnlyRow(label: 'Slug', value: gym['slug'] as String? ?? '—'),
+                  const Divider(height: 1),
+                  _ReadOnlyRow(label: 'Plan', value: (() {
+                    final p = gym['plan'] as String? ?? 'starter';
+                    return p[0].toUpperCase() + p.substring(1);
+                  })()),
+                ]),
               ),
               const SizedBox(height: 20),
               ElevatedButton(
@@ -846,7 +978,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
                     _loading ? null : () => _save(gym['id'] as String),
                 child: _loading
                     ? const _Spinner()
-                    : const Text('Save Changes'),
+                    : const Text('Save details'),
               ),
             ],
           );
@@ -950,7 +1082,7 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
-      title: 'Payments — Razorpay',
+      title: 'Payments',
       child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Text('Error: $e'),
@@ -961,45 +1093,36 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_error != null) _ErrorBox(message: _error!),
-              if (_connected)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.statusActiveBg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppTheme.statusActive),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.check_circle, color: AppTheme.statusActive, size: 16),
-                      SizedBox(width: 8),
-                      Text('Razorpay is connected',
-                          style: TextStyle(
-                              color: AppTheme.statusActive,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 13)),
-                    ],
-                  ),
-                ),
               const Text(
-                'Connect your Razorpay account so members can pay online from the portal.',
-                style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                'Connect Razorpay to collect UPI & card payments',
+                style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft),
               ),
               const SizedBox(height: 14),
-              TextFormField(
-                controller: _keyIdCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Key ID',
-                  hintText: 'rzp_live_…',
+              if (_connected)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(color: AppTheme.statusActiveBg, borderRadius: BorderRadius.circular(14)),
+                  child: Row(children: [
+                    Container(
+                      width: 28, height: 28,
+                      decoration: BoxDecoration(color: AppTheme.statusActive, borderRadius: BorderRadius.circular(9)),
+                      child: const Icon(Icons.check, color: Colors.white, size: 16),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Connected', style: TextStyle(color: AppTheme.statusActive, fontWeight: FontWeight.w800, fontSize: 14)),
+                    ),
+                  ]),
                 ),
-              ),
-              const SizedBox(height: 12),
+              const FieldLabel('Key ID'),
+              TextFormField(controller: _keyIdCtrl, decoration: const InputDecoration(hintText: 'rzp_live_…')),
+              const SizedBox(height: 14),
+              const FieldLabel('Key secret'),
               TextFormField(
                 controller: _keySecretCtrl,
                 obscureText: !_showSecret,
                 decoration: InputDecoration(
-                  labelText: 'Key Secret',
                   hintText: _connected ? 'Enter to update' : null,
                   suffixIcon: IconButton(
                     icon: Icon(_showSecret
@@ -1014,18 +1137,15 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
                 onPressed: _saving ? null : _connect,
                 child: _saving
                     ? const _Spinner()
-                    : Text(_connected ? 'Update Keys' : 'Connect Razorpay'),
+                    : Text(_connected ? 'Update keys' : 'Connect Razorpay'),
               ),
               if (_connected) ...[
                 const SizedBox(height: 10),
-                OutlinedButton(
-                  onPressed: _saving ? null : _disconnect,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.statusDanger,
-                    side: const BorderSide(color: AppTheme.statusDanger),
-                    minimumSize: const Size(double.infinity, 50),
+                Center(
+                  child: TextButton(
+                    onPressed: _saving ? null : _disconnect,
+                    child: const Text('Disconnect account', style: TextStyle(color: AppTheme.statusDanger)),
                   ),
-                  child: const Text('Disconnect'),
                 ),
               ],
             ],
@@ -1096,16 +1216,13 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
 
   Future<void> _regenerate() async {
     if (_gymId == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Regenerate link?'),
-        content: const Text('The old link will stop working immediately.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Regenerate')),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Regenerate link?',
+      body: 'The old link will stop working immediately.',
+      confirmLabel: 'Regenerate',
+      icon: Icons.refresh,
+      danger: false,
     );
     if (ok != true) return;
     setState(() => _regenerating = true);
@@ -1135,7 +1252,7 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
-      title: 'Member Registration Link',
+      title: 'Self-registration link',
       child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Text('Error: $e'),
@@ -1146,148 +1263,75 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Status + toggle
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _enabled ? AppTheme.statusActiveBg : AppTheme.statusWarnBg,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: _enabled ? AppTheme.statusActive : AppTheme.statusWarn),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _enabled ? Icons.check_circle : Icons.warning_amber_outlined,
-                            color: _enabled ? AppTheme.statusActive : AppTheme.statusWarn,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _enabled ? 'Registration is enabled' : 'Registration is disabled',
-                              style: TextStyle(
-                                color: _enabled ? AppTheme.statusActive : AppTheme.statusWarn,
-                                fontWeight: FontWeight.w500,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Switch(
-                    value: _enabled,
-                    onChanged: _toggling ? null : (_) => _toggle(),
-                  ),
-                ],
-              ),
+              Row(children: [
+                const Expanded(
+                  child: Text('Share so new members can sign up themselves',
+                    style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft)),
+                ),
+                Switch(
+                  value: _enabled,
+                  activeThumbColor: AppTheme.accent,
+                  onChanged: _toggling ? null : (_) => _toggle(),
+                ),
+              ]),
 
               if (_enabled && _link.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Text('Shareable Link',
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                    const Spacer(),
-                    if (_formatExpiry().isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: _formatExpiry() == 'Expired'
-                              ? const Color(0xFFFFEBEE)
-                              : const Color(0xFFE8F5E9),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          _formatExpiry(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: _formatExpiry() == 'Expired'
-                                ? const Color(0xFFC62828)
-                                : const Color(0xFF2E7D32),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.background,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppTheme.border),
-                  ),
+                  padding: const EdgeInsets.all(14),
+                  decoration: AppTheme.cardDecoration(),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(_link,
-                            style: const TextStyle(
-                                fontSize: 12, color: AppTheme.inkSoft, fontFamily: 'monospace')),
+                            style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft, fontFamily: 'monospace')),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.copy, size: 18),
-                        tooltip: 'Copy link',
-                        onPressed: () {
+                      GestureDetector(
+                        onTap: () {
                           Clipboard.setData(ClipboardData(text: _link));
                           _toast('Link copied to clipboard');
                         },
+                        child: const Text('Copy',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.accent)),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => Share.share(_link, subject: 'Join our gym'),
-                        icon: const Icon(Icons.share_outlined, size: 16),
-                        label: const Text('Share'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _regenerating ? null : _regenerate,
-                        icon: _regenerating
-                            ? const SizedBox(
-                                height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.refresh, size: 16),
-                        label: const Text('Regenerate'),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 8),
+                Text(
+                  _formatExpiry().isNotEmpty
+                      ? '${_formatExpiry()} · Regenerate anytime'
+                      : 'Regenerate anytime',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 // QR code for in-person sharing
                 Center(
                   child: Container(
                     padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.border),
-                    ),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
                     child: QrImageView(
                       data: _link,
                       version: QrVersions.auto,
-                      size: 180,
+                      size: 160,
                       backgroundColor: Colors.white,
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => Share.share(_link, subject: 'Join our gym'),
+                  child: const Text('Share link'),
+                ),
                 const SizedBox(height: 8),
-                const Center(
-                  child: Text('Members can scan this to register',
-                      style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: _regenerating ? null : _regenerate,
+                    icon: _regenerating
+                        ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.refresh, size: 16),
+                    label: const Text('Regenerate link'),
+                  ),
                 ),
               ] else ...[
                 const SizedBox(height: 12),
@@ -1296,6 +1340,119 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
                   style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
                 ),
               ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Push Reminders sheet ─────────────────────────────────────────────────────
+const _kPushReminderDayOptions = [1, 2, 3, 5, 7, 14];
+
+class _PushRemindersSheet extends ConsumerStatefulWidget {
+  const _PushRemindersSheet();
+
+  @override
+  ConsumerState<_PushRemindersSheet> createState() => _PushRemindersSheetState();
+}
+
+class _PushRemindersSheetState extends ConsumerState<_PushRemindersSheet> {
+  String? _gymId;
+  bool _enabled = false;
+  Set<int> _days = {};
+  bool _saving = false;
+  bool _seeded = false;
+
+  void _seed(Map<String, dynamic> gym) {
+    if (_seeded) return;
+    _seeded = true;
+    _gymId = gym['id'] as String?;
+    _enabled = gym['push_reminder_enabled'] as bool? ?? false;
+    final rawDays = gym['push_reminder_days'] as List?;
+    _days = rawDays != null ? rawDays.map((d) => d as int).toSet() : {3, 7};
+  }
+
+  Future<void> _save({bool? enabledOverride, Set<int>? daysOverride}) async {
+    if (_gymId == null) return;
+    final enabled = enabledOverride ?? _enabled;
+    final days = daysOverride ?? _days;
+    setState(() => _saving = true);
+    try {
+      await Supabase.instance.client.from('gyms').update({
+        'push_reminder_enabled': enabled,
+        'push_reminder_days': days.toList()..sort(),
+      }).eq('id', _gymId!);
+      if (mounted) setState(() { _enabled = enabled; _days = days; });
+    } catch (e) {
+      debugPrint('[GymCRM] Push reminder settings save error: $e');
+      _toast('Failed to update setting');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _toggleDay(int day) {
+    final next = Set<int>.from(_days);
+    if (next.contains(day)) {
+      if (next.length == 1) return; // keep at least one day selected
+      next.remove(day);
+    } else {
+      next.add(day);
+    }
+    _save(daysOverride: next);
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gymAsync = ref.watch(_gymProvider);
+    return _SheetScaffold(
+      title: 'Push Reminders',
+      child: gymAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Text('Error: $e'),
+        data: (gym) {
+          if (gym == null) return const Text('Gym not found');
+          _seed(gym);
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const Expanded(
+                  child: Text(
+                    'Automatically send a push notification to members before their membership expires',
+                    style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft),
+                  ),
+                ),
+                Switch(
+                  value: _enabled,
+                  activeThumbColor: AppTheme.accent,
+                  onChanged: _saving ? null : (v) => _save(enabledOverride: v),
+                ),
+              ]),
+              const SizedBox(height: 18),
+              const FieldLabel('Send reminder before expiry'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _kPushReminderDayOptions.map((d) => PillChip(
+                  label: '$d day${d == 1 ? '' : 's'}',
+                  selected: _days.contains(d),
+                  onTap: _saving ? () {} : () => _toggleDay(d),
+                )).toList(),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Reminders are sent once a day for members whose renewal date matches one of the selected windows.',
+                style: const TextStyle(fontSize: 12, color: AppTheme.inkHint, height: 1.4),
+              ),
             ],
           );
         },
@@ -1379,11 +1536,10 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
                   children: [
                     // ── Beta disclaimer ──────────────────────────────────────
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1c1200),
-                        border: Border.all(color: AppTheme.statusWarn),
-                        borderRadius: BorderRadius.circular(8),
+                        color: AppTheme.statusWarnBg,
+                        borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1436,18 +1592,10 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
                     const SizedBox(height: 16),
 
                     // ── ADMS URL ─────────────────────────────────────────────
-                    const Text(
-                      'Server URL',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
-                    ),
-                    const SizedBox(height: 6),
+                    const FieldLabel('Server URL'),
                     Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.background,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.border),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: AppTheme.cardDecoration(),
                       child: Row(
                         children: [
                           Expanded(
@@ -1456,15 +1604,15 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
                               style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppTheme.inkSoft),
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.copy, size: 18),
-                            tooltip: 'Copy',
-                            onPressed: () {
+                          GestureDetector(
+                            onTap: () {
                               Clipboard.setData(ClipboardData(text: _admsUrl));
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('Server URL copied')),
                               );
                             },
+                            child: const Text('Copy',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.accent)),
                           ),
                         ],
                       ),
@@ -1504,12 +1652,8 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
 
                     // ── Member linking note ──────────────────────────────────
                     Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.border),
-                      ),
+                      padding: const EdgeInsets.all(14),
+                      decoration: AppTheme.cardDecoration(),
                       child: const Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1604,30 +1748,15 @@ class _SheetScaffold extends StatelessWidget {
       padding: EdgeInsets.only(
         left: 16,
         right: 16,
-        top: 16,
+        top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
+          SheetHeader(title: title),
+          const SizedBox(height: 18),
           Flexible(
             child: SingleChildScrollView(
               child: child,
@@ -1647,11 +1776,10 @@ class _ErrorBox extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
         color: AppTheme.statusDangerBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.statusDanger.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         message,
@@ -1670,6 +1798,24 @@ class _Spinner extends StatelessWidget {
       height: 20,
       width: 20,
       child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+    );
+  }
+}
+
+class _ReadOnlyRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _ReadOnlyRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(children: [
+        Text(label, style: const TextStyle(fontSize: 13.5, color: AppTheme.inkSoft)),
+        const Spacer(),
+        Text(value, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+      ]),
     );
   }
 }

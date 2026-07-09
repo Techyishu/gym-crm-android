@@ -38,3 +38,15 @@ int? trialDaysRemaining(Map<String, dynamic>? gym) {
   final diff = end.difference(DateTime.now().toUtc()).inDays;
   return diff > 0 ? diff : null;
 }
+
+/// Days remaining before `plan_expires_at`/`trial_ends_at` (whichever is set),
+/// or null if there's no expiry to warn about. Can be negative (already expired
+/// but still within some grace window) — callers decide the cutoff.
+int? planExpiryDaysRemaining(Map<String, dynamic>? gym) {
+  if (gym == null) return null;
+  final expiryStr = gym['plan_expires_at'] as String? ?? gym['trial_ends_at'] as String?;
+  if (expiryStr == null) return null;
+  final expiry = DateTime.tryParse(expiryStr)?.toUtc();
+  if (expiry == null) return null;
+  return expiry.difference(DateTime.now().toUtc()).inDays;
+}

@@ -24,6 +24,7 @@ class _MemberBottomNav extends StatelessWidget {
     _Tab(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today, label: 'Bookings', index: 1),
     _Tab(icon: Icons.receipt_outlined, activeIcon: Icons.receipt, label: 'Billing', index: 2),
     _Tab(icon: Icons.fitness_center_outlined, activeIcon: Icons.fitness_center, label: 'Workout', index: 3),
+    _Tab(icon: Icons.restaurant_menu_outlined, activeIcon: Icons.restaurant_menu, label: 'Diet', index: 4),
   ];
 
   @override
