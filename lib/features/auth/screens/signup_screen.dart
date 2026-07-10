@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/auth_blob_background.dart';
+import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
 
 /// Matches the web `/(auth)/signup` form 1:1 in fields, validation and flow:
@@ -185,282 +187,209 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: SafeArea(
-        top: false,
-        child: Center(
-          child: SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: _sentTo != null ? _buildOtpScreen() : _buildForm(),
+      body: AuthBlobBackground(
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: _sentTo != null ? _buildOtpScreen() : _buildForm(),
+              ),
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  // ── Header (dark brand bar) ───────────────────────────────────────────────
-  Widget _header({String? tagline}) {
-    return Container(
-      width: double.infinity,
-      color: AppTheme.ink,
-      padding: const EdgeInsets.fromLTRB(16, 56, 16, 28),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.fitness_center, color: Colors.white, size: 18),
-              ),
-              const SizedBox(width: 10),
-              const Text(
-                'GymCRM',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1,
-                ),
-              ),
-            ],
-          ),
-          if (tagline != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              tagline,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
-            ),
-          ],
-        ],
       ),
     );
   }
 
   // ── Sign-up form ──────────────────────────────────────────────────────────
   Widget _buildForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _header(tagline: '1-day free trial · No card needed'),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-          child: Container(
-            decoration: AppTheme.cardDecoration(radius: 16),
-            padding: const EdgeInsets.all(20),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Start your free trial',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.textPrimary,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '1 day full access. No credit card required.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_error != null) ...[
-                    _ErrorBanner(message: _error!),
-                    const SizedBox(height: 16),
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 24),
+          const AuthLogoBadge(),
+          const SizedBox(height: 36),
+          Text(
+            'Create your gym',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                  letterSpacing: -0.4,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '1 day full access. No credit card required.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 28),
+          if (_error != null) ...[
+            _ErrorBanner(message: _error!),
+            const SizedBox(height: 16),
+          ],
+
+          // Continue with Google — hidden on iOS (Apple guideline 4.8
+          // would then require Sign in with Apple too).
+          if (!Platform.isIOS) ...[
+            AuthGoogleButton(
+              loading: _googleLoading,
+              onPressed: (_googleLoading || _loading) ? null : _signUpWithGoogle,
+              label: 'Sign up with Google',
+            ),
+            const SizedBox(height: 20),
+            const AuthOrDivider(),
+            const SizedBox(height: 20),
+          ],
+
+          // First + last name
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const AuthFieldLabel('First name'),
+                    const SizedBox(height: 6),
+                    AuthPillField(
+                      controller: _firstCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      hint: 'Rahul',
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'First name is required' : null,
+                    ),
                   ],
-
-                  // Continue with Google — hidden on iOS (Apple guideline 4.8
-                  // would then require Sign in with Apple too).
-                  if (!Platform.isIOS) ...[
-                    OutlinedButton.icon(
-                      onPressed: (_googleLoading || _loading) ? null : _signUpWithGoogle,
-                      icon: _googleLoading
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const _GoogleIcon(),
-                      label: const Text('Continue with Google'),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        const Expanded(child: Divider()),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text('or', style: TextStyle(color: AppTheme.inkHint, fontSize: 13)),
-                        ),
-                        const Expanded(child: Divider()),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // First + last name
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: _LabeledField(
-                          label: 'First name',
-                          child: TextFormField(
-                            controller: _firstCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(hintText: 'Rahul'),
-                            validator: (v) =>
-                                (v == null || v.trim().isEmpty) ? 'First name is required' : null,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _LabeledField(
-                          label: 'Last name',
-                          child: TextFormField(
-                            controller: _lastCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(hintText: 'Sharma'),
-                            validator: (v) =>
-                                (v == null || v.trim().isEmpty) ? 'Last name is required' : null,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-
-                  _LabeledField(
-                    label: 'Email',
-                    child: TextFormField(
-                      controller: _emailCtrl,
-                      keyboardType: TextInputType.emailAddress,
-                      autocorrect: false,
-                      decoration: const InputDecoration(hintText: 'you@example.com'),
-                      validator: (v) {
-                        final value = v?.trim() ?? '';
-                        final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
-                        return ok ? null : 'Enter a valid email address';
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Mobile number with +91 prefix
-                  _LabeledField(
-                    label: 'Mobile number',
-                    helper: '10 digits starting with 6, 7, 8, or 9',
-                    child: TextFormField(
-                      controller: _phoneCtrl,
-                      keyboardType: TextInputType.phone,
-                      maxLength: 10,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                        counterText: '',
-                        hintText: '9876543210',
-                        prefixIcon: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                          child: Text('🇮🇳 +91', style: TextStyle(fontSize: 14)),
-                        ),
-                        prefixIconConstraints: BoxConstraints(minWidth: 0),
-                      ),
-                      validator: (v) {
-                        final value = v?.trim() ?? '';
-                        return _indianMobile.hasMatch(value)
-                            ? null
-                            : 'Enter a valid 10-digit mobile number';
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Password + strength meter
-                  _LabeledField(
-                    label: 'Password',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        TextFormField(
-                          controller: _passwordCtrl,
-                          obscureText: _obscure,
-                          decoration: InputDecoration(
-                            hintText: 'Min. 8 characters',
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscure
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined),
-                              onPressed: () => setState(() => _obscure = !_obscure),
-                            ),
-                          ),
-                          validator: (v) => (v == null || v.length < 8)
-                              ? 'Password must be at least 8 characters'
-                              : null,
-                        ),
-                        if (_strength > 0) ...[
-                          const SizedBox(height: 8),
-                          _StrengthMeter(strength: _strength),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-
-                  // Terms & privacy acceptance (required)
-                  _TermsCheckbox(
-                    value: _acceptedTerms,
-                    showError: _termsError,
-                    onChanged: (v) => setState(() {
-                      _acceptedTerms = v;
-                      if (v) _termsError = false;
-                    }),
-                  ),
-                  const SizedBox(height: 18),
-
-                  ElevatedButton(
-                    onPressed: (_loading || _googleLoading) ? null : _submit,
-                    child: _loading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                        : const Text('Create Account'),
-                  ),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text('Already have an account?  ',
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
-                        GestureDetector(
-                          onTap: () => context.go('/login'),
-                          child: const Text(
-                            'Sign in',
-                            style: TextStyle(
-                              color: AppTheme.ink,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const AuthFieldLabel('Last name'),
+                    const SizedBox(height: 6),
+                    AuthPillField(
+                      controller: _lastCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      hint: 'Sharma',
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Last name is required' : null,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          const AuthFieldLabel('Email'),
+          const SizedBox(height: 6),
+          AuthPillField(
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            hint: 'rahul@ironhouse.in',
+            validator: (v) {
+              final value = v?.trim() ?? '';
+              final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
+              return ok ? null : 'Enter a valid email address';
+            },
+          ),
+          const SizedBox(height: 16),
+
+          // Mobile number with +91 prefix
+          const AuthFieldLabel('Mobile number'),
+          const SizedBox(height: 6),
+          AuthPillField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            maxLength: 10,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            hint: '9876543210',
+            prefixIcon: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Text('🇮🇳 +91', style: TextStyle(fontSize: 14)),
+            ),
+            prefixIconConstraints: const BoxConstraints(minWidth: 0),
+            validator: (v) {
+              final value = v?.trim() ?? '';
+              return _indianMobile.hasMatch(value)
+                  ? null
+                  : 'Enter a valid 10-digit mobile number';
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 4),
+            child: Text('10 digits starting with 6, 7, 8, or 9',
+                style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+          ),
+          const SizedBox(height: 16),
+
+          // Password + strength meter
+          const AuthFieldLabel('Password'),
+          const SizedBox(height: 6),
+          AuthPillField(
+            controller: _passwordCtrl,
+            obscureText: _obscure,
+            hint: 'Min. 8 characters',
+            suffixIcon: IconButton(
+              icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                  color: AppTheme.inkHint, size: 20),
+              onPressed: () => setState(() => _obscure = !_obscure),
+            ),
+            validator: (v) => (v == null || v.length < 8)
+                ? 'Password must be at least 8 characters'
+                : null,
+          ),
+          if (_strength > 0) ...[
+            const SizedBox(height: 8),
+            _StrengthMeter(strength: _strength),
+          ],
+          const SizedBox(height: 20),
+
+          // Terms & privacy acceptance (required)
+          _TermsCheckbox(
+            value: _acceptedTerms,
+            showError: _termsError,
+            onChanged: (v) => setState(() {
+              _acceptedTerms = v;
+              if (v) _termsError = false;
+            }),
+          ),
+          const SizedBox(height: 24),
+
+          AuthGradientButton(
+            label: 'Create your gym  →',
+            loading: _loading,
+            onPressed: (_loading || _googleLoading) ? null : _submit,
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text('Already on GymCRM? ',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                GestureDetector(
+                  onTap: () => context.go('/login'),
+                  child: const Text(
+                    'Log in',
+                    style: TextStyle(
+                      color: AppTheme.accent,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -469,165 +398,123 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     final allFilled = _otpControllers.every((c) => c.text.isNotEmpty);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _header(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-          child: Container(
-            decoration: AppTheme.cardDecoration(radius: 16),
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                Container(
-                  height: 56,
-                  width: 56,
-                  decoration: const BoxDecoration(color: AppTheme.activeBg, shape: BoxShape.circle),
-                  child: const Icon(Icons.mark_email_read_outlined, color: AppTheme.ink, size: 26),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Enter verification code',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800, color: AppTheme.ink),
-                ),
-                const SizedBox(height: 6),
-                Text.rich(
-                  TextSpan(
-                    text: 'We sent a 6-digit code to\n',
-                    style: const TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 14, height: 1.6),
-                    children: [
-                      TextSpan(
-                        text: _sentTo,
-                        style: const TextStyle(
-                            color: AppTheme.textPrimary, fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 28),
+        const SizedBox(height: 24),
+        const AuthLogoBadge(),
+        const SizedBox(height: 28),
+        Container(
+          height: 56,
+          width: 56,
+          decoration: const BoxDecoration(color: AppTheme.accentSoft, shape: BoxShape.circle),
+          child: const Icon(Icons.mark_email_read_outlined, color: AppTheme.accent, size: 26),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Enter verification code',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800, color: AppTheme.ink),
+        ),
+        const SizedBox(height: 6),
+        Text.rich(
+          TextSpan(
+            text: 'We sent a 6-digit code to\n',
+            style: const TextStyle(
+                color: AppTheme.textSecondary, fontSize: 14, height: 1.6),
+            children: [
+              TextSpan(
+                text: _sentTo,
+                style: const TextStyle(
+                    color: AppTheme.textPrimary, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 28),
 
-                // 6-digit OTP boxes
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(
-                    6,
-                    (i) => _OtpBox(
-                      controller: _otpControllers[i],
-                      focusNode: _otpFocusNodes[i],
-                      onChanged: (v) {
-                        if (v.isNotEmpty && i < 5) {
-                          _otpFocusNodes[i + 1].requestFocus();
-                        }
-                        // Auto-submit when last digit entered
-                        if (_otpControllers.every((c) => c.text.isNotEmpty)) {
-                          _verifyOtp();
-                        } else {
-                          setState(() {});
-                        }
-                      },
-                      onBackspace: () {
-                        if (i > 0) {
-                          _otpControllers[i - 1].clear();
-                          _otpFocusNodes[i - 1].requestFocus();
-                          setState(() {});
-                        }
-                      },
-                    ),
-                  ),
-                ),
-
-                if (_otpError != null) ...[
-                  const SizedBox(height: 14),
-                  _ErrorBanner(message: _otpError!),
-                ],
-                const SizedBox(height: 22),
-
-                ElevatedButton(
-                  onPressed: (_verifying || !allFilled) ? null : _verifyOtp,
-                  child: _verifying
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2),
-                        )
-                      : const Text('Verify'),
-                ),
-                const SizedBox(height: 18),
-
-                // Resend
-                GestureDetector(
-                  onTap: _resendCooldown > 0 ? null : _resendOtp,
-                  child: Text(
-                    _resendCooldown > 0
-                        ? 'Resend code in ${_resendCooldown}s'
-                        : 'Resend code',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color:
-                          _resendCooldown > 0 ? AppTheme.inkHint : AppTheme.ink,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                // Change email
-                GestureDetector(
-                  onTap: () {
-                    _resendTimer?.cancel();
-                    for (final c in _otpControllers) { c.clear(); }
-                    setState(() {
-                      _sentTo = null;
-                      _otpError = null;
-                      _resendCooldown = 0;
-                    });
-                  },
-                  child: const Text(
-                    'Change email',
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.inkHint,
-                        fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ],
+        // 6-digit OTP boxes
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(
+            6,
+            (i) => _OtpBox(
+              controller: _otpControllers[i],
+              focusNode: _otpFocusNodes[i],
+              onChanged: (v) {
+                if (v.isNotEmpty && i < 5) {
+                  _otpFocusNodes[i + 1].requestFocus();
+                }
+                // Auto-submit when last digit entered
+                if (_otpControllers.every((c) => c.text.isNotEmpty)) {
+                  _verifyOtp();
+                } else {
+                  setState(() {});
+                }
+              },
+              onBackspace: () {
+                if (i > 0) {
+                  _otpControllers[i - 1].clear();
+                  _otpFocusNodes[i - 1].requestFocus();
+                  setState(() {});
+                }
+              },
             ),
           ),
         ),
-      ],
-    );
-  }
-}
 
-class _LabeledField extends StatelessWidget {
-  final String label;
-  final String? helper;
-  final Widget child;
-  const _LabeledField({required this.label, required this.child, this.helper});
+        if (_otpError != null) ...[
+          const SizedBox(height: 14),
+          _ErrorBanner(message: _otpError!),
+        ],
+        const SizedBox(height: 22),
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6, left: 2),
-          child: Text(label,
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+        AuthGradientButton(
+          label: 'Verify',
+          loading: _verifying,
+          onPressed: (_verifying || !allFilled) ? null : _verifyOtp,
         ),
-        child,
-        if (helper != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4, left: 2),
-            child: Text(helper!, style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+        const SizedBox(height: 18),
+
+        // Resend
+        GestureDetector(
+          onTap: _resendCooldown > 0 ? null : _resendOtp,
+          child: Text(
+            _resendCooldown > 0
+                ? 'Resend code in ${_resendCooldown}s'
+                : 'Resend code',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color:
+                  _resendCooldown > 0 ? AppTheme.inkHint : AppTheme.accent,
+            ),
           ),
+        ),
+        const SizedBox(height: 10),
+
+        // Change email
+        GestureDetector(
+          onTap: () {
+            _resendTimer?.cancel();
+            for (final c in _otpControllers) { c.clear(); }
+            setState(() {
+              _sentTo = null;
+              _otpError = null;
+              _resendCooldown = 0;
+            });
+          },
+          child: const Text(
+            'Change email',
+            style: TextStyle(
+                fontSize: 13,
+                color: AppTheme.inkHint,
+                fontWeight: FontWeight.w500),
+          ),
+        ),
+        const SizedBox(height: 24),
       ],
     );
   }
@@ -748,19 +635,6 @@ class _ErrorBanner extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _GoogleIcon extends StatelessWidget {
-  const _GoogleIcon();
-  @override
-  Widget build(BuildContext context) {
-    return const Text('G',
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w800,
-          color: Color(0xFF4285F4),
-        ));
   }
 }
 

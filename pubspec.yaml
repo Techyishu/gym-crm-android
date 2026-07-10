@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.0+31
+version: 1.0.0+32
 
 environment:
   sdk: ^3.10.7
@@ -23,6 +23,7 @@ dependencies:
   # so we no longer fetch it at runtime via google_fonts.
   cached_network_image: ^3.4.1
   shimmer: ^3.0.0
+  flutter_svg: ^2.0.10+1
 
   # QR code scanning & generation
   mobile_scanner: ^7.2.0
@@ -91,6 +92,7 @@ flutter:
   uses-material-design: true
   assets:
     - shorebird.yaml
+    - assets/icons/
   fonts:
     - family: Manrope
       fonts:

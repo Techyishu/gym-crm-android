@@ -34,7 +34,6 @@ class StaffShell extends ConsumerWidget {
 
     final profile = profileAsync.valueOrNull;
     final gym = profile?['gyms'] as Map<String, dynamic>?;
-    final role = profile?['role'] as String?;
 
     // Billing gate — iOS uses RevenueCat entitlement; Android uses Supabase plan data.
     if (profileAsync.hasValue) {
@@ -54,7 +53,7 @@ class StaffShell extends ConsumerWidget {
             Expanded(child: shell),
           ],
         ),
-        bottomNavigationBar: _StaffBottomNav(shell: shell, role: role, onSignOut: onSignOut),
+        bottomNavigationBar: _StaffBottomNav(shell: shell, profile: profile, onSignOut: onSignOut),
       ),
     );
   }
@@ -64,9 +63,11 @@ class StaffShell extends ConsumerWidget {
 
 class _StaffBottomNav extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
-  final String? role;
+  final Map<String, dynamic>? profile;
   final VoidCallback onSignOut;
-  const _StaffBottomNav({required this.shell, required this.role, required this.onSignOut});
+  const _StaffBottomNav({required this.shell, required this.profile, required this.onSignOut});
+
+  String? get role => profile?['role'] as String?;
 
   @override
   ConsumerState<_StaffBottomNav> createState() => _StaffBottomNavState();
@@ -91,10 +92,10 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
   static const _allMoreItems = [
     _MoreItem(icon: Icons.person_add_outlined,      label: 'Leads',    route: '/staff/leads'),
     _MoreItem(icon: Icons.calendar_today_outlined,  label: 'Batches',  route: '/staff/classes'),
-    _MoreItem(icon: Icons.fitness_center_outlined,  label: 'Workouts', route: '/staff/workout-plans'),
-    _MoreItem(icon: Icons.restaurant_menu_outlined, label: 'Diet Plans', route: '/staff/diet-plans'),
+    _MoreItem(icon: Icons.fitness_center_outlined,  label: 'Workout plans', route: '/staff/workout-plans'),
+    _MoreItem(icon: Icons.restaurant_menu_outlined, label: 'Diet plans', route: '/staff/diet-plans'),
     _MoreItem(icon: Icons.chat_bubble_outline,      label: 'Messages', route: '/staff/communications'),
-    _MoreItem(icon: Icons.manage_accounts_outlined, label: 'Staff',    route: '/staff/staff'),
+    _MoreItem(icon: Icons.manage_accounts_outlined, label: 'Staff & roles', route: '/staff/staff'),
     _MoreItem(icon: Icons.bar_chart_outlined,       label: 'Reports',  route: '/staff/reports'),
     _MoreItem(icon: Icons.settings_outlined,        label: 'Settings', route: '/staff/settings'),
   ];
@@ -179,6 +180,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
       builder: (_) => _MoreSheet(
         items: items,
         currentRoute: currentRoute,
+        profile: widget.profile,
         onTap: (route) {
           Navigator.of(context).pop();
           context.push(route);
@@ -361,12 +363,14 @@ class _NavTab extends StatelessWidget {
 class _MoreSheet extends StatelessWidget {
   final List<_MoreItem> items;
   final String currentRoute;
+  final Map<String, dynamic>? profile;
   final void Function(String route) onTap;
   final VoidCallback onSignOut;
 
   const _MoreSheet({
     required this.items,
     required this.currentRoute,
+    required this.profile,
     required this.onTap,
     required this.onSignOut,
   });
@@ -374,6 +378,14 @@ class _MoreSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final gym = profile?['gyms'] as Map<String, dynamic>?;
+    final gymName = (gym?['name'] as String?) ?? 'Gym';
+    final firstName = (profile?['first_name'] as String?) ?? '';
+    final lastName = (profile?['last_name'] as String?) ?? '';
+    final fullName = '$firstName $lastName'.trim();
+    final role = (profile?['role'] as String?) ?? '';
+    final roleLabel = role.isEmpty ? '' : role[0].toUpperCase() + role.substring(1);
+    final initials = _initials(fullName.isEmpty ? gymName : fullName);
 
     return Container(
       decoration: const BoxDecoration(
@@ -393,99 +405,114 @@ class _MoreSheet extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          // Header row
+          // Header row: avatar, gym name + owner/role, sign-out
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             child: Row(
               children: [
-                const Text(
-                  'More',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkCard,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    initials,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.mintOnDark,
+                    ),
+                  ),
                 ),
-                const Spacer(),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, size: 20, color: AppTheme.inkSoft),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        gymName,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [fullName, roleLabel].where((s) => s.isNotEmpty).join(' · '),
+                        style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onSignOut,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface2,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.logout, size: 18, color: AppTheme.ink),
+                  ),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1, color: AppTheme.border),
-          // 3-column grid
+          // Menu list
           if (items.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 1.15,
-              children: items.map((item) {
-                final active = currentRoute.startsWith(item.route);
-                return GestureDetector(
-                  onTap: () => onTap(item.route),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: active ? AppTheme.activeBg : const Color(0xFFF2F2F2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          item.icon,
-                          size: 24,
-                          color: active ? AppTheme.ink : AppTheme.statusNeutral,
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          item.label,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: active ? AppTheme.ink : AppTheme.ink,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(12, 8, 12, 16 + bottomPadding),
-            child: GestureDetector(
-              onTap: onSignOut,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8DFD7),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.logout, size: 20, color: AppTheme.statusDanger),
-                    SizedBox(width: 8),
-                    Text(
-                      'Sign Out',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.statusDanger,
-                      ),
-                    ),
+            Padding(
+              padding: EdgeInsets.only(bottom: 8 + bottomPadding),
+              child: Column(
+                children: [
+                  for (final item in items) ...[
+                    const Divider(height: 1, color: AppTheme.border),
+                    _MoreRow(item: item, onTap: () => onTap(item.route)),
                   ],
-                ),
+                ],
               ),
             ),
-          ),
         ],
+      ),
+    );
+  }
+
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) return parts[0].substring(0, 1).toUpperCase();
+    return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
+  }
+}
+
+class _MoreRow extends StatelessWidget {
+  final _MoreItem item;
+  final VoidCallback onTap;
+  const _MoreRow({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(item.icon, size: 22, color: AppTheme.ink),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                item.label,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink),
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 20, color: AppTheme.inkHint),
+          ],
+        ),
       ),
     );
   }

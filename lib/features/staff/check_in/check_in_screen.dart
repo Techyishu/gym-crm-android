@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -43,6 +44,43 @@ final _recentCheckInsProvider = FutureProvider<List<Map<String, dynamic>>>((ref)
   return (data as List).cast<Map<String, dynamic>>();
 });
 
+// ── Small formatting helpers ─────────────────────────────────────────────────
+
+final _timeFmt = DateFormat('h:mm a');
+
+String _formatTime(String? s) {
+  if (s == null) return '-';
+  try {
+    return _timeFmt.format(DateTime.parse(s).toLocal());
+  } catch (_) {
+    return s;
+  }
+}
+
+/// "1h 09m" once past an hour, otherwise "55m".
+String _formatDuration(String inAt, String outAt) {
+  try {
+    final d = DateTime.parse(outAt).toLocal().difference(DateTime.parse(inAt).toLocal());
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    return h > 0 ? '${h}h ${m.toString().padLeft(2, '0')}m' : '${m}m';
+  } catch (_) {
+    return '-';
+  }
+}
+
+IconData _methodIcon(String method) => switch (method) {
+      'qr' => Icons.qr_code_2,
+      'biometric' => Icons.fingerprint,
+      _ => Icons.touch_app_outlined,
+    };
+
+Color _methodColor(String method) => switch (method) {
+      'qr' => AppTheme.accent,
+      'biometric' => const Color(0xFF7C3AED),
+      _ => AppTheme.inkHint,
+    };
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 class CheckInScreen extends ConsumerStatefulWidget {
@@ -63,6 +101,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
   final _searchCtrl = TextEditingController();
   List<Map<String, dynamic>> _searchResults = [];
   bool _searching = false;
+  int _tab = 0; // 0 = scan member, 1 = show gym QR
 
   @override
   void initState() {
@@ -331,20 +370,9 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                     style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
                   const Spacer(),
                   _HeaderIconButton(
-                    icon: Icons.qr_code_2,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const _GymQrPage()),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  _HeaderIconButton(
                     icon: Icons.history,
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => Scaffold(
-                        backgroundColor: AppTheme.background,
-                        appBar: AppBar(title: const Text('Check-in history')),
-                        body: const _HistoryTab(),
-                      )),
+                      MaterialPageRoute(builder: (_) => const _HistoryPage()),
                     ),
                   ),
                 ],
@@ -352,31 +380,40 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
             ),
             if (_pendingSync > 0) _PendingSyncBanner(count: _pendingSync, onTap: _tryFlushQueue),
             if (_message != null) _ResultBanner(message: _message!, success: _success),
-            Expanded(
-              child: RefreshIndicator(
-                color: AppTheme.accent,
-                onRefresh: () async => ref.invalidate(_recentCheckInsProvider),
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  children: [
-                    _buildScannerCard(),
-                    const SizedBox(height: 18),
-                    Row(children: [
-                      const Expanded(child: Divider()),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('or tap a name',
-                          style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
-                      ),
-                      const Expanded(child: Divider()),
-                    ]),
-                    const SizedBox(height: 14),
-                    _buildSearch(),
-                    const SizedBox(height: 20),
-                    _buildInToday(recentAsync),
-                  ],
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _ScanTabSwitch(
+                index: _tab,
+                onChanged: (i) => setState(() => _tab = i),
               ),
+            ),
+            Expanded(
+              child: _tab == 0
+                  ? RefreshIndicator(
+                      color: AppTheme.accent,
+                      onRefresh: () async => ref.invalidate(_recentCheckInsProvider),
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                        children: [
+                          _buildScannerCard(),
+                          const SizedBox(height: 18),
+                          Row(children: [
+                            const Expanded(child: Divider()),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text('or tap a name',
+                                style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+                            ),
+                            const Expanded(child: Divider()),
+                          ]),
+                          const SizedBox(height: 14),
+                          _buildSearch(),
+                          const SizedBox(height: 20),
+                          _buildInToday(recentAsync),
+                        ],
+                      ),
+                    )
+                  : const _GymQrTab(),
             ),
           ],
         ),
@@ -573,7 +610,161 @@ class _HeaderIconButton extends StatelessWidget {
   }
 }
 
-// ── Gym QR page ───────────────────────────────────────────────────────────────
+// ── Scan member / Show gym QR segmented switch ─────────────────────────────────
+
+class _ScanTabSwitch extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onChanged;
+  const _ScanTabSwitch({required this.index, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppTheme.activeBg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _segment(context, 0, 'Scan member')),
+          Expanded(child: _segment(context, 1, 'Show gym QR')),
+        ],
+      ),
+    );
+  }
+
+  Widget _segment(BuildContext context, int i, String label) {
+    final selected = index == i;
+    return GestureDetector(
+      onTap: () => onChanged(i),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.surface : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: selected
+              ? const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 1))]
+              : null,
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            color: selected ? AppTheme.ink : AppTheme.inkHint,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Show gym QR tab (embedded) ───────────────────────────────────────────────
+
+class _GymQrTab extends ConsumerWidget {
+  const _GymQrTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final gymAsync = ref.watch(_gymQrProvider);
+
+    return gymAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('Could not load gym QR: $e', style: const TextStyle(color: AppTheme.inkHint)),
+        ),
+      ),
+      data: (gym) {
+        final token = gym?['checkin_token']?.toString() ?? '';
+        final gymName = gym?['name'] as String? ?? 'Your Gym';
+        if (token.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('No check-in code for this gym yet.', style: TextStyle(color: AppTheme.inkHint)),
+            ),
+          );
+        }
+        final url = '$_checkinBaseUrl$token';
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          child: Column(
+            children: [
+              const Text(
+                'Members scan this to check themselves in',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 4))],
+                ),
+                child: QrImageView(
+                  data: url,
+                  version: QrVersions.auto,
+                  size: 200,
+                  eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: AppTheme.ink),
+                  dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: AppTheme.ink),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(gymName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: url));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Check-in link copied'), duration: Duration(seconds: 2)),
+                  );
+                },
+                child: const Text(
+                  'Tap to copy check-in link',
+                  style: TextStyle(fontSize: 12, color: AppTheme.inkHint, decoration: TextDecoration.underline),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const _GymQrPage()),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.border),
+                    ),
+                    child: const Text(
+                      'Full screen for front desk display',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Gym QR full-screen page (front-desk display) ────────────────────────────────
 
 class _GymQrPage extends ConsumerWidget {
   const _GymQrPage();
@@ -952,7 +1143,7 @@ class _CornerAccent extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 24.0;
     const width = 3.0;
-    final color = AppTheme.ink;
+    const color = AppTheme.accent;
 
     BorderRadius br;
     switch (corner) {
@@ -969,13 +1160,13 @@ class _CornerAccent extends StatelessWidget {
     Border b;
     switch (corner) {
       case _Corner.topLeft:
-        b = Border(top: BorderSide(color: color, width: width), left: BorderSide(color: color, width: width));
+        b = const Border(top: BorderSide(color: color, width: width), left: BorderSide(color: color, width: width));
       case _Corner.topRight:
-        b = Border(top: BorderSide(color: color, width: width), right: BorderSide(color: color, width: width));
+        b = const Border(top: BorderSide(color: color, width: width), right: BorderSide(color: color, width: width));
       case _Corner.bottomLeft:
-        b = Border(bottom: BorderSide(color: color, width: width), left: BorderSide(color: color, width: width));
+        b = const Border(bottom: BorderSide(color: color, width: width), left: BorderSide(color: color, width: width));
       case _Corner.bottomRight:
-        b = Border(bottom: BorderSide(color: color, width: width), right: BorderSide(color: color, width: width));
+        b = const Border(bottom: BorderSide(color: color, width: width), right: BorderSide(color: color, width: width));
     }
 
     return Container(
@@ -1077,7 +1268,7 @@ class _SearchResultRow extends StatelessWidget {
   }
 }
 
-// ── Recent check-in row ────────────────────────────────────────────────────────
+// ── Recent check-in row (main "In today" list) ──────────────────────────────────
 
 class _RecentCheckInRow extends StatelessWidget {
   final Map<String, dynamic> checkIn;
@@ -1095,17 +1286,6 @@ class _RecentCheckInRow extends StatelessWidget {
     final checkedAt = checkIn['checked_in_at'] as String?;
     final checkedOut = checkIn['checked_out_at'] as String?;
     final isOpen = checkedOut == null;
-
-    final methodBg = method == 'qr'
-        ? AppTheme.statusNeutralBg
-        : method == 'biometric'
-            ? const Color(0xFF1a1040)
-            : AppTheme.activeBg;
-    final methodFg = method == 'qr'
-        ? AppTheme.statusNeutral
-        : method == 'biometric'
-            ? const Color(0xFFa78bfa)
-            : AppTheme.inkSoft;
 
     return Column(
       children: [
@@ -1140,73 +1320,37 @@ class _RecentCheckInRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(
                       children: [
+                        Icon(_methodIcon(method), size: 11, color: _methodColor(method)),
+                        const SizedBox(width: 3),
                         Text(
-                          'In: ${timeAgo(checkedAt)}',
+                          isOpen
+                              ? 'In ${_formatTime(checkedAt)}'
+                              : 'In ${_formatTime(checkedAt)} · Out ${_formatTime(checkedOut)}',
                           style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
                         ),
-                        if (!isOpen) ...[
-                          const Text('  ·  ', style: TextStyle(fontSize: 11, color: AppTheme.inkHint)),
-                          Text(
-                            'Out: ${timeAgo(checkedOut)}',
-                            style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
-                          ),
-                        ],
                       ],
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: methodBg,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      method.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: methodFg,
-                      ),
+              GestureDetector(
+                onTap: onCheckOut,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isOpen ? AppTheme.statusActiveBg : AppTheme.statusNeutralBg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isOpen ? 'On floor' : _formatDuration(checkedAt!, checkedOut),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: isOpen ? AppTheme.statusActive : AppTheme.statusNeutral,
                     ),
                   ),
-                  if (isOpen) ...[
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 28,
-                      child: ElevatedButton(
-                        onPressed: onCheckOut,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.statusDanger,
-                          foregroundColor: Colors.white,
-                          minimumSize: Size.zero,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                          textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                        ),
-                        child: const Text('Check Out'),
-                      ),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.statusDangerBg,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'OUT',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusDanger),
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
             ],
           ),
@@ -1217,7 +1361,7 @@ class _RecentCheckInRow extends StatelessWidget {
   }
 }
 
-// ── History tab ────────────────────────────────────────────────────────────────
+// ── History page ──────────────────────────────────────────────────────────────
 // Filterable check-in log: date-range presets + member-name search, paginated.
 // Mirrors the web app's check-in-history.tsx (same presets, same page size).
 
@@ -1247,6 +1391,37 @@ final List<_DatePreset> _historyPresets = [
     return (end.subtract(const Duration(days: 30)), end);
   }),
 ];
+
+class _HistoryPage extends StatelessWidget {
+  const _HistoryPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 16, 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.arrow_back, size: 20, color: AppTheme.ink),
+                  ),
+                  const Text('History',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.3)),
+                ],
+              ),
+            ),
+            const Expanded(child: _HistoryTab()),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _HistoryTab extends ConsumerStatefulWidget {
   const _HistoryTab();
@@ -1546,17 +1721,6 @@ class _HistoryCheckInRow extends StatelessWidget {
     final checkedOut = checkIn['checked_out_at'] as String?;
     final isOpen = checkedOut == null;
 
-    final methodBg = method == 'qr'
-        ? AppTheme.statusNeutralBg
-        : method == 'biometric'
-            ? const Color(0xFF1a1040)
-            : AppTheme.activeBg;
-    final methodFg = method == 'qr'
-        ? AppTheme.statusNeutral
-        : method == 'biometric'
-            ? const Color(0xFFa78bfa)
-            : AppTheme.inkSoft;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
@@ -1580,47 +1744,36 @@ class _HistoryCheckInRow extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  'In: ${formatDateTimeFromString(checkedAt)}',
-                  style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                Row(
+                  children: [
+                    Icon(_methodIcon(method), size: 11, color: _methodColor(method)),
+                    const SizedBox(width: 3),
+                    Text(
+                      isOpen
+                          ? 'In ${_formatTime(checkedAt)} · still on floor'
+                          : 'In ${_formatTime(checkedAt)} · Out ${_formatTime(checkedOut)}',
+                      style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                    ),
+                  ],
                 ),
-                if (!isOpen)
-                  Text(
-                    'Out: ${formatDateTimeFromString(checkedOut)}',
-                    style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
-                  ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: methodBg, borderRadius: BorderRadius.circular(6)),
-                child: Text(
-                  method.toUpperCase(),
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: methodFg),
-                ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: isOpen ? AppTheme.statusActiveBg : AppTheme.statusNeutralBg,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              isOpen ? 'Active' : _formatDuration(checkedAt!, checkedOut),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: isOpen ? AppTheme.statusActive : AppTheme.statusNeutral,
               ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: isOpen ? AppTheme.statusActiveBg : AppTheme.statusDangerBg,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  isOpen ? 'INSIDE' : 'OUT',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: isOpen ? AppTheme.statusActive : AppTheme.statusDanger,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),

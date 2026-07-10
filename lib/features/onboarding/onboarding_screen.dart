@@ -16,50 +16,38 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   static const _pages = [
     _PageData(
-      tag: 'All-in-one platform',
-      title: 'Manage Your\nGym Smarter',
+      title: 'All your members,\nin one place',
       subtitle:
-          'Run memberships, schedules, billing, and staff — all from one powerful app built for gym owners.',
-      illustrationColor: Color(0xFFE9E6DD),
-      accentColor: Color(0xFF2C6E7A),
-      iconData: Icons.fitness_center_rounded,
-      badgeItems: [
-        _BadgeItem(Icons.people_rounded, '142 Members'),
-        _BadgeItem(Icons.trending_up_rounded, '94% Active'),
-      ],
+          "See who's active, who's expiring and who to call — the moment you open the app.",
+      preview: _MembersPreview(),
     ),
     _PageData(
-      tag: 'Smart check-ins',
-      title: 'Track Every\nMember Visit',
+      title: 'Never chase\nfees again',
       subtitle:
-          'Instant QR-code check-ins, member profiles with photos, and real-time attendance logs.',
-      illustrationColor: Color(0xFFDDEFE2),
-      accentColor: Color(0xFF2E7D4F),
-      iconData: Icons.qr_code_scanner_rounded,
-      badgeItems: [
-        _BadgeItem(Icons.check_circle_rounded, '23 Today'),
-        _BadgeItem(Icons.timer_rounded, 'Live Tracking'),
-      ],
+          'Collect payments, send auto reminders on WhatsApp, and track dues without a spreadsheet.',
+      preview: _PaymentsPreview(),
     ),
     _PageData(
-      tag: 'Revenue & leads',
-      title: 'Grow Your\nBusiness',
+      title: 'Check-ins in\none tap',
       subtitle:
-          'Smart invoicing, automated reminders, and a leads pipeline to convert prospects into members.',
-      illustrationColor: Color(0xFFF4E8CD),
-      accentColor: Color(0xFFB07C1F),
-      iconData: Icons.bar_chart_rounded,
-      badgeItems: [
-        _BadgeItem(Icons.receipt_rounded, '₹ Billing'),
-        _BadgeItem(Icons.person_add_rounded, 'Lead Capture'),
-      ],
+          "Scan a QR at the door or search a name — front desk stays fast, even on your busiest hour.",
+      preview: _CheckinPreview(),
     ),
   ];
 
-  Future<void> _finish() async {
+  Future<void> _markDone() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('onboarding_done', true);
+  }
+
+  Future<void> _skipToLogin() async {
+    await _markDone();
     if (mounted) context.go('/login');
+  }
+
+  Future<void> _finishToSignup() async {
+    await _markDone();
+    if (mounted) context.go('/signup');
   }
 
   void _next() {
@@ -69,7 +57,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         curve: Curves.easeInOut,
       );
     } else {
-      _finish();
+      _finishToSignup();
     }
   }
 
@@ -93,118 +81,81 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             curve: Curves.easeInOut,
           );
         } else {
-          _finish(); // back on first slide = skip onboarding → login
+          _skipToLogin();
         }
       },
       child: Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top bar: logo + skip
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary,
-                          borderRadius: BorderRadius.circular(9),
+        backgroundColor: AppTheme.background,
+        body: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (!isLast)
+                      TextButton(
+                        onPressed: _skipToLogin,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.textSecondary,
+                          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                         ),
-                        child: const Icon(Icons.fitness_center_rounded,
-                            color: Colors.white, size: 18),
+                        child: const Text('Skip'),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'GymCRM',
-                        style: TextStyle(fontFamily: 'Inter',
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (!isLast)
-                    TextButton(
-                      onPressed: _finish,
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.textSecondary,
-                        textStyle: TextStyle(fontFamily: 'Inter',
-                            fontSize: 14, fontWeight: FontWeight.w500),
-                      ),
-                      child: const Text('Skip'),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-
-            // Slides
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                onPageChanged: (i) => setState(() => _currentPage = i),
-                itemCount: _pages.length,
-                itemBuilder: (_, i) => _SlidePage(page: _pages[i]),
+              Expanded(
+                child: PageView.builder(
+                  controller: _controller,
+                  onPageChanged: (i) => setState(() => _currentPage = i),
+                  itemCount: _pages.length,
+                  itemBuilder: (_, i) => _SlidePage(page: _pages[i]),
+                ),
               ),
-            ),
-
-            // Bottom controls
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
-              child: Column(
-                children: [
-                  _DotRow(
-                    count: _pages.length,
-                    current: _currentPage,
-                    activeColor: _pages[_currentPage].accentColor,
-                  ),
-                  const SizedBox(height: 28),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 250),
-                    child: SizedBox(
-                      key: ValueKey(isLast),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
+                child: Column(
+                  children: [
+                    _DotRow(count: _pages.length, current: _currentPage),
+                    const SizedBox(height: 24),
+                    SizedBox(
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton(
                         onPressed: _next,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _pages[_currentPage].accentColor,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
-                          elevation: 0,
-                          textStyle: TextStyle(fontFamily: 'Inter',
-                              fontSize: 16, fontWeight: FontWeight.w600),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(isLast ? 'Get Started' : 'Next'),
-                            const SizedBox(width: 6),
-                            Icon(
-                              isLast
-                                  ? Icons.rocket_launch_rounded
-                                  : Icons.arrow_forward_rounded,
-                              size: 18,
-                            ),
-                          ],
-                        ),
+                        child: Text(isLast ? 'Create your gym' : 'Next'),
                       ),
                     ),
-                  ),
-                ],
+                    if (isLast) ...[
+                      const SizedBox(height: 14),
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text('Already have an account? ',
+                              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                          GestureDetector(
+                            onTap: _skipToLogin,
+                            child: const Text(
+                              'Log in',
+                              style: TextStyle(
+                                color: AppTheme.accent,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),  // PopScope
     );
   }
 }
@@ -223,56 +174,22 @@ class _SlidePage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 8),
-
-          // Illustration card
-          Expanded(
-            flex: 5,
-            child: _IllustrationCard(page: page),
-          ),
-
+          Expanded(flex: 5, child: Center(child: page.preview)),
           const SizedBox(height: 32),
-
-          // Tag chip
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: page.illustrationColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                  color: page.accentColor.withValues(alpha: 0.25)),
-            ),
-            child: Text(
-              page.tag.toUpperCase(),
-              style: TextStyle(fontFamily: 'Inter',
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: page.accentColor,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Title
           Text(
             page.title,
-            style: TextStyle(fontFamily: 'Inter',
-              fontSize: 30,
+            style: const TextStyle(
+              fontSize: 28,
               fontWeight: FontWeight.w800,
               color: AppTheme.textPrimary,
               height: 1.18,
+              letterSpacing: -0.4,
             ),
           ),
-          const SizedBox(height: 12),
-
-          // Subtitle
+          const SizedBox(height: 10),
           Text(
             page.subtitle,
-            style: TextStyle(fontFamily: 'Inter',
-              fontSize: 15,
-              color: AppTheme.textSecondary,
-              height: 1.55,
-            ),
+            style: TextStyle(fontSize: 15, color: AppTheme.textSecondary, height: 1.55),
           ),
           const SizedBox(height: 8),
         ],
@@ -281,87 +198,154 @@ class _SlidePage extends StatelessWidget {
   }
 }
 
-// ── Illustration card ────────────────────────────────────────────────────────
+// ── Slide 1: members dashboard preview ───────────────────────────────────────
 
-class _IllustrationCard extends StatelessWidget {
-  final _PageData page;
-  const _IllustrationCard({required this.page});
+class _MembersPreview extends StatelessWidget {
+  const _MembersPreview();
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: page.illustrationColor,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-            color: page.accentColor.withValues(alpha: 0.12), width: 1.5),
-      ),
-      child: Stack(
+      padding: const EdgeInsets.all(18),
+      decoration: AppTheme.cardDecoration(radius: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Decorative circles (background)
-          Positioned(
-            top: -30,
-            right: -30,
-            child: _DecorCircle(
-                size: 130,
-                color: page.accentColor.withValues(alpha: 0.06)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Iron House Gym',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+              const _InitialsChip(initials: 'RK', bg: AppTheme.statusActive, fg: Colors.white),
+            ],
           ),
-          Positioned(
-            bottom: -20,
-            left: -20,
-            child: _DecorCircle(
-                size: 100,
-                color: page.accentColor.withValues(alpha: 0.07)),
+          const SizedBox(height: 16),
+          Row(
+            children: const [
+              _StatTile(label: 'Active', value: '214'),
+              _StatTile(label: 'Check-ins', value: '63'),
+              _StatTile(label: 'Renewals', value: '9', valueColor: AppTheme.statusDanger),
+            ],
           ),
-          Positioned(
-            top: 20,
-            left: 24,
-            child: _DecorCircle(
-                size: 20,
-                color: page.accentColor.withValues(alpha: 0.25)),
+          const Divider(height: 28),
+          _MemberRow(
+            initials: 'AV',
+            bg: const Color(0xFFF8DFD7),
+            fg: AppTheme.statusDanger,
+            name: 'Amit Verma',
+            sub: 'Plan expired 3 days ago',
+            subColor: AppTheme.statusDanger,
+            trailing: const _RemindPill(),
           ),
-          Positioned(
-            bottom: 32,
-            right: 28,
-            child: _DecorCircle(
-                size: 14,
-                color: page.accentColor.withValues(alpha: 0.3)),
+          const SizedBox(height: 14),
+          _MemberRow(
+            initials: 'SN',
+            bg: const Color(0xFFF4E8CD),
+            fg: AppTheme.statusWarn,
+            name: 'Sneha Nair',
+            sub: 'Due in 2 days · ₹1,500',
+            subColor: AppTheme.statusWarn,
+            trailing: const _RemindPill(),
           ),
+        ],
+      ),
+    );
+  }
+}
 
-          // Center icon
-          Center(
+class _RemindPill extends StatelessWidget {
+  const _RemindPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(20)),
+      child: const Text('Remind', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+  const _StatTile({required this.label, required this.value, this.valueColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          const SizedBox(height: 4),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w800, color: valueColor ?? AppTheme.textPrimary)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Slide 2: payments preview ────────────────────────────────────────────────
+
+class _PaymentsPreview extends StatelessWidget {
+  const _PaymentsPreview();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: AppTheme.cardDecoration(radius: 20),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            color: AppTheme.darkCard,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    color: page.accentColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: page.accentColor.withValues(alpha: 0.28),
-                        blurRadius: 28,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Icon(page.iconData, color: Colors.white, size: 44),
+                Text('Collected today',
+                    style: TextStyle(color: AppTheme.onDarkSoft, fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                const Text('₹18,400',
+                    style: TextStyle(color: AppTheme.onDark, fontSize: 26, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 2),
+                Text('₹42,300 still pending',
+                    style: TextStyle(color: AppTheme.onDarkSoft, fontSize: 12)),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                _MemberRow(
+                  initials: 'AV',
+                  bg: const Color(0xFFF8DFD7),
+                  fg: AppTheme.statusDanger,
+                  name: 'Amit Verma',
+                  sub: '3 days overdue',
+                  subColor: AppTheme.statusDanger,
+                  trailing: const Text('₹1,200',
+                      style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                 ),
-                const SizedBox(height: 24),
-                // Floating badge row
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: page.badgeItems
-                      .map((b) => Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 6),
-                            child: _FloatingBadge(
-                                item: b, accentColor: page.accentColor),
-                          ))
-                      .toList(),
+                const SizedBox(height: 14),
+                _MemberRow(
+                  initials: 'SN',
+                  bg: const Color(0xFFF4E8CD),
+                  fg: AppTheme.statusWarn,
+                  name: 'Sneha Nair',
+                  sub: 'Due in 2 days',
+                  subColor: AppTheme.statusWarn,
+                  trailing: const Text('₹1,500',
+                      style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
                 ),
               ],
             ),
@@ -372,56 +356,165 @@ class _IllustrationCard extends StatelessWidget {
   }
 }
 
-class _DecorCircle extends StatelessWidget {
-  final double size;
-  final Color color;
-  const _DecorCircle({required this.size, required this.color});
+// ── Slide 3: check-in preview ────────────────────────────────────────────────
+
+class _CheckinPreview extends StatelessWidget {
+  const _CheckinPreview();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
-class _FloatingBadge extends StatelessWidget {
-  final _BadgeItem item;
-  final Color accentColor;
-  const _FloatingBadge({required this.item, required this.accentColor});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.07),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      width: double.infinity,
+      decoration: AppTheme.cardDecoration(radius: 20),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(item.icon, size: 15, color: accentColor),
-          const SizedBox(width: 6),
-          Text(
-            item.label,
-            style: TextStyle(fontFamily: 'Inter',
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textPrimary,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
+            color: AppTheme.darkCard,
+            child: _ScanFrame(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.qr_code_scanner_rounded, color: AppTheme.onDark, size: 34),
+                  const SizedBox(height: 10),
+                  Text('Scan to check in',
+                      style: TextStyle(color: AppTheme.onDark, fontSize: 13, fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              children: [
+                _MemberRow(
+                  initials: 'PM',
+                  bg: AppTheme.statusActiveBg,
+                  fg: AppTheme.statusActive,
+                  name: 'Priya Menon',
+                  sub: '7:42 AM',
+                  subColor: AppTheme.textSecondary,
+                  trailing: const Icon(Icons.check_circle, color: AppTheme.statusActive, size: 20),
+                ),
+                const SizedBox(height: 14),
+                _MemberRow(
+                  initials: 'RK',
+                  bg: AppTheme.statusActiveBg,
+                  fg: AppTheme.statusActive,
+                  name: 'Rahul Kapoor',
+                  sub: '7:31 AM',
+                  subColor: AppTheme.textSecondary,
+                  trailing: const Icon(Icons.check_circle, color: AppTheme.statusActive, size: 20),
+                ),
+              ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ScanFrame extends StatelessWidget {
+  final Widget child;
+  const _ScanFrame({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Padding(padding: const EdgeInsets.all(14), child: child),
+        Positioned(top: 0, left: 0, child: _corner(topLeft: true)),
+        Positioned(top: 0, right: 0, child: _corner(topRight: true)),
+        Positioned(bottom: 0, left: 0, child: _corner(bottomLeft: true)),
+        Positioned(bottom: 0, right: 0, child: _corner(bottomRight: true)),
+      ],
+    );
+  }
+
+  Widget _corner({
+    bool topLeft = false,
+    bool topRight = false,
+    bool bottomLeft = false,
+    bool bottomRight = false,
+  }) {
+    const side = BorderSide(color: AppTheme.accent, width: 2.5);
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        border: Border(
+          top: (topLeft || topRight) ? side : BorderSide.none,
+          bottom: (bottomLeft || bottomRight) ? side : BorderSide.none,
+          left: (topLeft || bottomLeft) ? side : BorderSide.none,
+          right: (topRight || bottomRight) ? side : BorderSide.none,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Shared row/chip widgets ──────────────────────────────────────────────────
+
+class _MemberRow extends StatelessWidget {
+  final String initials;
+  final Color bg;
+  final Color fg;
+  final String name;
+  final String sub;
+  final Color subColor;
+  final Widget? trailing;
+
+  const _MemberRow({
+    required this.initials,
+    required this.bg,
+    required this.fg,
+    required this.name,
+    required this.sub,
+    required this.subColor,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _InitialsChip(initials: initials, bg: bg, fg: fg),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.textPrimary)),
+              const SizedBox(height: 2),
+              Text(sub, style: TextStyle(fontSize: 12, color: subColor, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
+}
+
+class _InitialsChip extends StatelessWidget {
+  final String initials;
+  final Color bg;
+  final Color fg;
+  const _InitialsChip({required this.initials, required this.bg, required this.fg});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+      child: Text(initials, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: fg)),
     );
   }
 }
@@ -431,9 +524,7 @@ class _FloatingBadge extends StatelessWidget {
 class _DotRow extends StatelessWidget {
   final int count;
   final int current;
-  final Color activeColor;
-  const _DotRow(
-      {required this.count, required this.current, required this.activeColor});
+  const _DotRow({required this.count, required this.current});
 
   @override
   Widget build(BuildContext context) {
@@ -448,9 +539,7 @@ class _DotRow extends StatelessWidget {
           width: isActive ? 24 : 8,
           height: 8,
           decoration: BoxDecoration(
-            color: isActive
-                ? activeColor
-                : AppTheme.border,
+            color: isActive ? AppTheme.accent : AppTheme.border,
             borderRadius: BorderRadius.circular(4),
           ),
         );
@@ -459,30 +548,12 @@ class _DotRow extends StatelessWidget {
   }
 }
 
-// ── Data models ──────────────────────────────────────────────────────────────
+// ── Data model ────────────────────────────────────────────────────────────────
 
 class _PageData {
-  final String tag;
   final String title;
   final String subtitle;
-  final Color illustrationColor;
-  final Color accentColor;
-  final IconData iconData;
-  final List<_BadgeItem> badgeItems;
+  final Widget preview;
 
-  const _PageData({
-    required this.tag,
-    required this.title,
-    required this.subtitle,
-    required this.illustrationColor,
-    required this.accentColor,
-    required this.iconData,
-    required this.badgeItems,
-  });
-}
-
-class _BadgeItem {
-  final IconData icon;
-  final String label;
-  const _BadgeItem(this.icon, this.label);
+  const _PageData({required this.title, required this.subtitle, required this.preview});
 }
