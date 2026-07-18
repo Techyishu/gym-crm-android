@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,7 +60,8 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     if (phone.isNotEmpty) {
       _phoneCtrl.text = phone;
     } else {
-      _needsPhone = true;
+      // No phone field on iOS (App Review 5.1.1).
+      _needsPhone = !Platform.isIOS;
     }
   }
 
@@ -77,11 +80,8 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     }
     if (_needsPhone) {
       final digits = _phoneCtrl.text.trim();
-      if (digits.isEmpty) {
-        setState(() => _error = 'Mobile number is required.');
-        return;
-      }
-      if (!_indianMobile.hasMatch(digits)) {
+      // Optional (App Review 5.1.1) — validate format only when provided.
+      if (digits.isNotEmpty && !_indianMobile.hasMatch(digits)) {
         setState(() => _error = 'Enter a valid 10-digit mobile number (starts with 6–9).');
         return;
       }
@@ -102,7 +102,9 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
 
     final error = await ref.read(authNotifierProvider.notifier).setupGym(
           gymName: name,
-          phone: _needsPhone ? _phoneCtrl.text.trim() : null,
+          phone: _needsPhone && _phoneCtrl.text.trim().isNotEmpty
+              ? _phoneCtrl.text.trim()
+              : null,
           gymType: _gymType.isEmpty ? null : _gymType,
           goals: [],
         );
@@ -244,7 +246,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                           // Phone (Google users only)
                           if (_needsPhone) ...[
                             const SizedBox(height: 16),
-                            _label('Mobile number'),
+                            _label('Mobile number (optional)'),
                             TextField(
                               controller: _phoneCtrl,
                               keyboardType: TextInputType.phone,
@@ -309,7 +311,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                           const SizedBox(height: 20),
                           ElevatedButton(
                             onPressed: _submit,
-                            child: const Text('Start Free Trial'),
+                            child: Text(Platform.isIOS ? 'Create Gym' : 'Start Free Trial'),
                           ),
                         ],
                       ),
@@ -319,13 +321,14 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
               ),
 
               const SizedBox(height: 16),
-              Center(
-                child: Text('1-day free trial · No credit card needed',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.inkHint,
-                        letterSpacing: 0.5)),
-              ),
+              if (!Platform.isIOS)
+                Center(
+                  child: Text('1-day free trial · No credit card needed',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.inkHint,
+                          letterSpacing: 0.5)),
+                ),
             ],
           ),
         ),

@@ -1,3 +1,5 @@
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,6 +24,7 @@ import '../features/staff/check_in/check_in_screen.dart';
 import '../features/staff/leads/leads_screen.dart';
 import '../features/staff/reports/reports_screen.dart';
 import '../features/staff/settings/settings_screen.dart';
+import '../features/staff/settings/reminders_screen.dart';
 import '../features/staff/communications/communications_screen.dart';
 import '../features/staff/staff/staff_screen.dart';
 import '../features/staff/workout/staff_workout_plans_screen.dart';
@@ -62,7 +65,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
   ref.onDispose(refreshStream.dispose);
 
-  return GoRouter(
+  final router = GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/onboarding',
     // Also refresh when the signup handshake guard flips, so the redirect is
@@ -246,6 +249,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/staff/leads', builder: (_, __) => const LeadsScreen()),
       GoRoute(path: '/staff/reports', builder: (_, __) => const ReportsScreen()),
       GoRoute(path: '/staff/settings', builder: (_, __) => const SettingsScreen()),
+      GoRoute(path: '/staff/reminders', builder: (_, __) => const RemindersScreen()),
       GoRoute(path: '/staff/communications', builder: (_, __) => const CommunicationsScreen()),
       GoRoute(path: '/staff/staff', builder: (_, __) => const StaffScreen()),
       GoRoute(path: '/staff/workout-plans', builder: (_, __) => const StaffWorkoutPlansScreen()),
@@ -328,5 +332,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+
+  // Screen tracking. A delegate listener (not navigator observers) because
+  // StatefulShellRoute branches have their own navigators the root observer
+  // never sees. Firebase is only initialized on Android (see main.dart).
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    String? lastScreen;
+    router.routerDelegate.addListener(() {
+      final path = router.routerDelegate.currentConfiguration.uri.path;
+      if (path == lastScreen) return;
+      lastScreen = path;
+      FirebaseAnalytics.instance.logScreenView(screenName: path);
+    });
+  }
+
+  return router;
 });
 

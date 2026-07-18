@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -316,7 +317,7 @@ class _PaywallBody extends StatelessWidget {
                 const SizedBox(height: 8),
 
                 // ── Legal ─────────────────────────────────────────────────────
-                _LegalLinks(onOpenUrl: onOpenUrl),
+                const _LegalLinks(),
               ],
             ),
           ),
@@ -327,8 +328,6 @@ class _PaywallBody extends StatelessWidget {
 
   String _ctaLabel(Package? pkg) {
     if (pkg == null) return 'Select a plan';
-    final intro = pkg.storeProduct.introductoryPrice;
-    if (intro != null && intro.price == 0) return 'Start Free Trial';
     return 'Subscribe · ${pkg.storeProduct.priceString}';
   }
 
@@ -480,8 +479,7 @@ class _PlanCard extends StatelessWidget {
 // ── Legal links ───────────────────────────────────────────────────────────────
 
 class _LegalLinks extends StatelessWidget {
-  final Future<void> Function(String) onOpenUrl;
-  const _LegalLinks({required this.onOpenUrl});
+  const _LegalLinks();
 
   @override
   Widget build(BuildContext context) {
@@ -506,7 +504,7 @@ class _LegalLinks extends StatelessWidget {
                 color: AppTheme.inkSoft,
               ),
               recognizer: TapGestureRecognizer()
-                ..onTap = () => onOpenUrl('https://www.gymcrm.in/terms'),
+                ..onTap = () => context.push('/legal/terms'),
             ),
             const TextSpan(text: '  ·  '),
             TextSpan(
@@ -516,7 +514,7 @@ class _LegalLinks extends StatelessWidget {
                 color: AppTheme.inkSoft,
               ),
               recognizer: TapGestureRecognizer()
-                ..onTap = () => onOpenUrl('https://www.gymcrm.in/privacy'),
+                ..onTap = () => context.push('/legal/privacy'),
             ),
           ],
         ),

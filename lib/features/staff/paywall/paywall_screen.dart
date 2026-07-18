@@ -286,11 +286,11 @@ class _StatusBanner extends StatelessWidget {
       );
     }
 
-    // Trial active
+    // Trial active — iOS has no trial, so skip straight to the paywall message.
     final daysLeft = trialEndsAt != null
         ? DateTime.tryParse(trialEndsAt)?.toUtc().difference(now).inDays
         : null;
-    if (daysLeft != null && daysLeft > 0) {
+    if (!Platform.isIOS && daysLeft != null && daysLeft > 0) {
       return _Banner(
         icon: Icons.access_time_outlined,
         message: 'Your free trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}.',
@@ -299,10 +299,12 @@ class _StatusBanner extends StatelessWidget {
       );
     }
 
-    // Expired
+    // Expired / no subscription
     return _Banner(
       icon: Icons.lock_outline,
-      message: 'Your free trial has ended. Subscribe to continue using GymCRM.',
+      message: Platform.isIOS
+          ? 'Subscribe to continue using GymCRM.'
+          : 'Your free trial has ended. Subscribe to continue using GymCRM.',
       color: AppTheme.statusDangerBg,
       textColor: AppTheme.statusDanger,
     );

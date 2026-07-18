@@ -48,7 +48,7 @@ String _planLabel(Map<String, dynamic> p) {
   final unit = interval == 'custom'
       ? '${p['billing_interval_months'] ?? ''}mo'
       : (short[interval] ?? interval);
-  return '${p['name']} — ₹$price/$unit';
+  return '${p['name']} — $currencySymbol$price/$unit';
 }
 
 class MembersScreen extends ConsumerStatefulWidget {
@@ -570,6 +570,9 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
             await client.rpc('record_invoice_payment', params: {
               'p_invoice_id': invoice['id'],
               'p_method': _paymentMethod,
+              // next_payment_date was just set by the staff above — don't
+              // advance it again, or a 30-day pick becomes ~60 days.
+              'p_advance_date': false,
             });
           }
         }
@@ -579,9 +582,10 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     } catch (e) {
       debugPrint('[GymCRM] AddMember error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to add member. Please try again.')),
-        );
+        final msg = (e is PostgrestException && e.code == '23505')
+            ? 'Member ID "${_customIdCtrl.text.trim()}" is already in use. Please use a different one.'
+            : 'Failed to add member. Please try again.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
         setState(() => _loading = false);
       }
     }
@@ -774,10 +778,10 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: TextFormField(
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Recurring discount (optional)',
                       hintText: '0',
-                      prefixText: '₹ ',
+                      prefixText: '$currencySymbol ',
                       helperText: 'Fixed amount deducted from every auto-generated invoice',
                     ),
                     onChanged: (v) {

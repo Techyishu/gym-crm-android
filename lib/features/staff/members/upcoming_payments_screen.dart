@@ -657,7 +657,7 @@ class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
         if (plan != null && plan['price'] != null) {
           final price = (plan['price'] as num).toStringAsFixed(0);
           _amountCtrl.text = price;
-          _planHint = '${plan['name']} — ₹$price';
+          _planHint = '${plan['name']} — $currencySymbol$price';
         }
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;
@@ -842,9 +842,9 @@ class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
             TextFormField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Amount (₹) *',
-                prefixIcon: Icon(Icons.currency_rupee),
+              decoration: InputDecoration(
+                labelText: 'Amount ($currencySymbol) *',
+                prefixText: '$currencySymbol ',
               ),
             ),
             if (_planHint != null) ...[

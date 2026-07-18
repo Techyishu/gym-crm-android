@@ -1,0 +1,57 @@
+GymCRM — End User License Agreement (EULA)
+Last updated: 2 July 2026
+
+Please read this End User License Agreement ("Agreement") carefully before using GymCRM. By creating an account or using the app, you agree to be bound by this Agreement.
+
+1. The Service
+GymCRM is a gym management platform that allows gym owners and staff to manage memberships, billing, classes, check-ins, and communications. GymCRM is operated by Shashank Kumar, India.
+
+2. Account Registration
+You must be at least 18 years old to create an account. You are responsible for maintaining the security of your account credentials and for all activity that occurs under your account. Notify us immediately at shashanksingh67567@gmail.com if you suspect unauthorised access.
+
+3. Subscriptions
+GymCRM requires an active subscription from sign-up — there is no free trial on iOS. Subscription plans and pricing are shown in the app and purchased via the App Store.
+
+Subscriptions are billed monthly or annually as chosen. Payment is charged to your Apple ID account at confirmation of purchase. Subscriptions automatically renew unless auto-renew is turned off at least 24 hours before the end of the current period. Your account will be charged for renewal within 24 hours prior to the end of the current period. You can manage or cancel your subscription at any time in your Apple ID account settings; cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.
+
+4. Subscription Management
+Subscriptions are purchased and managed through the App Store using your Apple ID. Use the "Manage subscription" option in Settings within the app to view billing, cancel, or restore purchases.
+
+5. Acceptable Use
+GymCRM is intended exclusively for legitimate fitness businesses (gyms, fitness centres, personal training studios, and similar). By using GymCRM you confirm that your business is a genuine fitness or wellness operation.
+
+You agree not to:
+- Use GymCRM for any unlawful, fraudulent, or deceptive purpose.
+- Register a gym account to manage contacts who are not actual members or clients of a real fitness business.
+- Use the communication features to send unsolicited messages, spam, or content unrelated to your members' fitness services.
+- Misrepresent your business type, name, or purpose to obtain access to the platform.
+- Use member data stored in GymCRM for any purpose other than managing your legitimate gym operations.
+- Upload malware, spam, or abusive content.
+- Reverse engineer, decompile, or attempt to extract source code from the app.
+- Resell or sublicense access to GymCRM without written permission.
+
+We reserve the right to investigate suspicious activity and terminate accounts that we reasonably believe are operating outside a legitimate fitness business context, without prior notice.
+
+6. Your Data
+You retain ownership of all data you enter into GymCRM (gym details, member records, etc.). You grant us a limited licence to store and process that data solely to provide the service. See our Privacy Policy for full details on data handling: https://www.gymcrm.in/privacy
+
+7. Service Availability
+We aim for high availability but do not guarantee uninterrupted service. We may perform maintenance, upgrades, or changes at any time. We are not liable for losses resulting from downtime.
+
+8. Limitation of Liability
+To the maximum extent permitted by law, GymCRM and its operators are not liable for indirect, incidental, special, or consequential damages arising from your use of the service. Our total liability to you will not exceed the amount you paid in the 3 months preceding the claim.
+
+9. Termination
+We may suspend or terminate your account if you violate this Agreement or engage in conduct that harms the service or other users. You may delete your account at any time from Settings, Delete Account in the app, or by contacting shashanksingh67567@gmail.com.
+
+10. Governing Law
+This Agreement is governed by the laws of India. Any disputes will be subject to the exclusive jurisdiction of the courts of India.
+
+11. Changes to this Agreement
+We may update this Agreement from time to time. We will notify you of material changes via the app or by email. Continued use after changes constitutes acceptance of the updated Agreement.
+
+12. Contact
+GymCRM — Operated by Shashank Kumar
+Email: shashanksingh67567@gmail.com
+WhatsApp: +91 75410 04076
+Website: gymcrm.in

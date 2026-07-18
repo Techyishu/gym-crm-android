@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
@@ -40,24 +42,25 @@ class _TermsContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isIOS = Platform.isIOS;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
-        _UpdatedChip(date: 'Last updated: 2 July 2026'),
-        SizedBox(height: 16),
-        _Heading('Terms of Service — GymCRM'),
-        _Body(
+      children: [
+        const _UpdatedChip(date: 'Last updated: 2 July 2026'),
+        const SizedBox(height: 16),
+        const _Heading('Terms of Service — GymCRM'),
+        const _Body(
           'Please read these Terms of Service ("Terms") carefully before using GymCRM. '
           'By creating an account or using the app, you agree to be bound by these Terms.',
         ),
-        SizedBox(height: 20),
-        _Section(
+        const SizedBox(height: 20),
+        const _Section(
           title: '1. The Service',
           body:
               'GymCRM is a gym management platform that allows gym owners and staff to manage memberships, '
               'billing, classes, check-ins, and communications. GymCRM is operated by Shashank Kumar, India.',
         ),
-        _Section(
+        const _Section(
           title: '2. Account Registration',
           body:
               'You must be at least 18 years old to create an account. You are responsible for maintaining '
@@ -65,19 +68,26 @@ class _TermsContent extends StatelessWidget {
               'Notify us immediately at shashanksingh67567@gmail.com if you suspect unauthorised access.',
         ),
         _Section(
-          title: '3. Free Trial & Subscriptions',
-          body:
-              'New gym-owner accounts receive a 7-day free trial with full access. After the trial, '
-              'continued use requires an active subscription. Subscription plans and pricing are listed at gymcrm.in.\n\n'
-              'Subscriptions are billed monthly or annually as chosen. You may cancel at any time; '
-              'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',
+          title: '3. Subscriptions',
+          body: isIOS
+              ? 'GymCRM requires an active subscription from sign-up — there is no free trial on iOS. '
+                  'Subscription plans and pricing are shown in the app and purchased via the App Store.\n\n'
+                  'Subscriptions are billed monthly or annually as chosen. You may cancel at any time via your '
+                  'Apple ID subscription settings; cancellation takes effect at the end of the current billing '
+                  'period. No refunds are issued for unused periods.'
+              : 'New gym-owner accounts receive a 7-day free trial with full access. After the trial, '
+                  'continued use requires an active subscription. Subscription plans and pricing are listed at gymcrm.in.\n\n'
+                  'Subscriptions are billed monthly or annually as chosen. You may cancel at any time; '
+                  'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',
         ),
         _Section(
           title: '4. Subscription Management',
-          body:
-              'Subscriptions are managed at gymcrm.in. Tap "Open gymcrm.in" to visit the website '
-              'where you can start or manage your plan. Your subscription status applies automatically '
-              'across all your devices.',
+          body: isIOS
+              ? 'Subscriptions are purchased and managed through the App Store using your Apple ID. '
+                  'Use the "Manage subscription" option in Settings to view billing, cancel, or restore purchases.'
+              : 'Subscriptions are managed at gymcrm.in. Tap "Open gymcrm.in" to visit the website '
+                  'where you can start or manage your plan. Your subscription status applies automatically '
+                  'across all your devices.',
         ),
         _Section(
           title: '5. Acceptable Use',

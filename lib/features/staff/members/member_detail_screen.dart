@@ -1199,7 +1199,7 @@ class _DiscountSheet extends StatelessWidget {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 autofocus: true,
                 onChanged: (_) => setS(() {}),
-                decoration: const InputDecoration(hintText: '0', prefixText: '₹ '),
+                decoration: InputDecoration(hintText: '0', prefixText: '$currencySymbol '),
               ),
               if (discount > 0) ...[
                 const SizedBox(height: 14),

@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 
-// iOS-only RevenueCat key — get the production key from RC dashboard before shipping.
-const _kRcApiKeyIos = 'test_VXbIquNafuZRWMPJuwcqQabGsvd';
+// iOS-only RevenueCat public SDK key (Apple App Store).
+const _kRcApiKeyIos = 'appl_nIbDtTyPmDxXhpHcWKXfGoRRZyS';
 
 /// The RC entitlement identifier configured in the RevenueCat dashboard.
 const kRcEntitlement = 'gymcrm Pro';

@@ -301,32 +301,36 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Mobile number with +91 prefix
-          const AuthFieldLabel('Mobile number'),
-          const SizedBox(height: 6),
-          AuthPillField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
-            maxLength: 10,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            hint: '9876543210',
-            prefixIcon: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Text('🇮🇳 +91', style: TextStyle(fontSize: 14)),
+          // Mobile number with +91 prefix — hidden on iOS (App Review 5.1.1:
+          // phone is not required for core functionality).
+          if (!Platform.isIOS) ...[
+            const AuthFieldLabel('Mobile number (optional)'),
+            const SizedBox(height: 6),
+            AuthPillField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+              maxLength: 10,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              hint: '9876543210',
+              prefixIcon: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Text('🇮🇳 +91', style: TextStyle(fontSize: 14)),
+              ),
+              prefixIconConstraints: const BoxConstraints(minWidth: 0),
+              validator: (v) {
+                final value = v?.trim() ?? '';
+                if (value.isEmpty) return null; // optional
+                return _indianMobile.hasMatch(value)
+                    ? null
+                    : 'Enter a valid 10-digit mobile number';
+              },
             ),
-            prefixIconConstraints: const BoxConstraints(minWidth: 0),
-            validator: (v) {
-              final value = v?.trim() ?? '';
-              return _indianMobile.hasMatch(value)
-                  ? null
-                  : 'Enter a valid 10-digit mobile number';
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4, left: 4),
-            child: Text('10 digits starting with 6, 7, 8, or 9',
-                style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
-          ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 4),
+              child: Text('10 digits starting with 6, 7, 8, or 9',
+                  style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+            ),
+          ],
           const SizedBox(height: 16),
 
           // Password + strength meter

@@ -1,4 +1,4 @@
-bool hasActiveBillingAccess(Map<String, dynamic>? gym) {
+bool hasActiveBillingAccess(Map<String, dynamic>? gym, {bool ignoreTrial = false}) {
   if (gym == null) return false;
 
   final now = DateTime.now().toUtc();
@@ -20,8 +20,8 @@ bool hasActiveBillingAccess(Map<String, dynamic>? gym) {
     if (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false) return true;
   }
 
-  // Within trial period
-  if (trialEndsAt != null) {
+  // Within trial period — iOS ignores this, must pay via StoreKit before use.
+  if (!ignoreTrial && trialEndsAt != null) {
     if (DateTime.tryParse(trialEndsAt)?.toUtc().isAfter(now) ?? false) return true;
   }
 

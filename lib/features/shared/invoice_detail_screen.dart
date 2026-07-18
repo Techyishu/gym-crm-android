@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_theme.dart';
@@ -37,12 +39,19 @@ class InvoiceDetailScreen extends ConsumerWidget {
           orElse: () => const Text('Invoice'),
         ),
         actions: [
-          if (async.hasValue)
+          if (async.hasValue) ...[
+            if (!Platform.isIOS)
+              IconButton(
+                icon: const Icon(Icons.download_outlined),
+                onPressed: () => _downloadPdf(context, async.value!),
+                tooltip: 'Download PDF',
+              ),
             IconButton(
               icon: const Icon(Icons.share_outlined),
               onPressed: () => _sharePdf(async.value!),
               tooltip: 'Share as PDF',
             ),
+          ],
         ],
       ),
       body: async.when(
@@ -57,6 +66,26 @@ class InvoiceDetailScreen extends ConsumerWidget {
     final invNum = invoiceNumber(inv['id'] as String, inv['created_at'] as String);
     final bytes  = await buildInvoicePdf(inv);
     await Printing.sharePdf(bytes: bytes, filename: '$invNum.pdf');
+  }
+
+  Future<void> _downloadPdf(BuildContext context, Map<String, dynamic> inv) async {
+    final invNum = invoiceNumber(inv['id'] as String, inv['created_at'] as String);
+    try {
+      final bytes = await buildInvoicePdf(inv);
+      final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+      final file = await File('${dir.path}/$invNum.pdf').writeAsBytes(bytes);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved ${file.path.split('/').last}')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not download the invoice. Please try again.')),
+        );
+      }
+    }
   }
 }
 

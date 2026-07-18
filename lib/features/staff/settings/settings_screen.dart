@@ -8,8 +8,10 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -137,16 +139,6 @@ class SettingsScreen extends ConsumerWidget {
                   isScrollControlled: true,
                   useSafeArea: true,
                   builder: (_) => const _PaymentsSheet(),
-                ),
-              ),
-              _SettingsRow(
-                icon: Icons.notifications_outlined,
-                label: 'Push Reminders',
-                onTap: () => showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => const _PushRemindersSheet(),
                 ),
               ),
               // BIOMETRIC HIDDEN — re-enable when ready to launch
@@ -800,6 +792,15 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   bool _loading     = false;
   String? _error;
   bool _initialized = false;
+  String _currencyCode = 'INR';
+
+  // ponytail: fixed shortlist; add codes here if a gym asks for one we missed
+  static const _currencies = [
+    'INR', 'USD', 'EUR', 'GBP', 'AED', 'SAR', 'QAR', 'KWD', 'OMR', 'BHD',
+    'AUD', 'CAD', 'NZD', 'SGD', 'MYR', 'PHP', 'IDR', 'THB', 'VND',
+    'BDT', 'LKR', 'NPR', 'PKR', 'ZAR', 'NGN', 'KES', 'EGP', 'TRY',
+    'MXN', 'BRL',
+  ];
   File? _logoFile;
   String? _logoUrl;
   bool _pickingLogo = false;
@@ -824,6 +825,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
     _websiteCtrl.text = _settings['website'] as String? ?? '';
     _descCtrl.text    = _settings['description'] as String? ?? '';
     _logoUrl          = _settings['logo_url'] as String?;
+    _currencyCode     = _settings['currency'] as String? ?? 'INR';
     _initialized = true;
   }
 
@@ -892,12 +894,14 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
         'phone': _phoneCtrl.text.trim(),
         'website': _websiteCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
+        'currency': _currencyCode,
         if (uploadedLogoUrl != null) 'logo_url': uploadedLogoUrl,
       };
       await Supabase.instance.client.from('gyms').update({
         'name': _nameCtrl.text.trim(),
         'settings': settings,
       }).eq('id', gymId);
+      setCurrency(_currencyCode);
       widget.onSaved();
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -959,6 +963,19 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
               const SizedBox(height: 14),
               const FieldLabel('Description (optional)'),
               TextFormField(controller: _descCtrl, maxLines: 2),
+              const SizedBox(height: 14),
+              const FieldLabel('Currency'),
+              DropdownButtonFormField<String>(
+                initialValue: _currencies.contains(_currencyCode) ? _currencyCode : 'INR',
+                items: [
+                  for (final c in _currencies)
+                    DropdownMenuItem(
+                      value: c,
+                      child: Text('$c (${NumberFormat.simpleCurrency(name: c).currencySymbol})'),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _currencyCode = v ?? 'INR'),
+              ),
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1340,119 +1357,6 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
                   style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
                 ),
               ],
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ─── Push Reminders sheet ─────────────────────────────────────────────────────
-const _kPushReminderDayOptions = [1, 2, 3, 5, 7, 14];
-
-class _PushRemindersSheet extends ConsumerStatefulWidget {
-  const _PushRemindersSheet();
-
-  @override
-  ConsumerState<_PushRemindersSheet> createState() => _PushRemindersSheetState();
-}
-
-class _PushRemindersSheetState extends ConsumerState<_PushRemindersSheet> {
-  String? _gymId;
-  bool _enabled = false;
-  Set<int> _days = {};
-  bool _saving = false;
-  bool _seeded = false;
-
-  void _seed(Map<String, dynamic> gym) {
-    if (_seeded) return;
-    _seeded = true;
-    _gymId = gym['id'] as String?;
-    _enabled = gym['push_reminder_enabled'] as bool? ?? false;
-    final rawDays = gym['push_reminder_days'] as List?;
-    _days = rawDays != null ? rawDays.map((d) => d as int).toSet() : {3, 7};
-  }
-
-  Future<void> _save({bool? enabledOverride, Set<int>? daysOverride}) async {
-    if (_gymId == null) return;
-    final enabled = enabledOverride ?? _enabled;
-    final days = daysOverride ?? _days;
-    setState(() => _saving = true);
-    try {
-      await Supabase.instance.client.from('gyms').update({
-        'push_reminder_enabled': enabled,
-        'push_reminder_days': days.toList()..sort(),
-      }).eq('id', _gymId!);
-      if (mounted) setState(() { _enabled = enabled; _days = days; });
-    } catch (e) {
-      debugPrint('[GymCRM] Push reminder settings save error: $e');
-      _toast('Failed to update setting');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  void _toggleDay(int day) {
-    final next = Set<int>.from(_days);
-    if (next.contains(day)) {
-      if (next.length == 1) return; // keep at least one day selected
-      next.remove(day);
-    } else {
-      next.add(day);
-    }
-    _save(daysOverride: next);
-  }
-
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final gymAsync = ref.watch(_gymProvider);
-    return _SheetScaffold(
-      title: 'Push Reminders',
-      child: gymAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Text('Error: $e'),
-        data: (gym) {
-          if (gym == null) return const Text('Gym not found');
-          _seed(gym);
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                const Expanded(
-                  child: Text(
-                    'Automatically send a push notification to members before their membership expires',
-                    style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft),
-                  ),
-                ),
-                Switch(
-                  value: _enabled,
-                  activeThumbColor: AppTheme.accent,
-                  onChanged: _saving ? null : (v) => _save(enabledOverride: v),
-                ),
-              ]),
-              const SizedBox(height: 18),
-              const FieldLabel('Send reminder before expiry'),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _kPushReminderDayOptions.map((d) => PillChip(
-                  label: '$d day${d == 1 ? '' : 's'}',
-                  selected: _days.contains(d),
-                  onTap: _saving ? () {} : () => _toggleDay(d),
-                )).toList(),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Reminders are sent once a day for members whose renewal date matches one of the selected windows.',
-                style: const TextStyle(fontSize: 12, color: AppTheme.inkHint, height: 1.4),
-              ),
             ],
           );
         },

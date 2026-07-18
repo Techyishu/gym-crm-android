@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyBaLeN4QUb3FhQLwJjaIPQA6kmYqHruMFY</string>
+	<key>GCM_SENDER_ID</key>
+	<string>520036297961</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.gymcrm.gymCrm</string>
+	<key>PROJECT_ID</key>
+	<string>gymcrm-analytics</string>
+	<key>STORAGE_BUCKET</key>
+	<string>gymcrm-analytics.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:520036297961:ios:a268f9957b0129c0cc1478</string>
+</dict>
+</plist>

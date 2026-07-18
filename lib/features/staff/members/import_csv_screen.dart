@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../auth/providers/auth_provider.dart';
 
 /// Bulk member import from a CSV file. Mirrors the web import-csv-dialog:
@@ -36,7 +37,7 @@ String _planLabel(Map<String, dynamic> p) {
   final unit = interval == 'custom'
       ? '${p['billing_interval_months'] ?? ''}mo'
       : (short[interval] ?? interval);
-  return '${p['name']} — ₹$price/$unit';
+  return '${p['name']} — $currencySymbol$price/$unit';
 }
 
 enum _Phase { upload, preview, importing, done }
@@ -372,6 +373,11 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                     ),
                     OutlinedButton.icon(
                       onPressed: _copyTemplate,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
                       icon: const Icon(Icons.copy, size: 14),
                       label: const Text('Copy template'),
                     ),

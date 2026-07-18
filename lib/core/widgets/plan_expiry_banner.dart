@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +37,10 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
   }
 
   Future<void> _maybeShow() async {
+    // iOS billing is entirely StoreKit-driven — Apple already sends its own
+    // renewal/expiry notices, so this custom nag popup never shows on iOS.
+    if (Platform.isIOS) return;
+
     final daysLeft = planExpiryDaysRemaining(widget.gym);
     if (daysLeft == null || daysLeft > 3) return;
 

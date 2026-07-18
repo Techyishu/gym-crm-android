@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "520036297961",
+    "project_id": "gymcrm-analytics",
+    "storage_bucket": "gymcrm-analytics.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:520036297961:android:6bbb729e3974b028cc1478",
+        "android_client_info": {
+          "package_name": "com.gymcrm.gym_crm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChtoHetD4BLFd5hCEe3OAADric4JMQDp8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

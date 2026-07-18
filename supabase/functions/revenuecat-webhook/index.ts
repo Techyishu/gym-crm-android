@@ -38,6 +38,13 @@ const LAPSED_EVENTS = new Set([
   'BILLING_ISSUE',
 ])
 
+// Consumable WhatsApp credit-pack products — App Store Connect product ID → credits.
+const CREDIT_PRODUCTS: Record<string, number> = {
+  gymcrm_credits_200: 200,
+  gymcrm_credits_300: 300,
+  gymcrm_credits_500: 500,
+}
+
 interface RcEvent {
   type: string
   app_user_id: string
@@ -100,6 +107,21 @@ Deno.serve(async (req: Request) => {
   if (!gymId) {
     // User may not have a staff profile (member-only account) — not an error.
     console.warn(`[rc-webhook] No gym for user=${app_user_id}, skipping`)
+    return new Response('ok', { status: 200 })
+  }
+
+  // ── Consumable credit-pack purchase (one-time, not a subscription) ────────────
+  if (type === 'NON_RENEWING_PURCHASE' && product_id && CREDIT_PRODUCTS[product_id]) {
+    const credits = CREDIT_PRODUCTS[product_id]
+    const { error } = await supabase.rpc('increment_whatsapp_credits', {
+      p_gym_id: gymId,
+      p_amount: credits,
+    })
+    if (error) {
+      console.error(`[rc-webhook] credit increment failed: ${error.message}`)
+      return new Response('DB error', { status: 500 })
+    }
+    console.log(`[rc-webhook] gym=${gymId} +${credits} whatsapp credits (${product_id})`)
     return new Response('ok', { status: 200 })
   }
 

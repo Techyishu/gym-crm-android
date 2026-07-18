@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/formatters.dart';
+
 final supabaseProvider = Provider<SupabaseClient>((ref) => Supabase.instance.client);
 
 /// True only while [AuthNotifier.signUp]'s create → sign-out → send-OTP handshake
@@ -48,7 +50,7 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
   final user = client.auth.currentUser;
   if (user == null) return null;
 
-  return await client
+  final profile = await client
       .from('profiles')
       .select(
         'id, role, gym_id, first_name, last_name, phone, '
@@ -58,6 +60,10 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
       )
       .eq('id', user.id)
       .maybeSingle();
+
+  final settings = (profile?['gyms'] as Map<String, dynamic>?)?['settings'];
+  setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
+  return profile;
 });
 
 // Convenience provider: just the role string for the current staff user.
@@ -96,11 +102,15 @@ final memberRecordProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
   final user = client.auth.currentUser;
   if (user == null) return null;
 
-  return await client
+  final member = await client
       .from('members')
-      .select('*, memberships(*, membership_plans(*))')
+      .select('*, memberships(*, membership_plans(*)), gyms(settings)')
       .eq('user_id', user.id)
       .maybeSingle();
+
+  final settings = (member?['gyms'] as Map<String, dynamic>?)?['settings'];
+  setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
+  return member;
 });
 
 class AuthNotifier extends StateNotifier<AsyncValue<void>> {

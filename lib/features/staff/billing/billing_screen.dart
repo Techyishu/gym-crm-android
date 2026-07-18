@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,21 +11,6 @@ import '../../../core/utils/invoice_pdf.dart';
 import '../../../shared/models/invoice.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
-
-final _invoicesProvider = FutureProvider.family<List<Invoice>, String>((ref, status) async {
-  final gymId = await ref.watch(gymIdProvider.future);
-  final client = Supabase.instance.client;
-
-  var query = client
-      .from('invoices')
-      .select('*, members(first_name, last_name, email, phone)')
-      .eq('gym_id', gymId);
-
-  if (status != 'all') query = query.eq('status', status);
-
-  final data = await query.order('created_at', ascending: false);
-  return (data as List).map((e) => Invoice.fromJson(e as Map<String, dynamic>)).toList();
-});
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
@@ -49,41 +35,191 @@ final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
       .order('first_name');
 });
 
-// KPI provider: this-month collected + pending dues, with counts.
-final _billingKpiProvider = FutureProvider<Map<String, num>>((ref) async {
+// Period shown on the balance card's hero number.
+enum BillingPeriod { today, week, month }
+
+// Money dashboard: collected totals for today/week/month (each vs the same
+// elapsed-length window immediately before it), open due count, and a merged
+// feed of recent payments + open dues (banking-app style).
+final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
   final now = DateTime.now();
-  final startOfMonth = DateTime(now.year, now.month, 1).toIso8601String();
+  final upperBound = now.add(const Duration(minutes: 1));
+  final startOfToday = DateTime(now.year, now.month, now.day);
+  final startOfYesterday = startOfToday.subtract(const Duration(days: 1));
+  final startOfWeek = startOfToday.subtract(Duration(days: now.weekday - 1));
+  final startOfMonth = DateTime(now.year, now.month, 1);
 
-  final paidFuture = client
-      .from('invoices')
-      .select('amount')
-      .eq('gym_id', gymId)
-      .eq('status', 'paid')
-      .gte('paid_at', startOfMonth);
-  final pendingFuture = client
-      .from('invoices')
-      .select('amount, member_id')
-      .eq('gym_id', gymId)
-      .eq('status', 'open');
+  final elapsedWeek = now.difference(startOfWeek);
+  final prevWeekStart = startOfWeek.subtract(elapsedWeek);
+  final elapsedMonth = now.difference(startOfMonth);
+  final prevMonthStart = startOfMonth.subtract(elapsedMonth);
 
-  final results = await Future.wait([paidFuture, pendingFuture]);
-  final paid = results[0] as List;
-  final pending = results[1] as List;
+  // Earliest bound any of the three period comparisons need.
+  final statsFrom = prevMonthStart.isBefore(prevWeekStart) ? prevMonthStart : prevWeekStart;
 
-  final revenue = paid.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
-  final pendingAmt = pending.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0.0));
-  final pendingMembers = pending.map((r) => r['member_id']).toSet().length;
+  final results = await Future.wait([
+    // Recent payments feed (with member/method info for display) — widened to
+    // the start of the month so the Today/Week/Month toggle always has data.
+    client
+        .from('payments')
+        .select('amount, method, created_at, invoice_id, invoices!inner(gym_id, members(first_name, last_name))')
+        .eq('invoices.gym_id', gymId)
+        .eq('status', 'succeeded')
+        .gte('created_at', startOfMonth.toIso8601String())
+        .order('created_at', ascending: false),
+    client
+        .from('invoices')
+        .select('id, amount, due_at, member_id, members(first_name, last_name, email, phone)')
+        .eq('gym_id', gymId)
+        .eq('status', 'open')
+        .order('due_at'),
+    // Wider-range, lightweight payments for the today/week/month sums.
+    client
+        .from('payments')
+        .select('amount, created_at, invoices!inner(gym_id)')
+        .eq('invoices.gym_id', gymId)
+        .eq('status', 'succeeded')
+        .gte('created_at', statsFrom.toIso8601String()),
+  ]);
 
-  return {
-    'revenue': revenue,
-    'pending': pendingAmt,
-    'paidCount': paid.length,
-    'pendingMembers': pendingMembers,
-  };
+  final payments = (results[0] as List).cast<Map<String, dynamic>>();
+  final dues = (results[1] as List).cast<Map<String, dynamic>>();
+  final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
+
+  double sumBetween(DateTime from, DateTime to) => statsPayments
+      .where((p) {
+        final t = DateTime.tryParse(p['created_at'] as String? ?? '');
+        return t != null && !t.isBefore(from) && t.isBefore(to);
+      })
+      .fold<double>(0, (s, p) => s + ((p['amount'] as num?)?.toDouble() ?? 0));
+
+  int? pctChange(double current, double previous) =>
+      previous > 0 ? ((current - previous) / previous * 100).round() : null;
+
+  final collectedToday = sumBetween(startOfToday, upperBound);
+  final collectedYesterday = sumBetween(startOfYesterday, startOfToday);
+  final collectedWeek = sumBetween(startOfWeek, upperBound);
+  final collectedPrevWeek = sumBetween(prevWeekStart, startOfWeek);
+  final collectedMonth = sumBetween(startOfMonth, upperBound);
+  final collectedPrevMonth = sumBetween(prevMonthStart, startOfMonth);
+
+  final items = <_TxnItem>[
+    for (final p in payments) _TxnItem.payment(p),
+    for (final d in dues) _TxnItem.due(d),
+  ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
+
+  return _BillingFeed(
+    collected: {
+      BillingPeriod.today: collectedToday,
+      BillingPeriod.week: collectedWeek,
+      BillingPeriod.month: collectedMonth,
+    },
+    growthPct: {
+      BillingPeriod.today: pctChange(collectedToday, collectedYesterday),
+      BillingPeriod.week: pctChange(collectedWeek, collectedPrevWeek),
+      BillingPeriod.month: pctChange(collectedMonth, collectedPrevMonth),
+    },
+    dueCount: dues.length,
+    items: items,
+    periodStart: {
+      BillingPeriod.today: startOfToday,
+      BillingPeriod.week: startOfWeek,
+      BillingPeriod.month: startOfMonth,
+    },
+  );
 });
+
+class _BillingFeed {
+  final Map<BillingPeriod, double> collected;
+  final Map<BillingPeriod, int?> growthPct;
+  final int dueCount;
+  final List<_TxnItem> items;
+  final Map<BillingPeriod, DateTime> periodStart;
+  const _BillingFeed({
+    required this.collected,
+    required this.growthPct,
+    required this.dueCount,
+    required this.items,
+    required this.periodStart,
+  });
+}
+
+// One row in the merged feed — either a collected payment or an open due.
+class _TxnItem {
+  final bool isDue;
+  final String invoiceId;
+  final String name;
+  final double amount;
+  final String subtitle;
+  final Color color;
+  final DateTime sortKey;
+  final Map<String, dynamic> raw;
+
+  const _TxnItem._({
+    required this.isDue,
+    required this.invoiceId,
+    required this.name,
+    required this.amount,
+    required this.subtitle,
+    required this.color,
+    required this.sortKey,
+    required this.raw,
+  });
+
+  factory _TxnItem.payment(Map<String, dynamic> p) {
+    final invoice = p['invoices'] as Map<String, dynamic>?;
+    final member = invoice?['members'] as Map<String, dynamic>?;
+    final created = DateTime.tryParse(p['created_at'] as String? ?? '') ?? DateTime.now();
+    final method = (p['method'] as String?)?.replaceAll('_', ' ') ?? '';
+    final methodLabel = method.isEmpty ? 'Payment' : method[0].toUpperCase() + method.substring(1);
+    return _TxnItem._(
+      isDue: false,
+      invoiceId: p['invoice_id'] as String? ?? '',
+      name: member != null ? '${member['first_name']} ${member['last_name']}' : 'Unknown',
+      amount: (p['amount'] as num?)?.toDouble() ?? 0,
+      subtitle: '$methodLabel · ${DateFormat('d MMM, h:mm a').format(created.toLocal())}',
+      color: AppTheme.statusActive,
+      sortKey: created,
+      raw: p,
+    );
+  }
+
+  factory _TxnItem.due(Map<String, dynamic> inv) {
+    final member = inv['members'] as Map<String, dynamic>?;
+    final due = DateTime.tryParse(inv['due_at'] as String? ?? '');
+    String subtitle;
+    Color color;
+    if (due == null) {
+      subtitle = 'Due';
+      color = AppTheme.statusWarn;
+    } else {
+      final days = due.difference(DateTime.now()).inDays;
+      if (days < 0) {
+        subtitle = '${days.abs()} day${days == -1 ? '' : 's'} overdue';
+        color = AppTheme.statusDanger;
+      } else if (days == 0) {
+        subtitle = 'Due today';
+        color = AppTheme.statusWarn;
+      } else {
+        subtitle = 'Due in $days day${days == 1 ? '' : 's'}';
+        color = AppTheme.statusWarn;
+      }
+    }
+    return _TxnItem._(
+      isDue: true,
+      invoiceId: inv['id'] as String? ?? '',
+      name: member != null ? '${member['first_name']} ${member['last_name']}' : 'Unknown',
+      amount: (inv['amount'] as num?)?.toDouble() ?? 0,
+      subtitle: subtitle,
+      color: color,
+      sortKey: due ?? DateTime.now(),
+      raw: inv,
+    );
+  }
+}
 
 class BillingScreen extends ConsumerStatefulWidget {
   const BillingScreen({super.key});
@@ -93,91 +229,152 @@ class BillingScreen extends ConsumerStatefulWidget {
 }
 
 class _BillingScreenState extends ConsumerState<BillingScreen> {
-  static const _monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // 'all' | 'due' | 'collected'
+  String _filter = 'all';
+  BillingPeriod _period = BillingPeriod.month;
 
   @override
   Widget build(BuildContext context) {
-    final kpi = ref.watch(_billingKpiProvider);
+    final feed = ref.watch(_billingFeedProvider);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Row(
-                children: [
-                  const Text('Payments',
+        child: RefreshIndicator(
+          color: AppTheme.accent,
+          onRefresh: () async => ref.invalidate(_billingFeedProvider),
+          child: CustomScrollView(
+            slivers: [
+              const SliverPadding(
+                padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
+                sliver: SliverToBoxAdapter(
+                  child: Text('Billing',
                     style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => _PlansTab(ref: ref)),
-                    ),
-                    child: Container(
-                      width: 38, height: 38,
-                      decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
-                      child: const Icon(Icons.sell_outlined, size: 19, color: AppTheme.ink),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () => _showCreateInvoiceSheet(context),
-                    child: Container(
-                      width: 38, height: 38,
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [BoxShadow(color: Color(0x33DF5B34), blurRadius: 10, offset: Offset(0, 3))],
-                      ),
-                      child: const Icon(Icons.add, size: 21, color: Colors.white),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-            kpi.when(
-              loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
-              data: (data) => _buildKpiRow(data),
-            ),
-            Expanded(child: _InvoicesTab(ref: ref)),
-          ],
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                sliver: SliverToBoxAdapter(
+                  child: feed.when(
+                    loading: () => const _BalanceCardSkeleton(),
+                    error: (_, __) => const _BalanceCardSkeleton(),
+                    data: (data) => _BalanceCard(
+                      period: _period,
+                      onPeriodChange: (p) => setState(() => _period = p),
+                      collected: data.collected[_period] ?? 0,
+                      growthPct: data.growthPct[_period],
+                      dueCount: data.dueCount,
+                      onRecord: () => setState(() => _filter = 'due'),
+                      onInvoice: () => _showCreateInvoiceSheet(context),
+                      onNewPlan: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const _PlansTab()),
+                      ),
+                      onDue: () => setState(() => _filter = 'due'),
+                    ),
+                  ),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                sliver: SliverToBoxAdapter(
+                  child: Row(
+                    children: [
+                      const Text('All transactions',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                      const Spacer(),
+                      PopupMenuButton<String>(
+                        initialValue: _filter,
+                        onSelected: (v) => setState(() => _filter = v),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'all', child: Text('All')),
+                          PopupMenuItem(value: 'due', child: Text('Due')),
+                          PopupMenuItem(value: 'collected', child: Text('Collected')),
+                        ],
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Filter', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                            SizedBox(width: 2),
+                            Icon(Icons.keyboard_arrow_down, size: 18, color: AppTheme.accent),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              feed.when(
+                loading: () => SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  sliver: SliverList.builder(
+                    itemCount: 6,
+                    itemBuilder: (_, __) => Shimmer.fromColors(
+                      baseColor: const Color(0xFFE8E8E8),
+                      highlightColor: const Color(0xFFF5F5F5),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        height: 68,
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                  ),
+                ),
+                error: (_, __) => const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: Center(child: Text('Could not load transactions. Pull to retry.', style: TextStyle(color: AppTheme.inkSoft))),
+                  ),
+                ),
+                data: (data) {
+                  final periodStart = data.periodStart[_period];
+                  bool inPeriod(_TxnItem t) =>
+                      t.isDue || periodStart == null || !t.sortKey.isBefore(periodStart);
+                  final items = data.items.where((t) {
+                    if (_filter == 'due') return t.isDue;
+                    if (_filter == 'collected') return !t.isDue && inPeriod(t);
+                    return inPeriod(t);
+                  }).toList();
+                  if (items.isEmpty) {
+                    return const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: Text('No transactions', style: TextStyle(color: AppTheme.inkHint, fontSize: 14))),
+                      ),
+                    );
+                  }
+                  return SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                    sliver: SliverList.builder(
+                      itemCount: items.length,
+                      itemBuilder: (_, i) => _TxnCard(
+                        item: items[i],
+                        onTap: () => _openInvoice(context, items[i]),
+                        onCollect: () => _collect(context, items[i]),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildKpiRow(Map<String, num> data) {
-    final month = _monthsShort[DateTime.now().month - 1];
-    final pendingMembers = (data['pendingMembers'] ?? 0).toInt();
-    final paidCount = (data['paidCount'] ?? 0).toInt();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: _KpiCard(
-              label: 'Pending dues',
-              value: formatCurrency((data['pending'] ?? 0).toDouble()),
-              valueColor: AppTheme.statusDanger,
-              sub: '$pendingMembers member${pendingMembers == 1 ? '' : 's'}',
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _KpiCard(
-              label: 'Collected · $month',
-              value: formatCurrency((data['revenue'] ?? 0).toDouble()),
-              valueColor: AppTheme.statusActive,
-              sub: '$paidCount payment${paidCount == 1 ? '' : 's'}',
-            ),
-          ),
-        ],
-      ),
-    );
+  void _openInvoice(BuildContext context, _TxnItem item) {
+    if (item.invoiceId.isEmpty) return;
+    context.push('/invoice/${item.invoiceId}');
+  }
+
+  void _collect(BuildContext context, _TxnItem item) {
+    final invoice = Invoice.fromJson(item.raw);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _RecordPaymentSheet(invoice: invoice),
+    ).then((_) => ref.invalidate(_billingFeedProvider));
   }
 
   void _showCreateInvoiceSheet(BuildContext context) {
@@ -186,131 +383,137 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => const _CreateInvoiceSheet(),
-    ).then((_) => ref.invalidate(_invoicesProvider('all')));
+    ).then((_) => ref.invalidate(_billingFeedProvider));
   }
 }
 
-// ── KPI Card ──────────────────────────────────────────────────────────────────
+// ── Balance Card (banking-app hero) ─────────────────────────────────────────
 
-class _KpiCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color valueColor;
-  final String sub;
-  const _KpiCard({required this.label, required this.value, required this.valueColor, required this.sub});
+class _BalanceCard extends StatelessWidget {
+  final BillingPeriod period;
+  final ValueChanged<BillingPeriod> onPeriodChange;
+  final double collected;
+  final int? growthPct;
+  final int dueCount;
+  final VoidCallback onRecord;
+  final VoidCallback onInvoice;
+  final VoidCallback onNewPlan;
+  final VoidCallback onDue;
+  const _BalanceCard({
+    required this.period,
+    required this.onPeriodChange,
+    required this.collected,
+    required this.growthPct,
+    required this.dueCount,
+    required this.onRecord,
+    required this.onInvoice,
+    required this.onNewPlan,
+    required this.onDue,
+  });
+
+  String get _label => switch (period) {
+    BillingPeriod.today => 'Collected today',
+    BillingPeriod.week => 'Collected this week',
+    BillingPeriod.month => 'Collected this month',
+  };
+
+  String get _growthSuffix => switch (period) {
+    BillingPeriod.today => 'vs yesterday',
+    BillingPeriod.week => 'vs last week',
+    BillingPeriod.month => 'vs last month',
+  };
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: AppTheme.cardDecoration(),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+      decoration: AppTheme.darkCardDecoration(),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
-          const SizedBox(height: 6),
+          _PeriodTabs(period: period, onChange: onPeriodChange),
+          const SizedBox(height: 14),
+          Text(_label,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+          const SizedBox(height: 8),
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text(value, style: AppTheme.numberStyle(fontSize: 22, color: valueColor)),
+            child: Text(formatCurrency(collected),
+              style: AppTheme.numberStyle(fontSize: 34, color: AppTheme.onDark, height: 1.0)),
           ),
-          const SizedBox(height: 4),
-          Text(sub, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkHint)),
+          if (growthPct != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              '${growthPct! >= 0 ? '↑' : '↓'} ${growthPct!.abs()}% $_growthSuffix',
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark),
+            ),
+          ],
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _DockAction(icon: Icons.credit_card_outlined, label: 'Record', onTap: onRecord),
+              _DockAction(icon: Icons.receipt_outlined, label: 'Invoice', onTap: onInvoice),
+              _DockAction(icon: Icons.sell_outlined, label: 'New plan', onTap: onNewPlan),
+              _DockAction(icon: Icons.schedule_outlined, label: 'Due · $dueCount', onTap: onDue),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-// ── Invoices Tab ──────────────────────────────────────────────────────────────
+// Small Today/Week/Month segmented control.
+class _PeriodTabs extends StatelessWidget {
+  final BillingPeriod period;
+  final ValueChanged<BillingPeriod> onChange;
+  const _PeriodTabs({required this.period, required this.onChange});
 
-class _InvoicesTab extends StatefulWidget {
-  final WidgetRef ref;
-  const _InvoicesTab({required this.ref});
-
-  @override
-  State<_InvoicesTab> createState() => _InvoicesTabState();
-}
-
-class _InvoicesTabState extends State<_InvoicesTab> {
-  String _filter = 'open';
+  static const _options = [
+    (BillingPeriod.today, 'Today'),
+    (BillingPeriod.week, 'Week'),
+    (BillingPeriod.month, 'Month'),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final invoices = widget.ref.watch(_invoicesProvider(_filter));
-    final dueCount = widget.ref.watch(_invoicesProvider('open')).valueOrNull?.length;
-
-    return Column(
-      children: [
-        // Underline tabs: Due (n) · Collected · All
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: Row(
-            children: [
-              _UnderlineTab(
-                label: dueCount != null ? 'Due ($dueCount)' : 'Due',
-                selected: _filter == 'open',
-                onTap: () => setState(() => _filter = 'open'),
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: AppTheme.darkCard2, borderRadius: BorderRadius.circular(11)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: _options.map((o) {
+          final selected = o.$1 == period;
+          return GestureDetector(
+            onTap: () => onChange(o.$1),
+            behavior: HitTestBehavior.opaque,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: selected ? AppTheme.onDark : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(width: 20),
-              _UnderlineTab(
-                label: 'Collected',
-                selected: _filter == 'paid',
-                onTap: () => setState(() => _filter = 'paid'),
-              ),
-              const SizedBox(width: 20),
-              _UnderlineTab(
-                label: 'All',
-                selected: _filter == 'all',
-                onTap: () => setState(() => _filter = 'all'),
-              ),
-              const Spacer(),
-            ],
-          ),
-        ),
-        Expanded(
-          child: invoices.when(
-            loading: () => _BillingShimmer(),
-            error: (e, _) => const Center(child: Text('Could not load invoices. Pull to retry.', style: TextStyle(color: AppTheme.inkSoft))),
-            data: (list) => list.isEmpty
-                ? const Center(
-                    child: Text('No invoices', style: TextStyle(color: AppTheme.inkHint, fontSize: 14)),
-                  )
-                : RefreshIndicator(
-                    color: AppTheme.accent,
-                    onRefresh: () async => widget.ref.invalidate(_invoicesProvider(_filter)),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                      itemCount: list.length,
-                      itemBuilder: (_, i) => _InvoiceCard(
-                        invoice: list[i],
-                        onTap: () => context.push('/invoice/${list[i].id}'),
-                        onMarkPaid: () => _showRecordPaymentSheet(context, list[i], widget.ref),
-                      ),
-                    ),
-                  ),
-          ),
-        ),
-      ],
+              child: Text(o.$2,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? AppTheme.darkCard : AppTheme.onDarkSoft,
+                )),
+            ),
+          );
+        }).toList(),
+      ),
     );
-  }
-
-  void _showRecordPaymentSheet(BuildContext context, Invoice invoice, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _RecordPaymentSheet(invoice: invoice),
-    ).then((_) => ref.invalidate(_invoicesProvider(_filter)));
   }
 }
 
-// ── Invoice Card ──────────────────────────────────────────────────────────────
-
-class _UnderlineTab extends StatelessWidget {
+class _DockAction extends StatelessWidget {
+  final IconData icon;
   final String label;
-  final bool selected;
   final VoidCallback onTap;
-  const _UnderlineTab({required this.label, required this.selected, required this.onTap});
+  const _DockAction({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -320,66 +523,41 @@ class _UnderlineTab extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-              color: selected ? AppTheme.ink : AppTheme.inkHint,
-            )),
-          const SizedBox(height: 6),
           Container(
-            height: 2.5,
-            width: 34,
-            decoration: BoxDecoration(
-              color: selected ? AppTheme.accent : Colors.transparent,
-              borderRadius: BorderRadius.circular(2),
-            ),
+            width: 46, height: 46,
+            decoration: BoxDecoration(color: AppTheme.darkCard2, shape: BoxShape.circle),
+            child: Icon(icon, size: 19, color: AppTheme.onDark),
           ),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
         ],
       ),
     );
   }
 }
 
-class _InvoiceCard extends StatelessWidget {
-  final Invoice invoice;
-  final VoidCallback onTap;
-  final VoidCallback onMarkPaid;
-  const _InvoiceCard({required this.invoice, required this.onTap, required this.onMarkPaid});
-
-  String get _subtitle {
-    final parts = <String>[];
-    if (invoice.description != null && invoice.description!.isNotEmpty) {
-      parts.add(invoice.description!);
-    }
-    if (invoice.status == 'paid') {
-      if (invoice.paidAt != null) parts.add('Paid ${formatDateFromString(invoice.paidAt)}');
-    } else if (invoice.dueAt != null) {
-      final due = DateTime.tryParse(invoice.dueAt!);
-      if (due != null) {
-        final days = due.difference(DateTime.now()).inDays;
-        if (days < 0) {
-          parts.add('${days.abs()} day${days == -1 ? '' : 's'} overdue');
-        } else if (days == 0) {
-          parts.add('due today');
-        } else if (days == 1) {
-          parts.add('due tomorrow');
-        } else {
-          parts.add('due in $days days');
-        }
-      }
-    }
-    return parts.join(' · ');
-  }
+class _BalanceCardSkeleton extends StatelessWidget {
+  const _BalanceCardSkeleton();
 
   @override
   Widget build(BuildContext context) {
-    final open = invoice.status == 'open';
-    final overdue = open &&
-        invoice.dueAt != null &&
-        (DateTime.tryParse(invoice.dueAt!)?.isBefore(DateTime.now()) ?? false);
-    final name = invoice.member?.fullName ?? 'Unknown';
+    return Container(
+      height: 216,
+      decoration: AppTheme.darkCardDecoration(),
+    );
+  }
+}
 
+// ── Transaction Card ─────────────────────────────────────────────────────────
+
+class _TxnCard extends StatelessWidget {
+  final _TxnItem item;
+  final VoidCallback onTap;
+  final VoidCallback onCollect;
+  const _TxnCard({required this.item, required this.onTap, required this.onCollect});
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -388,43 +566,38 @@ class _InvoiceCard extends StatelessWidget {
         decoration: AppTheme.cardDecoration(),
         child: Row(
           children: [
-            InitialsAvatar(name: name, size: 44),
+            InitialsAvatar(name: item.name, size: 44),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
+                  Text(item.name,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
-                  if (_subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(_subtitle,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: invoice.status == 'paid'
-                            ? AppTheme.inkSoft
-                            : overdue ? AppTheme.statusDanger : AppTheme.statusWarn,
-                      )),
-                  ],
+                  const SizedBox(height: 2),
+                  Text(item.subtitle,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: item.color)),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(formatCurrency(invoice.amount),
-                  style: AppTheme.numberStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 6),
-                if (open)
-                  PillButton(label: 'Collect', onTap: onMarkPaid)
-                else
-                  StatusPill.active(label: invoice.status[0].toUpperCase() + invoice.status.substring(1)),
-              ],
-            ),
+            if (item.isDue)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('${formatCurrency(item.amount)} due',
+                    style: AppTheme.numberStyle(fontSize: 15, fontWeight: FontWeight.w800, color: item.color)),
+                  const SizedBox(height: 6),
+                  PillButton(label: 'Collect', onTap: onCollect),
+                ],
+              )
+            else
+              Text(
+                '+${formatCurrency(item.amount)}',
+                style: AppTheme.numberStyle(fontSize: 15, fontWeight: FontWeight.w800, color: item.color),
+              ),
           ],
         ),
       ),
@@ -664,7 +837,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
         if (plan != null && plan['price'] != null) {
           final price = (plan['price'] as num).toStringAsFixed(0);
           _amountCtrl.text = price;
-          _planHint = '${plan['name']} — ₹$price';
+          _planHint = '${plan['name']} — $currencySymbol$price';
         }
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _dueAt = npd.split('T').first;
@@ -766,7 +939,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(prefixText: '₹ '),
+              decoration: InputDecoration(prefixText: '$currencySymbol '),
             ),
             if (_planHint != null) ...[
               const SizedBox(height: 4),
@@ -779,7 +952,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               controller: _discountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(prefixText: '₹ '),
+              decoration: InputDecoration(prefixText: '$currencySymbol '),
             ),
             const SizedBox(height: 14),
             const FieldLabel('Description (optional)'),
@@ -948,38 +1121,13 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
   }
 }
 
-// ── Billing Shimmer ───────────────────────────────────────────────────────────
-
-class _BillingShimmer extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: 6,
-      itemBuilder: (_, __) => Shimmer.fromColors(
-        baseColor: const Color(0xFFE8E8E8),
-        highlightColor: const Color(0xFFF5F5F5),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          height: 100,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ── Plans Tab ─────────────────────────────────────────────────────────────────
 
-class _PlansTab extends StatelessWidget {
-  final WidgetRef ref;
-  const _PlansTab({required this.ref});
+class _PlansTab extends ConsumerWidget {
+  const _PlansTab();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final plans = ref.watch(_plansProvider);
 
     return Scaffold(
@@ -1222,7 +1370,7 @@ class _PlanFormSheetState extends ConsumerState<_PlanFormSheet> {
                     TextFormField(
                       controller: _priceCtrl,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(prefixText: '₹ '),
+                      decoration: InputDecoration(prefixText: '$currencySymbol '),
                       validator: (v) {
                         if (v?.trim().isEmpty ?? true) return 'Required';
                         if (double.tryParse(v!) == null) return 'Enter a valid price';

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/access/role_access.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -37,10 +38,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
       client.from('invoices').select('amount').eq('gym_id', gymId).inFilter('status', ['pending', 'open', 'overdue']),
       client.from('invoices').select('amount').eq('gym_id', gymId).eq('status', 'paid').gte('paid_at', startOfMonth),
       client.from('invoices').select('amount, paid_at').eq('gym_id', gymId).eq('status', 'paid').gte('paid_at', lastMonthStart).lt('paid_at', startOfMonth),
-      // Renewals due within 7 days.
+      // Renewals due within 7 days (includes today — "Payment due today" splits those out client-side).
       client.from('members').select('id, first_name, last_name, phone, next_payment_date, avatar_url').eq('gym_id', gymId).eq('status', 'active').gte('next_payment_date', todayDate).lte('next_payment_date', in7Days).order('next_payment_date'),
-      // Recently expired members needing follow-up.
-      client.from('members').select('id, first_name, last_name, phone, next_payment_date, avatar_url').eq('gym_id', gymId).eq('status', 'expired').order('next_payment_date', ascending: false).limit(3),
       // Recent paid invoices for the "Recent payments" section.
       client.from('invoices').select('amount, paid_at, members(first_name, last_name, avatar_url)').eq('gym_id', gymId).eq('status', 'paid').order('paid_at', ascending: false).limit(4),
       // Today's check-in feed.
@@ -83,10 +82,9 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
     'monthRevenue':     monthRevenue,
     'growthPct':        growthPct,
     'renewals':         rows[4],
-    'expiredRecent':    rows[5],
-    'recentPaid':       rows[6],
-    'todayCheckinsList': rows[7],
-    'recentLeads':      rows[8],
+    'recentPaid':       rows[5],
+    'todayCheckinsList': rows[6],
+    'recentLeads':      rows[7],
   };
 });
 
@@ -215,7 +213,7 @@ class _DashboardBody extends ConsumerWidget {
           const SizedBox(height: 10),
           _QuickActions(canCollect: canCollect, canLeads: canLeads),
           const SizedBox(height: 16),
-          _NeedsAttention(data: data, canCollect: canCollect),
+          _PaymentDueToday(data: data, canCollect: canCollect),
           const SizedBox(height: 16),
           _UpcomingPayments(data: data, canCollect: canCollect),
           const SizedBox(height: 16),
@@ -646,7 +644,8 @@ class _Header extends StatelessWidget {
 // ─── Collected today hero (dark card) ─────────────────────────────────────────
 
 String _rupees(double v) {
-  if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(2)}L';
+  if (currencyCode != 'INR') return formatCurrency(v);
+  if (v >= 100000) return '$currencySymbol${(v / 100000).toStringAsFixed(2)}L';
   final s = v.toStringAsFixed(0);
   final buf = StringBuffer();
   for (var i = 0; i < s.length; i++) {
@@ -657,7 +656,7 @@ String _rupees(double v) {
       if (left == 3 || (left > 3 && (left - 3) % 2 == 0)) buf.write(',');
     }
   }
-  return '₹${buf.toString()}';
+  return '$currencySymbol${buf.toString()}';
 }
 
 class _CollectedHero extends StatelessWidget {
@@ -754,12 +753,12 @@ class _StatRow extends StatelessWidget {
   }
 }
 
-// ─── Needs attention ──────────────────────────────────────────────────────────
+// ─── Payment due today ──────────────────────────────────────────────────────────
 
-class _NeedsAttention extends ConsumerWidget {
+class _PaymentDueToday extends ConsumerWidget {
   final Map<String, dynamic> data;
   final bool canCollect;
-  const _NeedsAttention({required this.data, required this.canCollect});
+  const _PaymentDueToday({required this.data, required this.canCollect});
 
   Future<void> _showCollect(BuildContext ctx, WidgetRef ref, Map<String, dynamic> member) async {
     await showModalBottomSheet(
@@ -773,30 +772,29 @@ class _NeedsAttention extends ConsumerWidget {
     );
   }
 
-  Future<void> _whatsApp(Map<String, dynamic> member) async {
-    final phone = member['phone'] as String?;
-    if (phone == null || phone.isEmpty) return;
-    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
-    final first = member['first_name'] as String? ?? '';
-    final msg = Uri.encodeComponent('Hi $first! Your gym membership payment is due. Please renew at your earliest. 🙏');
-    final url = Uri.parse('https://wa.me/91$cleaned?text=$msg');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
-    final expired = (data['expiredRecent'] as List<dynamic>).cast<Map<String, dynamic>>();
+    final today = DateTime(now.year, now.month, now.day);
+    final renewals = (data['renewals'] as List<dynamic>).cast<Map<String, dynamic>>();
+    // "renewals" is due-within-7-days; a member is due today when their
+    // next_payment_date falls on (or before, still-active grace) today.
+    final dueToday = renewals.where((m) {
+      final npd = m['next_payment_date'] as String?;
+      if (npd == null) return false;
+      final d = DateTime.parse(npd);
+      return !DateTime(d.year, d.month, d.day).isAfter(today);
+    }).toList();
 
-    if (expired.isEmpty) {
+    if (dueToday.isEmpty) {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const SectionHeader(title: 'Needs attention'),
+        const SectionHeader(title: 'Payment due today'),
         const SizedBox(height: 10),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 22),
           decoration: AppTheme.cardDecoration(),
-          child: const Center(child: Text('All good — nothing needs attention',
+          child: const Center(child: Text('No payments due today',
             style: TextStyle(fontSize: 13, color: AppTheme.inkHint))),
         ),
       ]);
@@ -804,26 +802,25 @@ class _NeedsAttention extends ConsumerWidget {
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SectionHeader(
-        title: 'Needs attention',
+        title: 'Payment due today',
         actionLabel: 'See all',
         onAction: () => context.push('/staff/upcoming-payments'),
       ),
       const SizedBox(height: 10),
       CardList(
-        children: expired.map((m) {
+        children: dueToday.map((m) {
           final npd = m['next_payment_date'] as String?;
-          var since = '';
+          var subtitle = 'Due today';
           if (npd != null) {
-            final days = now.difference(DateTime.parse(npd)).inDays;
-            since = days > 0 ? ' $days day${days == 1 ? '' : 's'} ago' : '';
+            final days = today.difference(DateTime(DateTime.parse(npd).year, DateTime.parse(npd).month, DateTime.parse(npd).day)).inDays;
+            if (days > 0) subtitle = '$days day${days == 1 ? '' : 's'} overdue';
           }
           return _AttentionRow(
             member: m,
-            subtitle: 'Plan expired$since',
+            subtitle: subtitle,
             subColor: AppTheme.statusDanger,
             canCollect: canCollect,
             onCollect: () => _showCollect(context, ref, m),
-            onRemind: () => _whatsApp(m),
           );
         }).toList(),
       ),
@@ -850,20 +847,17 @@ class _UpcomingPayments extends ConsumerWidget {
     );
   }
 
-  Future<void> _whatsApp(Map<String, dynamic> member) async {
-    final phone = member['phone'] as String?;
-    if (phone == null || phone.isEmpty) return;
-    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
-    final first = member['first_name'] as String? ?? '';
-    final msg = Uri.encodeComponent('Hi $first! Your gym membership payment is due. Please renew at your earliest. 🙏');
-    final url = Uri.parse('https://wa.me/91$cleaned?text=$msg');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
-    final renewals = (data['renewals'] as List<dynamic>).cast<Map<String, dynamic>>();
+    final today = DateTime(now.year, now.month, now.day);
+    // Exclude today's dues — those surface in the "Payment due today" section.
+    final renewals = (data['renewals'] as List<dynamic>).cast<Map<String, dynamic>>().where((m) {
+      final npd = m['next_payment_date'] as String?;
+      if (npd == null) return false;
+      final d = DateTime.parse(npd);
+      return DateTime(d.year, d.month, d.day).isAfter(today);
+    }).toList();
     if (renewals.isEmpty) return const SizedBox.shrink();
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -877,14 +871,13 @@ class _UpcomingPayments extends ConsumerWidget {
         children: renewals.map((m) {
           final npd = m['next_payment_date'] as String?;
           final days = npd != null ? DateTime.parse(npd).difference(now).inDays : 0;
-          final subtitle = days <= 0 ? 'Due today' : 'Due in $days day${days == 1 ? '' : 's'}';
+          final subtitle = 'Due in $days day${days == 1 ? '' : 's'}';
           return _AttentionRow(
             member: m,
             subtitle: subtitle,
             subColor: AppTheme.statusWarn,
             canCollect: canCollect,
             onCollect: () => _showCollect(context, ref, m),
-            onRemind: () => _whatsApp(m),
           );
         }).toList(),
       ),
@@ -900,7 +893,6 @@ class _AttentionRow extends StatelessWidget {
   final Color subColor;
   final bool canCollect;
   final VoidCallback onCollect;
-  final VoidCallback onRemind;
 
   const _AttentionRow({
     required this.member,
@@ -908,7 +900,6 @@ class _AttentionRow extends StatelessWidget {
     required this.subColor,
     required this.canCollect,
     required this.onCollect,
-    required this.onRemind,
   });
 
   @override
@@ -933,12 +924,8 @@ class _AttentionRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        if (canCollect) ...[
+        if (canCollect)
           PillButton(label: 'Collect', onTap: onCollect),
-          const SizedBox(width: 6),
-          PillButton(label: 'Remind', filled: false, onTap: onRemind),
-        ] else
-          PillButton(label: 'Message', filled: false, onTap: onRemind),
       ]),
     );
   }
@@ -996,7 +983,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         if (plan != null && plan['price'] != null) {
           final price = (plan['price'] as num).toStringAsFixed(0);
           _amountCtrl.text = price;
-          _planHint = '${plan['name']} — ₹$price';
+          _planHint = '${plan['name']} — $currencySymbol$price';
         }
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;
@@ -1075,22 +1062,11 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     }
   }
 
-  Future<void> _sendWhatsApp() async {
-    final phone = widget.member['phone'] as String?;
-    final firstName = widget.member['first_name'] as String? ?? '';
-    if (phone == null || phone.isEmpty) return;
-    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
-    final msg = Uri.encodeComponent('Hi $firstName! Your gym membership payment is due. Please make the payment at your earliest. 🙏');
-    final url = Uri.parse('https://wa.me/91$cleaned?text=$msg');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
     final firstName = widget.member['first_name'] as String? ?? '';
     final lastName  = widget.member['last_name']  as String? ?? '';
     final name      = '$firstName $lastName'.trim();
-    final phone     = widget.member['phone'] as String?;
 
     return Padding(
       padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
@@ -1114,7 +1090,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
           TextFormField(
             controller: _amountCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Amount (₹) *', prefixIcon: Icon(Icons.currency_rupee)),
+            decoration: InputDecoration(labelText: 'Amount ($currencySymbol) *', prefixText: '$currencySymbol '),
           ),
           if (_planHint != null) ...[
             const SizedBox(height: 4),
@@ -1161,22 +1137,6 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
                 ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : const Text('Collect Payment'),
           ),
-          if (phone != null && phone.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _sendWhatsApp,
-                icon: const Icon(Icons.chat_bubble_outline, size: 18, color: Color(0xFF25D366)),
-                label: const Text('WhatsApp Reminder'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF25D366),
-                  side: const BorderSide(color: Color(0xFF25D366)),
-                  minimumSize: const Size(double.infinity, 44),
-                ),
-              ),
-            ),
-          ],
         ]),
       ),
     );

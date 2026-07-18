@@ -43,7 +43,7 @@ class _PolicyContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: const [
-        _UpdatedChip(date: 'Last updated: 23 June 2026'),
+        _UpdatedChip(date: 'Last updated: 16 July 2026'),
         SizedBox(height: 16),
         _Heading('Privacy Policy — GymCRM'),
         _Body(
@@ -59,7 +59,8 @@ class _PolicyContent extends StatelessWidget {
               'billing history, class schedules, and documents that you enter into the app.\n\n'
               'Device & usage data: IP address, device type, OS version, and in-app activity logs used to improve performance and diagnose issues. '
               'Error reports and stack traces are sent to Sentry (US) for crash diagnosis. '
-              'Usage patterns are tracked via PostHog analytics (US).\n\n'
+              'Usage patterns are tracked via PostHog analytics (US) and Google Firebase Analytics (US), which collect device identifiers, '
+              'screens viewed, and in-app interactions.\n\n'
               'Login monitoring: when you log in, the gym name and timestamp are sent to an internal monitoring channel for operational health purposes.\n\n'
               'Camera & photos: with your permission, to scan QR codes for member check-in and to upload profile photos. '
               'Member photos are stored in a private storage bucket and are never publicly accessible.',
@@ -90,6 +91,7 @@ class _PolicyContent extends StatelessWidget {
               '• Vercel (US) — web hosting.\n'
               '• Sentry (US) — error monitoring and crash reports.\n'
               '• PostHog (US) — product analytics.\n'
+              '• Google Firebase Analytics (US) — app usage analytics (device identifiers, screen views, in-app events).\n'
               '• Resend (US) — transactional email.\n'
               '• Razorpay (India) — payment processing.\n'
               '• Dodo Payments — subscription billing.\n'

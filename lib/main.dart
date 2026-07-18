@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/services/onesignal_service.dart';
+import 'firebase_options.dart';
 import 'core/services/revenue_cat_service.dart';
 
 const _supabaseUrl = 'https://orlqjhqxeyukvfzsursl.supabase.co';
@@ -51,6 +55,13 @@ Future<void> main() async {
         Sentry.captureException(details.exception, stackTrace: details.stack);
       };
 
+      // firebase_options.dart is Android-only for now; skip on iOS.
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+
       await Supabase.initialize(
         url: _supabaseUrl,
         anonKey: _supabaseAnonKey,
@@ -61,11 +72,13 @@ Future<void> main() async {
 
       await OneSignalService.initialize();
 
-      // If a session already exists at cold-start, log the user into RC / OneSignal.
+      // If a session already exists at cold-start, log the user into RC /
+      // OneSignal. Not awaited — these are network calls and must not block
+      // first frame; the RC customer-info stream updates when login lands.
       final existingSession = Supabase.instance.client.auth.currentSession;
       if (existingSession != null) {
-        await RevenueCatService.loginUser(existingSession.user.id);
-        await OneSignalService.loginUser(existingSession.user.id);
+        unawaited(RevenueCatService.loginUser(existingSession.user.id));
+        unawaited(OneSignalService.loginUser(existingSession.user.id));
       }
 
       runApp(const ProviderScope(child: GymCRMApp()));

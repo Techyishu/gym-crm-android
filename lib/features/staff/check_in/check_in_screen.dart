@@ -1,11 +1,17 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gal/gal.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
@@ -69,17 +75,27 @@ String _formatDuration(String inAt, String outAt) {
   }
 }
 
-IconData _methodIcon(String method) => switch (method) {
-      'qr' => Icons.qr_code_2,
-      'biometric' => Icons.fingerprint,
-      _ => Icons.touch_app_outlined,
-    };
-
 Color _methodColor(String method) => switch (method) {
       'qr' => AppTheme.accent,
       'biometric' => const Color(0xFF7C3AED),
       _ => AppTheme.inkHint,
     };
+
+/// Method badge as a plain colored dot rather than an icon glyph — new
+/// Material icon glyphs grow the tree-shaken font, which Shorebird can't
+/// patch (asset changes are excluded from patches).
+class _MethodDot extends StatelessWidget {
+  final String method;
+  const _MethodDot({required this.method});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 6, height: 6,
+      decoration: BoxDecoration(color: _methodColor(method), shape: BoxShape.circle),
+    );
+  }
+}
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -766,11 +782,80 @@ class _GymQrTab extends ConsumerWidget {
 
 // ── Gym QR full-screen page (front-desk display) ────────────────────────────────
 
-class _GymQrPage extends ConsumerWidget {
+class _GymQrPage extends ConsumerStatefulWidget {
   const _GymQrPage();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_GymQrPage> createState() => _GymQrPageState();
+}
+
+class _GymQrPageState extends ConsumerState<_GymQrPage> {
+  final _captureKey = GlobalKey();
+  bool _saving = false;
+  bool _sharing = false;
+
+  Future<Uint8List?> _captureQrPng() async {
+    final boundary = _captureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    final image = await boundary.toImage(pixelRatio: 3);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  // Saves the QR card directly to the device's photo gallery via the `gal`
+  // plugin (MediaStore on Android — no manual permission/manifest needed).
+  Future<void> _saveToGallery(String gymName) async {
+    setState(() => _saving = true);
+    try {
+      final bytes = await _captureQrPng();
+      if (bytes == null) return;
+      final safeName = gymName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
+      await Gal.putImageBytes(bytes, album: 'GymCRM', name: 'gym_qr_$safeName');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Saved to gallery')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the QR code. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  // Renders the QR card to a PNG and hands it to the system share sheet —
+  // for printing or sending it elsewhere.
+  Future<void> _shareQr(String gymName) async {
+    setState(() => _sharing = true);
+    try {
+      final bytes = await _captureQrPng();
+      if (bytes == null) return;
+
+      final dir = await getTemporaryDirectory();
+      final safeName = gymName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
+      final file = await File('${dir.path}/gym_qr_$safeName.png').writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Scan to check in at $gymName',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not share the QR code. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymQrProvider);
 
     return Scaffold(
@@ -805,52 +890,83 @@ class _GymQrPage extends ConsumerWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      QrImageView(
-                        data: url,
-                        version: QrVersions.auto,
-                        size: 220,
-                        eyeStyle: const QrEyeStyle(
-                          eyeShape: QrEyeShape.square,
-                          color: AppTheme.textPrimary,
+                RepaintBoundary(
+                  key: _captureKey,
+                  child: Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 20,
+                          spreadRadius: 2,
                         ),
-                        dataModuleStyle: const QrDataModuleStyle(
-                          dataModuleShape: QrDataModuleShape.square,
-                          color: AppTheme.textPrimary,
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        QrImageView(
+                          data: url,
+                          version: QrVersions.auto,
+                          size: 220,
+                          eyeStyle: const QrEyeStyle(
+                            eyeShape: QrEyeShape.square,
+                            color: AppTheme.textPrimary,
+                          ),
+                          dataModuleStyle: const QrDataModuleStyle(
+                            dataModuleShape: QrDataModuleShape.square,
+                            color: AppTheme.textPrimary,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        gymName,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Members scan this to check themselves in.\nPrint it and place it at the front desk.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-                      ),
-                    ],
+                        const SizedBox(height: 20),
+                        Text(
+                          gymName,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Members scan this to check themselves in.\nPrint it and place it at the front desk.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _saving ? null : () => _saveToGallery(gymName),
+                    icon: _saving
+                        ? const SizedBox(
+                            height: 16, width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.download_outlined, size: 18),
+                    label: Text(_saving ? 'Saving…' : 'Save to gallery'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _sharing ? null : () => _shareQr(gymName),
+                    icon: _sharing
+                        ? const SizedBox(
+                            height: 16, width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.ink),
+                          )
+                        : const Icon(Icons.share_outlined, size: 18),
+                    label: Text(_sharing ? 'Preparing…' : 'Share / Print'),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 GestureDetector(
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: url));
@@ -1320,7 +1436,7 @@ class _RecentCheckInRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Icon(_methodIcon(method), size: 11, color: _methodColor(method)),
+                        _MethodDot(method: method),
                         const SizedBox(width: 3),
                         Text(
                           isOpen
@@ -1746,7 +1862,7 @@ class _HistoryCheckInRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(_methodIcon(method), size: 11, color: _methodColor(method)),
+                    _MethodDot(method: method),
                     const SizedBox(width: 3),
                     Text(
                       isOpen

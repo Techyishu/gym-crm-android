@@ -38,7 +38,8 @@ class StaffShell extends ConsumerWidget {
     // Billing gate — iOS uses RevenueCat entitlement; Android uses Supabase plan data.
     if (profileAsync.hasValue) {
       final hasAccess = Platform.isIOS
-          ? ref.watch(iosProAccessProvider) || hasActiveBillingAccess(gym)
+          ? ref.watch(iosProAccessProvider) ||
+              hasActiveBillingAccess(gym, ignoreTrial: true)
           : hasActiveBillingAccess(gym);
       if (!hasAccess) return const PaywallScreen();
     }
@@ -86,7 +87,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     _Tab(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Members', index: 1),
   ];
   static const _moneyTab =
-      _Tab(icon: Icons.credit_card_outlined, activeIcon: Icons.credit_card, label: 'Money', index: 2);
+      _Tab(icon: Icons.credit_card_outlined, activeIcon: Icons.credit_card, label: 'Billing', index: 2);
   static const int _checkInIndex = 3;
 
   static const _allMoreItems = [
@@ -94,7 +95,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     _MoreItem(icon: Icons.calendar_today_outlined,  label: 'Batches',  route: '/staff/classes'),
     _MoreItem(icon: Icons.fitness_center_outlined,  label: 'Workout plans', route: '/staff/workout-plans'),
     _MoreItem(icon: Icons.restaurant_menu_outlined, label: 'Diet plans', route: '/staff/diet-plans'),
-    _MoreItem(icon: Icons.chat_bubble_outline,      label: 'Messages', route: '/staff/communications'),
+    _MoreItem(icon: Icons.notifications_outlined,   label: 'Reminders', route: '/staff/reminders'),
     _MoreItem(icon: Icons.manage_accounts_outlined, label: 'Staff & roles', route: '/staff/staff'),
     _MoreItem(icon: Icons.bar_chart_outlined,       label: 'Reports',  route: '/staff/reports'),
     _MoreItem(icon: Icons.settings_outlined,        label: 'Settings', route: '/staff/settings'),
@@ -108,7 +109,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     if (item.route == '/staff/leads') return RoleAccess.canSeeLeads(widget.role);
     if (item.route == '/staff/workout-plans') return RoleAccess.canManageWorkoutPlans(widget.role);
     if (item.route == '/staff/diet-plans') return RoleAccess.canManageDietPlans(widget.role);
-    if (item.route == '/staff/communications') return RoleAccess.canSeeCommunications(widget.role);
+    if (item.route == '/staff/reminders') return RoleAccess.canSeeCommunications(widget.role);
     if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(widget.role);
     if (item.route == '/staff/reports') return RoleAccess.canSeeReports(widget.role);
     if (item.route == '/staff/settings') return RoleAccess.canSeeSettings(widget.role);
