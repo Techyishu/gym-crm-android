@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/services/activity_log_service.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
 import '../../../shared/widgets/member_photo.dart';
@@ -250,6 +251,11 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         }
         rethrow;
       }
+      ActivityLogService.logActivity(
+        gymId: gymId,
+        action: 'check_in',
+        metadata: {'member_id': memberId, 'member_name': label, 'method': method},
+      );
       ref.invalidate(_recentCheckInsProvider);
 
       return _CheckResult(
@@ -839,9 +845,12 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
       final safeName = gymName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
       final file = await File('${dir.path}/gym_qr_$safeName.png').writeAsBytes(bytes);
 
+      if (!mounted) return;
+      final box = context.findRenderObject() as RenderBox?;
       await Share.shareXFiles(
         [XFile(file.path)],
         text: 'Scan to check in at $gymName',
+        sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
       );
     } catch (e) {
       if (mounted) {

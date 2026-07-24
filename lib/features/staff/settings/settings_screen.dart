@@ -131,16 +131,17 @@ class SettingsScreen extends ConsumerWidget {
                   builder: (_) => const _RegistrationLinkSheet(),
                 ),
               ),
-              _SettingsRow(
-                icon: Icons.payments_outlined,
-                label: 'Payments (Razorpay)',
-                onTap: () => showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => const _PaymentsSheet(),
-                ),
-              ),
+              // RAZORPAY HIDDEN — re-enable when ready to launch
+              // _SettingsRow(
+              //   icon: Icons.payments_outlined,
+              //   label: 'Payments (Razorpay)',
+              //   onTap: () => showModalBottomSheet(
+              //     context: context,
+              //     isScrollControlled: true,
+              //     useSafeArea: true,
+              //     builder: (_) => const _PaymentsSheet(),
+              //   ),
+              // ),
               // BIOMETRIC HIDDEN — re-enable when ready to launch
               // _SettingsRow(
               //   icon: Icons.fingerprint,
@@ -1337,7 +1338,14 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () => Share.share(_link, subject: 'Join our gym'),
+                  onPressed: () {
+                    final box = context.findRenderObject() as RenderBox?;
+                    Share.share(
+                      _link,
+                      subject: 'Join our gym',
+                      sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
+                    );
+                  },
                   child: const Text('Share link'),
                 ),
                 const SizedBox(height: 8),

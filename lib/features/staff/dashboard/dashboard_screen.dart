@@ -969,7 +969,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     try {
       final data = await Supabase.instance.client
           .from('members')
-          .select('next_payment_date, memberships(status, membership_plans(price, name))')
+          .select('next_payment_date, memberships(status, discount_amount, membership_plans(price, name))')
           .eq('id', memberId)
           .maybeSingle();
       if (data == null || !mounted) return;
@@ -979,11 +979,15 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         if ((m as Map)['status'] == 'active') { active = m.cast<String, dynamic>(); break; }
       }
       final plan = active?['membership_plans'] as Map?;
+      final discount = (active?['discount_amount'] as num?)?.toDouble() ?? 0;
       setState(() {
         if (plan != null && plan['price'] != null) {
-          final price = (plan['price'] as num).toStringAsFixed(0);
-          _amountCtrl.text = price;
-          _planHint = '${plan['name']} — $currencySymbol$price';
+          final listPrice = (plan['price'] as num).toDouble();
+          final finalPrice = (listPrice - discount).clamp(0, listPrice);
+          _amountCtrl.text = finalPrice.toStringAsFixed(0);
+          _planHint = discount > 0
+              ? '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)} − $currencySymbol${discount.toStringAsFixed(0)} discount'
+              : '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)}';
         }
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;

@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:country_picker/country_picker.dart';
+import 'package:currency_picker/currency_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/auth_blob_background.dart';
 import '../../../core/widgets/auth_form_kit.dart';
@@ -22,6 +25,7 @@ class SignupScreen extends ConsumerStatefulWidget {
 
 class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _gymNameCtrl = TextEditingController();
   final _firstCtrl = TextEditingController();
   final _lastCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
@@ -35,6 +39,21 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   bool _termsError = false;
   String? _error;
   String? _sentTo; // when set → render OTP verification screen
+  Country _country = Country.parse('IN');
+  String _currencyCode = 'INR'; // follows _country; set gym currency at signup
+
+  // One place to change country: keeps the phone dial code and the gym's
+  // currency in sync whether the user taps the Country row or the phone flag.
+  void _selectCountry(Country c) {
+    setState(() {
+      _country = c;
+      final match = CurrencyService()
+          .getAll()
+          .where((cur) => cur.flag == c.countryCode)
+          .toList();
+      if (match.isNotEmpty) _currencyCode = match.first.code;
+    });
+  }
 
   // OTP verification state
   final List<TextEditingController> _otpControllers =
@@ -45,8 +64,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   int _resendCooldown = 0;
   Timer? _resendTimer;
 
-  // Mirrors web INDIAN_MOBILE = /^[6-9]\d{9}$/
-  static final _indianMobile = RegExp(r'^[6-9]\d{9}$');
+  // Optional field — only length is validated once a country is picked,
+  // since digit rules vary per country.
+  static final _digitsOnly = RegExp(r'^\d{4,14}$');
 
   @override
   void initState() {
@@ -56,6 +76,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   @override
   void dispose() {
+    _gymNameCtrl.dispose();
     _firstCtrl.dispose();
     _lastCtrl.dispose();
     _emailCtrl.dispose();
@@ -88,20 +109,60 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       _otpError = null;
     });
 
-    final error = await ref
-        .read(authNotifierProvider.notifier)
-        .verifyEmailOtp(email: _sentTo!, token: code);
+    final notifier = ref.read(authNotifierProvider.notifier);
+    // Hold the router guard through verify + gym creation so the redirect
+    // doesn't briefly land the user on /gym-setup between the two calls.
+    signupHandshakeInProgress.value = true;
 
-    if (!mounted) return;
+    final error = await notifier.verifyEmailOtp(email: _sentTo!, token: code);
+
+    if (!mounted) {
+      signupHandshakeInProgress.value = false;
+      return;
+    }
     if (error != null) {
+      signupHandshakeInProgress.value = false;
       for (final c in _otpControllers) { c.clear(); }
       _otpFocusNodes[0].requestFocus();
       setState(() {
         _otpError = error;
         _verifying = false;
       });
+      return;
     }
-    // On success the auth state change fires → GoRouter redirects automatically
+
+    // Session now exists — create the gym + owner profile inline (was the
+    // separate /gym-setup screen).
+    final phoneDigits = _phoneCtrl.text.trim();
+    final setupError = await notifier.setupGym(
+      gymName: _gymNameCtrl.text.trim(),
+      phone: phoneDigits.isEmpty ? null : '+${_country.phoneCode}$phoneDigits',
+      currency: _currencyCode,
+      goals: [],
+    );
+
+    if (!mounted) {
+      signupHandshakeInProgress.value = false;
+      return;
+    }
+    if (setupError != null) {
+      // Setup failed but the session is live and has no profile — release the
+      // guard and let the router route to /gym-setup so the user can retry.
+      signupHandshakeInProgress.value = false;
+      setState(() {
+        _otpError = setupError;
+        _verifying = false;
+      });
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('home_route', '/staff/dashboard');
+    ref.invalidate(userTypeProvider);
+    ref.invalidate(staffProfileProvider);
+    signupHandshakeInProgress.value = false;
+    if (!mounted) return;
+    context.go('/staff/dashboard');
   }
 
   Future<void> _resendOtp() async {
@@ -155,11 +216,12 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     });
 
     final notifier = ref.read(authNotifierProvider.notifier);
+    final phoneDigits = _phoneCtrl.text.trim();
     final error = await notifier.signUp(
       firstName: _firstCtrl.text.trim(),
       lastName: _lastCtrl.text.trim(),
       email: _emailCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim(),
+      phone: phoneDigits.isEmpty ? '' : '+${_country.phoneCode}$phoneDigits',
       password: _passwordCtrl.text,
     );
 
@@ -233,7 +295,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           ],
 
           // Continue with Google — hidden on iOS (Apple guideline 4.8
-          // would then require Sign in with Apple too).
+          // would then require Sign in with Apple too). Google signups finish
+          // gym creation on the /gym-setup screen (they never fill this form).
           if (!Platform.isIOS) ...[
             AuthGoogleButton(
               loading: _googleLoading,
@@ -244,6 +307,51 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             const AuthOrDivider(),
             const SizedBox(height: 20),
           ],
+
+          // Gym name — was a separate onboarding screen; merged in here so
+          // email signups land straight on the dashboard after OTP verify.
+          const AuthFieldLabel('Gym name'),
+          const SizedBox(height: 6),
+          AuthPillField(
+            controller: _gymNameCtrl,
+            textCapitalization: TextCapitalization.words,
+            hint: 'FitZone Gym',
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Gym name is required' : null,
+          ),
+          const SizedBox(height: 16),
+
+          // Country & currency — one pick sets the gym's currency (and the
+          // phone dial code below). Always visible: iOS hides the phone field,
+          // so this is the only place iOS owners set their currency.
+          const AuthFieldLabel('Country & currency'),
+          const SizedBox(height: 6),
+          InkWell(
+            borderRadius: BorderRadius.circular(28),
+            onTap: () => showCountryPicker(
+              context: context,
+              showPhoneCode: true,
+              exclude: const ['PK', 'BD'],
+              onSelect: _selectCountry,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('${_country.flagEmoji}  ${_country.name}  ($_currencyCode)',
+                        style: const TextStyle(fontSize: 15, color: AppTheme.textPrimary)),
+                  ),
+                  const Icon(Icons.keyboard_arrow_down, color: AppTheme.inkHint, size: 20),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
 
           // First + last name
           Row(
@@ -309,25 +417,34 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             AuthPillField(
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
-              maxLength: 10,
+              maxLength: 14,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               hint: '9876543210',
-              prefixIcon: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Text('🇮🇳 +91', style: TextStyle(fontSize: 14)),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                child: GestureDetector(
+                  onTap: () => showCountryPicker(
+                    context: context,
+                    showPhoneCode: true,
+                    exclude: const ['PK', 'BD'],
+                    onSelect: _selectCountry,
+                  ),
+                  child: Text('${_country.flagEmoji} +${_country.phoneCode}',
+                      style: const TextStyle(fontSize: 14)),
+                ),
               ),
               prefixIconConstraints: const BoxConstraints(minWidth: 0),
               validator: (v) {
                 final value = v?.trim() ?? '';
                 if (value.isEmpty) return null; // optional
-                return _indianMobile.hasMatch(value)
+                return _digitsOnly.hasMatch(value)
                     ? null
-                    : 'Enter a valid 10-digit mobile number';
+                    : 'Enter a valid mobile number';
               },
             ),
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 4),
-              child: Text('10 digits starting with 6, 7, 8, or 9',
+              child: Text('Tap the flag to change country',
                   style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
             ),
           ],

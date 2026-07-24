@@ -61,7 +61,7 @@ After login, `router.dart` checks `profiles` (staff) and `members` (member) tabl
 
 | File | Purpose |
 |------|---------|
-| `lib/main.dart` | Supabase init, `_syncNativeCredentials` (pushes tokens to Kotlin SMS worker via MethodChannel) |
+| `lib/main.dart` | Supabase init |
 | `lib/core/router.dart` | All routes + redirect logic. Contains `signupHandshakeInProgress` guard and `home_route` cache. |
 | `lib/features/auth/providers/auth_provider.dart` | `AuthNotifier` (sign-in, sign-up OTP flow, gym setup RPC), `gymIdProvider`, `staffProfileProvider`, `staffRoleProvider` |
 | `lib/core/access/role_access.dart` | RBAC — maps `owner/manager/trainer/staff` roles to feature flags |
@@ -69,12 +69,6 @@ After login, `router.dart` checks `profiles` (staff) and `members` (member) tabl
 | `lib/core/theme/app_theme.dart` | Full design system (colors, typography, component styles). All screens use `AppTheme.*` constants. |
 | `lib/core/services/member_photo_service.dart` | Resolves `member-photos` (private bucket) storage paths to signed URLs with 55-min in-memory cache |
 | `lib/core/services/offline_checkin_queue.dart` | Persists QR check-ins to SharedPreferences when offline; flushes via `insert_checkin_secure` RPC on reconnect |
-| `lib/features/staff/reminders/sms_reminder_service.dart` | Dart-side SMS logic; delegates actual sending to the Kotlin `SmsPlugin` via `com.gymcrm/sms` MethodChannel |
-
-### Native Android layer (`android/app/src/main/kotlin/com/gymcrm/gym_crm/`)
-- **`SmsPlugin.kt`** — MethodChannel handler for `sendSms`, `storeCredentials`, `startNativeReminders`, `stopNativeReminders`
-- **`SmsReminderWorker.kt`** — `WorkManager` background worker that runs daily, reads Supabase credentials from native SharedPreferences, queries expiring members, and sends SMS without the Flutter app being open
-- Supabase URL + anon key are baked into `BuildConfig` at compile time via `dartDefine()` in `build.gradle.kts`
 
 ### Auth + signup flow
 Signup uses a two-step OTP handshake: `signUp()` (creates instant session) → `signOut()` → `signInWithOtp()`. `signupHandshakeInProgress` (a `ValueNotifier`) prevents the router from navigating away mid-handshake.

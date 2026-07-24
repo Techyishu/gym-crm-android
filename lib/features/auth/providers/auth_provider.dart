@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/services/activity_log_service.dart';
 import '../../../core/utils/formatters.dart';
 
 final supabaseProvider = Provider<SupabaseClient>((ref) => Supabase.instance.client);
@@ -56,7 +57,7 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
         'id, role, gym_id, first_name, last_name, phone, '
         'gyms(id, name, slug, plan, settings, razorpay_key_id, '
         'registration_enabled, registration_token, '
-        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price)',
+        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status)',
       )
       .eq('id', user.id)
       .maybeSingle();
@@ -129,6 +130,13 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       _ref.invalidate(userTypeProvider);
       _ref.invalidate(memberRecordProvider);
       state = const AsyncValue.data(null);
+
+      final profile = await _client.from('profiles').select('gym_id').eq('id', _client.auth.currentUser!.id).maybeSingle();
+      final gymId = profile?['gym_id'] as String?;
+      if (gymId != null) {
+        ActivityLogService.logActivity(gymId: gymId, action: 'login', metadata: {'via': 'android'});
+      }
+
       return null;
     } on AuthException catch (e) {
       state = AsyncValue.error(e, StackTrace.current);
@@ -217,17 +225,28 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     String? phone,
     String? gymType,
     String? memberCount,
+    String? currency,
     required List<String> goals,
   }) async {
     try {
-      await _client.rpc('setup_gym', params: {
+      final gymId = await _client.rpc('setup_gym', params: {
         'p_gym_name': gymName,
         'p_city': city,
         'p_phone': phone,
         'p_gym_type': gymType,
         'p_member_count': memberCount,
         'p_goals': goals,
-      });
+      }) as String;
+      // setup_gym doesn't take a currency param — set it via the same
+      // gyms.settings JSONB path Settings > Gym Details uses.
+      if (currency != null && currency.isNotEmpty) {
+        final gym = await _client.from('gyms').select('settings').eq('id', gymId).single();
+        final settings = {
+          ...Map<String, dynamic>.from(gym['settings'] as Map? ?? {}),
+          'currency': currency,
+        };
+        await _client.from('gyms').update({'settings': settings}).eq('id', gymId);
+      }
       return null;
     } on PostgrestException catch (e) {
       return e.message;

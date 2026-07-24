@@ -6,6 +6,10 @@ bool hasActiveBillingAccess(Map<String, dynamic>? gym, {bool ignoreTrial = false
   final planExpiresAt = gym['plan_expires_at'] as String?;
   final trialEndsAt = gym['trial_ends_at'] as String?;
   final dodoId = gym['dodo_subscription_id'] as String?;
+  final status = gym['status'] as String?;
+
+  // Platform admin suspended/cancelled this gym — blocks access regardless of plan
+  if (status == 'suspended' || status == 'cancelled') return false;
 
   // Grandfathered pro with no expiry
   if (plan == 'pro' && planExpiresAt == null) return true;

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'core/services/activity_log_service.dart';
 import 'core/services/onesignal_service.dart';
 import 'firebase_options.dart';
 import 'core/services/revenue_cat_service.dart';
@@ -53,6 +54,10 @@ Future<void> main() async {
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
         Sentry.captureException(details.exception, stackTrace: details.stack);
+        ActivityLogService.logError(
+          message: details.exception.toString(),
+          stackTrace: details.stack?.toString(),
+        );
       };
 
       // firebase_options.dart is Android-only for now; skip on iOS.

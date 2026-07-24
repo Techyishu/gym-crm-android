@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:country_picker/country_picker.dart';
+import 'package:currency_picker/currency_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -33,7 +35,11 @@ const _setupSteps = [
   'Preparing your workspace',
 ];
 
-final _indianMobile = RegExp(r'^[6-9]\d{9}$');
+final _digitsOnly = RegExp(r'^\d{4,14}$');
+
+class _CurrencyServiceHolder {
+  static final service = CurrencyService();
+}
 
 class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
   bool _submitting = false;
@@ -44,6 +50,8 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
   final _gymNameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   String _gymType = '';
+  Country _country = Country.parse('IN');
+  String _currencyCode = 'INR';
 
   String _prefillName = '';
   bool _needsPhone = false;
@@ -81,8 +89,8 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     if (_needsPhone) {
       final digits = _phoneCtrl.text.trim();
       // Optional (App Review 5.1.1) — validate format only when provided.
-      if (digits.isNotEmpty && !_indianMobile.hasMatch(digits)) {
-        setState(() => _error = 'Enter a valid 10-digit mobile number (starts with 6–9).');
+      if (digits.isNotEmpty && !_digitsOnly.hasMatch(digits)) {
+        setState(() => _error = 'Enter a valid mobile number.');
         return;
       }
     }
@@ -103,9 +111,10 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     final error = await ref.read(authNotifierProvider.notifier).setupGym(
           gymName: name,
           phone: _needsPhone && _phoneCtrl.text.trim().isNotEmpty
-              ? _phoneCtrl.text.trim()
+              ? '+${_country.phoneCode}${_phoneCtrl.text.trim()}'
               : null,
           gymType: _gymType.isEmpty ? null : _gymType,
+          currency: _currencyCode,
           goals: [],
         );
 
@@ -243,6 +252,33 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                             },
                           ),
 
+                          // Country — drives both the phone dial code and
+                          // the gym's currency (via Currency.flag, which is
+                          // the ISO2 country code in the currency_picker data).
+                          const SizedBox(height: 16),
+                          _label('Country'),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => showCountryPicker(
+                              context: context,
+                              showPhoneCode: true,
+                              exclude: const ['PK', 'BD'],
+                              onSelect: (c) => setState(() {
+                                _country = c;
+                                final match = _CurrencyServiceHolder.service
+                                    .getAll()
+                                    .where((cur) => cur.flag == c.countryCode)
+                                    .toList();
+                                if (match.isNotEmpty) _currencyCode = match.first.code;
+                              }),
+                            ),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(),
+                              child: Text('${_country.flagEmoji}  ${_country.name}  ($_currencyCode)',
+                                  style: const TextStyle(fontSize: 14, color: AppTheme.ink)),
+                            ),
+                          ),
+
                           // Phone (Google users only)
                           if (_needsPhone) ...[
                             const SizedBox(height: 16),
@@ -250,18 +286,18 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                             TextField(
                               controller: _phoneCtrl,
                               keyboardType: TextInputType.phone,
-                              maxLength: 10,
+                              maxLength: 14,
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 counterText: '',
                                 hintText: '98765 43210',
                                 prefixIcon: Padding(
-                                  padding: EdgeInsets.symmetric(
+                                  padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 14),
-                                  child: Text('🇮🇳 +91',
-                                      style: TextStyle(fontSize: 14)),
+                                  child: Text('${_country.flagEmoji} +${_country.phoneCode}',
+                                      style: const TextStyle(fontSize: 14)),
                                 ),
-                                prefixIconConstraints: BoxConstraints(minWidth: 0),
+                                prefixIconConstraints: const BoxConstraints(minWidth: 0),
                               ),
                               onChanged: (_) {
                                 if (_error.isNotEmpty) setState(() => _error = '');
