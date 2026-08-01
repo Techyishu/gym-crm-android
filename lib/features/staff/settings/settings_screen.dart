@@ -161,6 +161,21 @@ class SettingsScreen extends ConsumerWidget {
             _SectionLabel(label: 'APP'),
             _SettingsCard(items: [
               _SettingsRow(
+                icon: Icons.info_outline,
+                label: 'Help & Support',
+                onTap: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  builder: (_) => const _SupportTicketSheet(),
+                ),
+              ),
+              _SettingsRow(
+                icon: Icons.visibility_outlined,
+                label: 'Privacy & data choices',
+                onTap: () => context.push('/consent'),
+              ),
+              _SettingsRow(
                 icon: Icons.lock_outline,
                 label: 'Privacy Policy',
                 onTap: () => context.push('/legal/privacy'),
@@ -1167,6 +1182,224 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
                 ),
               ],
             ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Support ticket sheet ───────────────────────────────────────────────────
+const _ticketTypes = [
+  ('bug', 'Bug report'),
+  ('feature_request', 'Feature request'),
+  ('support', 'General help'),
+];
+
+class _SupportTicketSheet extends ConsumerStatefulWidget {
+  const _SupportTicketSheet();
+
+  @override
+  ConsumerState<_SupportTicketSheet> createState() => _SupportTicketSheetState();
+}
+
+class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
+  final _titleCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  String _type = 'support';
+  bool _loading = false;
+  bool _submitted = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final title = _titleCtrl.text.trim();
+    if (title.isEmpty) {
+      setState(() => _error = 'Please describe your issue in a few words.');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
+
+    try {
+      final gymId = await ref.read(gymIdProvider.future);
+      final email = Supabase.instance.client.auth.currentUser?.email;
+      await Supabase.instance.client.from('support_tickets').insert({
+        'gym_id': gymId,
+        'reporter_email': email,
+        'type': _type,
+        'title': title,
+        'description': _descCtrl.text.trim(),
+      });
+      ref.invalidate(_myTicketsProvider);
+      if (mounted) setState(() { _submitted = true; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Could not submit — please try again.'; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SheetScaffold(
+      title: 'Help & Support',
+      child: _submitted
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                children: [
+                  const Icon(Icons.check_circle, color: AppTheme.accent, size: 40),
+                  const SizedBox(height: 12),
+                  const Text('Ticket submitted',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppTheme.ink)),
+                  const SizedBox(height: 6),
+                  Text('We\'ll get back to you at ${Supabase.instance.client.auth.currentUser?.email ?? 'your email'}.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Done'),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      builder: (_) => const _MyTicketsSheet(),
+                    ),
+                    child: const Text('View past tickets'),
+                  ),
+                ),
+                if (_error != null) _ErrorBox(message: _error!),
+                const FieldLabel('What\'s this about?'),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _ticketTypes.map((t) {
+                    return PillChip(
+                      label: t.$2,
+                      selected: _type == t.$1,
+                      onTap: () => setState(() => _type = t.$1),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                const FieldLabel('Title'),
+                TextFormField(
+                  controller: _titleCtrl,
+                  decoration: const InputDecoration(hintText: 'Short summary of the issue'),
+                ),
+                const SizedBox(height: 14),
+                const FieldLabel('Details (optional)'),
+                TextFormField(
+                  controller: _descCtrl,
+                  maxLines: 4,
+                  decoration: const InputDecoration(hintText: 'Anything that helps us understand it'),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _loading ? null : _submit,
+                  child: _loading ? const _Spinner() : const Text('Submit ticket'),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+final _myTicketsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final gymId = await ref.watch(gymIdProvider.future);
+  final rows = await Supabase.instance.client
+      .from('support_tickets')
+      .select('id, type, title, description, status, created_at')
+      .eq('gym_id', gymId)
+      .order('created_at', ascending: false);
+  return List<Map<String, dynamic>>.from(rows as List);
+});
+
+StatusPill _ticketStatusPill(String status) {
+  switch (status) {
+    case 'in_progress':
+      return StatusPill.warn(label: 'In progress');
+    case 'fixed':
+      return StatusPill.active(label: 'Fixed');
+    case 'closed':
+      return StatusPill.neutral(label: 'Closed');
+    default:
+      return StatusPill.neutral(label: 'New');
+  }
+}
+
+class _MyTicketsSheet extends ConsumerWidget {
+  const _MyTicketsSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tickets = ref.watch(_myTicketsProvider);
+    return _SheetScaffold(
+      title: 'My tickets',
+      child: tickets.when(
+        loading: () => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+        error: (e, _) => Text('Could not load tickets: $e'),
+        data: (rows) {
+          if (rows.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text('No tickets yet', style: TextStyle(color: AppTheme.textSecondary)),
+              ),
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: rows.map((t) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: AppTheme.cardDecoration(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(t['title'] as String? ?? '',
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
+                        ),
+                        _ticketStatusPill(t['status'] as String? ?? 'new'),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(formatDateFromString(t['created_at'] as String?),
+                        style: const TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+                    if ((t['description'] as String?)?.isNotEmpty ?? false) ...[
+                      const SizedBox(height: 6),
+                      Text(t['description'] as String,
+                          style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                    ],
+                  ],
+                ),
+              );
+            }).toList(),
           );
         },
       ),

@@ -10,6 +10,7 @@ import 'router_refresh.dart';
 import '../features/auth/providers/auth_provider.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/auth/screens/login_screen.dart';
+import '../features/auth/screens/phone_otp_screen.dart';
 import '../features/auth/screens/signup_screen.dart';
 import '../features/auth/screens/forgot_password_screen.dart';
 import '../features/staff/gym_setup/gym_setup_screen.dart';
@@ -36,6 +37,7 @@ import '../features/member/workout/workout_screen.dart';
 import '../features/member/diet/diet_screen.dart';
 import '../features/member/attendance/heatmap_screen.dart';
 import '../features/member/qr/qr_screen.dart';
+import '../features/legal/consent_screen.dart';
 import '../features/legal/privacy_policy_screen.dart';
 import '../features/legal/terms_screen.dart';
 import '../features/shared/invoice_detail_screen.dart';
@@ -103,6 +105,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         // Already done — never show again.
         return '/login';
       }
+
+      // DPDP consent gate — sits between the intro slides and login, before any
+      // account exists, because that's the point where collection would start.
+      // /legal/* stays reachable so the notice can link out to the policy.
+      if (!(prefs.getBool(kConsentGiven) ?? false) &&
+          !state.matchedLocation.startsWith('/legal/')) {
+        return state.matchedLocation == '/consent' ? null : '/consent';
+      }
+
       final loc = state.matchedLocation;
       final isAuthRoute = loc.startsWith('/login') ||
           loc.startsWith('/signup') ||
@@ -168,8 +179,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const OnboardingScreen(),
       ),
       GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/consent',
+        builder: (_, __) => const ConsentScreen(),
+      ),
+      GoRoute(
         path: '/login',
         builder: (_, __) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/login/phone-otp',
+        builder: (_, __) => const PhoneOtpScreen(),
       ),
       GoRoute(
         path: '/signup',

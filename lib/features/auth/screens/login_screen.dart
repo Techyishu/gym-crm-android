@@ -107,6 +107,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const AuthOrDivider(),
                         const SizedBox(height: 20),
                       ],
+                      // Mobile OTP login — Android only. Hidden for now (feature
+                      // disabled, not removed — flip back to `Platform.isAndroid`
+                      // to re-enable).
+                      // if (Platform.isAndroid) ...[
+                      //   OutlinedButton.icon(
+                      //     onPressed: (_loading || _googleLoading)
+                      //         ? null
+                      //         : () => context.push('/login/phone-otp'),
+                      //     icon: const Icon(Icons.sms_outlined, size: 18),
+                      //     label: const Text('Log in with mobile number'),
+                      //     style: OutlinedButton.styleFrom(
+                      //       minimumSize: const Size.fromHeight(52),
+                      //       foregroundColor: AppTheme.textPrimary,
+                      //       side: BorderSide(color: AppTheme.border),
+                      //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                      //       textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                      //     ),
+                      //   ),
+                      //   const SizedBox(height: 20),
+                      // ],
                       const AuthFieldLabel('Email'),
                       const SizedBox(height: 6),
                       AuthPillField(

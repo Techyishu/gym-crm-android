@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'features/legal/consent_screen.dart' show applyStoredConsent;
 import 'core/services/activity_log_service.dart';
 import 'core/services/onesignal_service.dart';
 import 'firebase_options.dart';
@@ -65,6 +67,8 @@ Future<void> main() async {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
         );
+        // DPDP: analytics stays off until the user consents on /consent.
+        await applyStoredConsent(await SharedPreferences.getInstance());
       }
 
       await Supabase.initialize(

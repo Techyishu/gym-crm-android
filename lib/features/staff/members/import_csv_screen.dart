@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -256,6 +257,11 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       // Optionally assign a plan to every imported member.
       if (_planId != null && insertedMembers.isNotEmpty) {
         setState(() => _importingLabel = 'Assigning membership plans…');
+        final plans = await ref.read(_importPlansProvider.future);
+        final plan = plans.firstWhere((p) => p['id'] == _planId, orElse: () => {});
+        final months = (plan['billing_interval_months'] as int?) ??
+            const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']] ??
+            1;
         // Plan cycle starts on each member's join date, not the import date.
         // Membership is open-ended — next_payment_date tracks renewal, not ends_at.
         final memberships = insertedMembers.map((mem) {
@@ -270,6 +276,19 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
         }).toList();
         try {
           await client.from('memberships').insert(memberships);
+          // next_payment_date isn't set anywhere else in the CSV path — derive
+          // it from join date + plan duration so imported members show up in
+          // upcoming-payments and reminders (both key off next_payment_date).
+          for (final mem in insertedMembers) {
+            final startsAt = DateTime.tryParse(mem['joined_at'] as String) ?? DateTime.now().toUtc();
+            final joinedStr = startsAt.toIso8601String().split('T').first;
+            final nextPaymentDate = advancePaymentDate(joinedStr, months: months);
+            if (nextPaymentDate == null) continue;
+            await client.from('members').update({
+              'next_payment_date': nextPaymentDate,
+              'billing_interval_months': months,
+            }).eq('id', mem['id']);
+          }
         } catch (e) {
           debugPrint('[GymCRM] CSV plan assignment error: $e');
         }

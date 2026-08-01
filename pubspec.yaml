@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.1+38
+version: 1.0.1+42
 
 environment:
   sdk: ^3.10.7
@@ -51,14 +51,20 @@ dependencies:
   printing: ^5.13.2
   shared_preferences: ^2.3.3
 
+  # Mobile OTP login (Android only) — MSG91
+  sendotp_flutter_sdk: ^0.0.2
+
   cupertino_icons: ^1.0.8
 
   # Error monitoring
   sentry_flutter: ^9.0.0
 
   # In-App Purchase (iOS only — RevenueCat)
-  purchases_flutter: ^8.7.6
-  purchases_ui_flutter: ^8.7.6
+  # 9.x is required by Google Play: it pulls purchases-hybrid-common 17.x, which
+  # builds against Play Billing Library 8. The 8.x line was stuck on Billing 7,
+  # rejected for uploads from 2026-08-31.
+  purchases_flutter: ^9.10.7
+  purchases_ui_flutter: ^9.10.7
 
   # Push notifications
   onesignal_flutter: ^5.3.3

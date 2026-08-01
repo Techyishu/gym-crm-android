@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/invoice_pdf.dart';
@@ -635,25 +636,6 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     super.dispose();
   }
 
-  // Advance a "YYYY-MM-DD" billing date by one calendar month (UTC, day-clamped).
-  // Mirrors advancePaymentDate() in the web record-payment endpoint.
-  String? _advancePaymentDate(String dateStr) {
-    final segs = dateStr.split('T').first.split('-');
-    if (segs.length < 3) return null;
-    final day = int.tryParse(segs[2]);
-    if (day == null || day < 1 || day > 31) return null;
-    final base = DateTime.now().toUtc();
-    var year = base.year;
-    var month = base.month + 1; // 1-based next month
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-    final daysInNext = DateTime.utc(year, month + 1, 0).day; // last day of `month`
-    final billingDay = day < daysInNext ? day : daysInNext;
-    return DateTime.utc(year, month, billingDay).toIso8601String().split('T').first;
-  }
-
   Future<void> _save() async {
     setState(() => _loading = true);
     try {
@@ -692,14 +674,17 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       // 3. Advance the member's next payment date and lift any freeze.
       final memberRow = await client
           .from('members')
-          .select('next_payment_date, status')
+          .select('next_payment_date, status, billing_interval_months')
           .eq('id', inv.memberId)
           .maybeSingle();
       if (memberRow != null) {
         final updates = <String, dynamic>{};
         final npd = memberRow['next_payment_date'] as String?;
         if (npd != null) {
-          final advanced = _advancePaymentDate(npd);
+          final advanced = advancePaymentDate(
+            npd,
+            months: (memberRow['billing_interval_months'] as int?) ?? 1,
+          );
           if (advanced != null) updates['next_payment_date'] = advanced;
         }
         if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';

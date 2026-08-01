@@ -282,6 +282,51 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
+  /// Mobile OTP login (Android only). [phone] and [msg91AccessToken] come from
+  /// the MSG91 widget SDK's verifyOTP() response after the user enters the code
+  /// they received by SMS. The `verify-phone-otp` edge function re-checks that
+  /// access-token against MSG91 server-side, finds-or-creates the matching
+  /// Supabase auth user, and returns a magiclink token — which we redeem here
+  /// via the same verifyOTP() call the email flow already uses, so this ends
+  /// up creating a real session exactly like `verifyEmailOtp` does.
+  Future<String?> verifyPhoneOtpToken({
+    required String phone,
+    required String msg91AccessToken,
+  }) async {
+    state = const AsyncValue.loading();
+    try {
+      final res = await _client.functions.invoke(
+        'verify-phone-otp',
+        body: {'accessToken': msg91AccessToken, 'phone': phone},
+      );
+      final data = res.data as Map<String, dynamic>?;
+      final email = data?['email'] as String?;
+      final hashedToken = data?['hashedToken'] as String?;
+      if (email == null || hashedToken == null) {
+        state = AsyncValue.error('Phone verification failed', StackTrace.current);
+        return (data?['error'] as String?) ?? 'Phone verification failed. Please try again.';
+      }
+
+      await _client.auth.verifyOTP(
+        tokenHash: hashedToken,
+        type: OtpType.magiclink,
+      );
+      _ref.invalidate(gymIdProvider);
+      _ref.invalidate(staffProfileProvider);
+      _ref.invalidate(userTypeProvider);
+      _ref.invalidate(memberRecordProvider);
+      state = const AsyncValue.data(null);
+      return null;
+    } on AuthException catch (e) {
+      state = AsyncValue.error(e, StackTrace.current);
+      return e.message;
+    } catch (e, st) {
+      debugPrint('[GymCRM] verifyPhoneOtpToken error: $e\n$st');
+      state = AsyncValue.error(e, StackTrace.current);
+      return 'Phone verification failed: $e';
+    }
+  }
+
   Future<String?> resendEmailOtp(String email) async {
     try {
       await _client.auth.signInWithOtp(

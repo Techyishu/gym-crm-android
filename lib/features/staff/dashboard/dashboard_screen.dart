@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/utils/formatters.dart';
@@ -995,19 +996,6 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     } catch (e) { debugPrint('[GymCRM] autofill error: $e'); }
   }
 
-  String? _advancePaymentDate(String dateStr) {
-    final segs = dateStr.split('T').first.split('-');
-    if (segs.length < 3) return null;
-    final day = int.tryParse(segs[2]);
-    if (day == null || day < 1 || day > 31) return null;
-    final base = DateTime.now().toUtc();
-    var year = base.year; var month = base.month + 1;
-    if (month > 12) { month = 1; year += 1; }
-    final daysInNext = DateTime.utc(year, month + 1, 0).day;
-    final billingDay = day < daysInNext ? day : daysInNext;
-    return DateTime.utc(year, month, billingDay).toIso8601String().split('T').first;
-  }
-
   Future<void> _collect() async {
     final amountText = _amountCtrl.text.trim();
     if (amountText.isEmpty) {
@@ -1043,11 +1031,14 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
 
       await client.from('invoices').update({'status': 'paid', 'paid_at': DateTime.now().toUtc().toIso8601String()}).eq('id', invoiceId);
 
-      final memberRow = await client.from('members').select('next_payment_date, status').eq('id', memberId).maybeSingle();
+      final memberRow = await client.from('members').select('next_payment_date, status, billing_interval_months').eq('id', memberId).maybeSingle();
       if (memberRow != null) {
         final updates = <String, dynamic>{};
         final npd = memberRow['next_payment_date'] as String?;
-        if (npd != null) { final adv = _advancePaymentDate(npd); if (adv != null) updates['next_payment_date'] = adv; }
+        if (npd != null) {
+          final adv = advancePaymentDate(npd, months: (memberRow['billing_interval_months'] as int?) ?? 1);
+          if (adv != null) updates['next_payment_date'] = adv;
+        }
         if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';
         if (updates.isNotEmpty) await client.from('members').update(updates).eq('id', memberId);
       }

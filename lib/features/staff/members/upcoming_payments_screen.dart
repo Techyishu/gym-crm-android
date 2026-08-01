@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/member_photo.dart';
@@ -671,23 +672,6 @@ class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
     }
   }
 
-  String? _advancePaymentDate(String dateStr) {
-    final segs = dateStr.split('T').first.split('-');
-    if (segs.length < 3) return null;
-    final day = int.tryParse(segs[2]);
-    if (day == null || day < 1 || day > 31) return null;
-    final base = DateTime.now().toUtc();
-    var year = base.year;
-    var month = base.month + 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-    final daysInNext = DateTime.utc(year, month + 1, 0).day;
-    final billingDay = day < daysInNext ? day : daysInNext;
-    return DateTime.utc(year, month, billingDay).toIso8601String().split('T').first;
-  }
-
   Future<void> _save() async {
     final amountText = _amountCtrl.text.trim();
     if (amountText.isEmpty) {
@@ -756,14 +740,17 @@ class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
       // 4. Advance next_payment_date + lift freeze
       final memberRow = await client
           .from('members')
-          .select('next_payment_date, status')
+          .select('next_payment_date, status, billing_interval_months')
           .eq('id', widget.memberId)
           .maybeSingle();
       if (memberRow != null) {
         final updates = <String, dynamic>{};
         final npd = memberRow['next_payment_date'] as String?;
         if (npd != null) {
-          final advanced = _advancePaymentDate(npd);
+          final advanced = advancePaymentDate(
+            npd,
+            months: (memberRow['billing_interval_months'] as int?) ?? 1,
+          );
           if (advanced != null) updates['next_payment_date'] = advanced;
         }
         if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';

@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
+import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -1020,6 +1021,22 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       // Activate the member if they were expired or cancelled.
       if (m.status == 'expired' || m.status == 'cancelled') {
         await _client.from('members').update({'status': 'active'}).eq('id', m.id);
+      }
+      // Recompute next_payment_date from join date + the newly selected
+      // plan's duration every time a plan is assigned/changed — not only
+      // when it was empty. Otherwise switching plans after an earlier
+      // assignment leaves the old plan's due date stuck in place.
+      final plan = plans.firstWhere((p) => p['id'] == selected, orElse: () => {});
+      final months = (plan['billing_interval_months'] as int?) ??
+          const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']] ??
+          1;
+      final joinedStr = startsAt.toIso8601String().split('T').first;
+      final derived = advancePaymentDate(joinedStr, months: months);
+      if (derived != null) {
+        await _client.from('members').update({
+          'next_payment_date': derived,
+          'billing_interval_months': months,
+        }).eq('id', m.id);
       }
       ref.invalidate(_memberDetailProvider(m.id));
       _toast('Plan assigned');

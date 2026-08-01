@@ -440,14 +440,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  freezed_annotation:
-    dependency: transitive
-    description:
-      name: freezed_annotation
-      sha256: c2e2d632dd9b8a2b7751117abcfc2b4888ecfe181bd9fca7170d9ef02e595fe2
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.4"
   functions_client:
     dependency: transitive
     description:
@@ -900,18 +892,18 @@ packages:
     dependency: "direct main"
     description:
       name: purchases_flutter
-      sha256: "8d34712aa3201f675eeccaacf45c0b7b025575fc9d0378b2619bb61246e76064"
+      sha256: "7608be2dc1f48cf34f15cc5830af256b89d2d7966d5da63788a87a7a8925ff87"
       url: "https://pub.dev"
     source: hosted
-    version: "8.11.0"
+    version: "9.16.1"
   purchases_ui_flutter:
     dependency: "direct main"
     description:
       name: purchases_ui_flutter
-      sha256: "883caecc6065d3e079d2cf62c2b72c54b909668bd4c95ea51691f9708dea0dc6"
+      sha256: f630597686ea55c832482799cedbb863e143070f30352cfc064db58d687cc8eb
       url: "https://pub.dev"
     source: hosted
-    version: "8.11.0"
+    version: "9.16.1"
   qr:
     dependency: transitive
     description:
@@ -968,6 +960,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.28.0"
+  sendotp_flutter_sdk:
+    dependency: "direct main"
+    description:
+      name: sendotp_flutter_sdk
+      sha256: "4536dc5132c505c7f854c1f203b146f32f705e95640c476fa3320bf435c0e6ea"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.2"
   sentry:
     dependency: transitive
     description:

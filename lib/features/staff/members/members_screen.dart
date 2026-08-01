@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/access/role_access.dart';
+import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -441,6 +442,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   String? _nextPaymentDate;
   int _billingIntervalMonths = 1;
   String? _planId;
+  int? _planBillingIntervalMonths;
   double _planDiscountAmount = 0;
   bool _paidToday = false;
   String _paymentMethod = 'cash';
@@ -528,6 +530,17 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
 
       final avatarUrl = await _uploadAvatar(gymId);
 
+      // Plan assigned but no next_payment_date typed in — derive it from
+      // join date + plan duration so the member isn't invisible to
+      // upcoming-payments and reminders (both key off next_payment_date).
+      var nextPaymentDate = _nextPaymentDate;
+      var billingIntervalMonths = _billingIntervalMonths;
+      if (nextPaymentDate == null && _planId != null) {
+        billingIntervalMonths = _planBillingIntervalMonths ?? 1;
+        final joined = _joinedAt ?? DateTime.now().toIso8601String().split('T').first;
+        nextPaymentDate = advancePaymentDate(joined, months: billingIntervalMonths);
+      }
+
       final inserted = await client.from('members').insert({
         'gym_id': gymId,
         'first_name': _firstCtrl.text.trim(),
@@ -536,13 +549,13 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
         if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim(),
         if (_customIdCtrl.text.trim().isNotEmpty) 'custom_id': _customIdCtrl.text.trim(),
         if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
-        'status': (_nextPaymentDate != null && _nextPaymentDate!.compareTo(DateTime.now().toIso8601String().split('T')[0]) < 0)
+        'status': (nextPaymentDate != null && nextPaymentDate.compareTo(DateTime.now().toIso8601String().split('T')[0]) < 0)
             ? 'expired'
             : _status,
         if (_joinedAt != null) 'joined_at': _joinedAt,
         if (avatarUrl != null) 'avatar_url': avatarUrl,
-        if (_nextPaymentDate != null) 'next_payment_date': _nextPaymentDate,
-        if (_nextPaymentDate != null) 'billing_interval_months': _billingIntervalMonths,
+        if (nextPaymentDate != null) 'next_payment_date': nextPaymentDate,
+        if (nextPaymentDate != null) 'billing_interval_months': billingIntervalMonths,
       }).select('id').single();
 
       // Assign the selected membership plan (open-ended, matches the web flow).
@@ -765,7 +778,14 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                               ],
                               onChanged: (v) => setState(() {
                                 _planId = v;
-                                if (v == null) _planDiscountAmount = 0;
+                                if (v == null) {
+                                  _planDiscountAmount = 0;
+                                  _planBillingIntervalMonths = null;
+                                } else {
+                                  final plan = list.firstWhere((p) => p['id'] == v, orElse: () => {});
+                                  _planBillingIntervalMonths = plan['billing_interval_months'] as int? ??
+                                      const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']];
+                                }
                               }),
                             ),
                           ),
