@@ -1,3 +1,4 @@
+import 'package:facebook_app_events/facebook_app_events.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,19 +7,53 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
 
-/// DPDP Act 2023 consent keys. Bump the `_v1` suffix to re-prompt everyone
+/// DPDP Act 2023 consent keys. Bump the `_v*` suffix to re-prompt everyone
 /// after a material change to what we collect or who we share it with.
-const kConsentGiven = 'dpdp_consent_v1';
+///
+/// v2 (Meta SDK): ad measurement split out of `consent_marketing` into its own
+/// key. Sharing an advertising ID with Meta is a different purpose from sending
+/// a push notification, so it needs its own consent — and everyone who agreed
+/// under v1 agreed to a screen that promised the opposite.
+const kConsentGiven = 'dpdp_consent_v2';
 const kConsentAnalytics = 'consent_analytics';
 const kConsentMarketing = 'consent_marketing';
+const kConsentAds = 'consent_ads';
+
+/// Live analytics consent, read by Sentry's `beforeSend` in main.dart.
+///
+/// Sentry has to be initialised before `runApp` to catch startup crashes, which
+/// is earlier than we can read consent — so it always initialises and drops
+/// events at the send hook instead. Defaults to false: until consent is loaded,
+/// nothing is sent.
+bool analyticsConsentGranted = false;
 
 /// Applies stored consent to the SDKs that read it. Called at startup and
 /// whenever the user changes their choice.
 Future<void> applyStoredConsent(SharedPreferences prefs) async {
+  // Set before the platform check — Sentry runs on every platform.
+  analyticsConsentGranted = prefs.getBool(kConsentAnalytics) ?? false;
+
   if (defaultTargetPlatform != TargetPlatform.android) return;
   await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
     prefs.getBool(kConsentAnalytics) ?? false,
   );
+
+  // Meta reads the ads consent, not analytics or marketing — its events carry
+  // the advertising ID and feed ad attribution, which is its own purpose. The
+  // manifest ships both SDK toggles off, so nothing leaves the device before
+  // this runs. Without consent we also set Limited Data Use, which tells Meta
+  // to restrict processing of anything that still reaches it.
+  // This only stops Meta's *automatic* events (install, launch, Play purchase).
+  // Explicit logEvent calls are not covered by it — AppEvents re-checks the same
+  // flag before every call. Don't drop either half.
+  //
+  // No setAdvertiserTracking here: on Android the plugin's handler is an empty
+  // stub (iOS ATT only), so calling it would just look like a gate.
+  final ads = prefs.getBool(kConsentAds) ?? false;
+  final fb = FacebookAppEvents();
+  await fb.setAutoLogAppEventsEnabled(ads);
+  await fb.setDataProcessingOptions(ads ? [] : ['LDU'], country: 0, state: 0);
+  if (!ads) await fb.clearUserData();
 }
 
 class ConsentScreen extends StatefulWidget {
@@ -31,6 +66,7 @@ class ConsentScreen extends StatefulWidget {
 class _ConsentScreenState extends State<ConsentScreen> {
   bool _analytics = true;
   bool _marketing = true;
+  bool _ads = true;
   bool _loaded = false;
   bool _saving = false;
 
@@ -48,15 +84,23 @@ class _ConsentScreenState extends State<ConsentScreen> {
       // (and nothing collected) until the user actually taps a button.
       _analytics = prefs.getBool(kConsentAnalytics) ?? true;
       _marketing = prefs.getBool(kConsentMarketing) ?? true;
+      // Never inherited from the v1 marketing choice — that screen said data
+      // was never shared with advertisers, so it cannot stand as consent here.
+      _ads = prefs.getBool(kConsentAds) ?? true;
       _loaded = true;
     });
   }
 
-  Future<void> _save({required bool analytics, required bool marketing}) async {
+  Future<void> _save({
+    required bool analytics,
+    required bool marketing,
+    required bool ads,
+  }) async {
     setState(() => _saving = true);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kConsentAnalytics, analytics);
     await prefs.setBool(kConsentMarketing, marketing);
+    await prefs.setBool(kConsentAds, ads);
     await prefs.setBool(kConsentGiven, true);
     await applyStoredConsent(prefs);
     if (!mounted) return;
@@ -153,12 +197,24 @@ class _ConsentScreenState extends State<ConsentScreen> {
                           title: 'Product updates',
                           body:
                               'Push notifications about new features, offers and tips, '
-                              'sent through OneSignal. Never sold or shared with '
-                              'advertisers.',
+                              'sent through OneSignal.',
                           value: _marketing,
                           onChanged: _saving
                               ? null
                               : (v) => setState(() => _marketing = v),
+                        ),
+                        const SizedBox(height: 12),
+                        _ConsentTile(
+                          icon: Icons.campaign_outlined,
+                          title: 'Ad measurement',
+                          body:
+                              'Your device advertising ID and app events — install, '
+                              'sign-up, subscription — shared with Meta (Facebook) so '
+                              'we can see which ads bring gyms to us. Your member and '
+                              'payment records are never shared.',
+                          value: _ads,
+                          onChanged:
+                              _saving ? null : (v) => setState(() => _ads = v),
                         ),
 
                         const SizedBox(height: 22),
@@ -184,6 +240,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                               : () => _save(
                                     analytics: _analytics,
                                     marketing: _marketing,
+                                    ads: _ads,
                                   ),
                           child: Text(canPop ? 'Save choices' : 'Agree & continue'),
                         ),
@@ -191,7 +248,11 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         OutlinedButton(
                           onPressed: _saving
                               ? null
-                              : () => _save(analytics: false, marketing: false),
+                              : () => _save(
+                                    analytics: false,
+                                    marketing: false,
+                                    ads: false,
+                                  ),
                           child: const Text('Essential only'),
                         ),
                         const SizedBox(height: 12),

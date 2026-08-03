@@ -8,9 +8,11 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
-import 'features/legal/consent_screen.dart' show applyStoredConsent;
+import 'features/legal/consent_screen.dart'
+    show applyStoredConsent, analyticsConsentGranted;
 import 'core/services/activity_log_service.dart';
 import 'core/services/onesignal_service.dart';
+import 'core/services/update_prompt.dart';
 import 'firebase_options.dart';
 import 'core/services/revenue_cat_service.dart';
 
@@ -36,7 +38,15 @@ Future<void> main() async {
       options.tracesSampleRate = kReleaseMode ? 0.1 : 1.0;
       options.attachScreenshot = false;
       options.attachViewHierarchy = false;
+      // DPDP: the consent screen names Sentry under "Improve the app", so no
+      // crash report leaves the device without that consent. Sentry must still
+      // initialise this early to catch startup crashes, so the gate is here at
+      // the send hook rather than on init.
+      options.beforeSendTransaction =
+          (transaction, hint) => analyticsConsentGranted ? transaction : null;
       options.beforeSend = (event, hint) {
+        if (!analyticsConsentGranted) return null;
+
         // Drop OS-level network interruptions caused by the device sleeping or
         // Android killing idle sockets. These are not actionable.
         final exceptions = event.exceptions;
@@ -67,9 +77,11 @@ Future<void> main() async {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
         );
-        // DPDP: analytics stays off until the user consents on /consent.
-        await applyStoredConsent(await SharedPreferences.getInstance());
       }
+      // Runs on every platform, and after Firebase init so it can configure it:
+      // Sentry's gate reads the flag this sets. DPDP — analytics, ad
+      // measurement and crash reporting all stay off until /consent.
+      await applyStoredConsent(await SharedPreferences.getInstance());
 
       await Supabase.initialize(
         url: _supabaseUrl,
@@ -93,6 +105,9 @@ Future<void> main() async {
       runApp(const ProviderScope(child: GymCRMApp()));
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
+        // Play update check. Not awaited — it must never delay first paint.
+        unawaited(UpdatePrompt.check());
+
         Supabase.instance.client.auth.onAuthStateChange.listen(
           (data) async {
             if (data.event == AuthChangeEvent.tokenRefreshed ||

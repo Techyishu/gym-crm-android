@@ -16,6 +16,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/activity_log_service.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
+import '../../../core/services/review_prompt.dart';
 import '../../../shared/widgets/member_photo.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -257,6 +258,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         metadata: {'member_id': memberId, 'member_name': label, 'method': method},
       );
       ref.invalidate(_recentCheckInsProvider);
+      unawaited(ReviewPrompt.recordSuccess());
 
       return _CheckResult(
         success: true,

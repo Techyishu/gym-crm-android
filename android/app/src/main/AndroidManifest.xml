@@ -5,7 +5,10 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove"/>
+    <!-- Advertising ID. Required for Meta / Google install attribution; without
+         it, ad platforms cannot tie a purchase back to the campaign that paid
+         for it. Declare this in the Play Console Data safety form. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <application
@@ -48,6 +51,26 @@
                 <data android:scheme="gymcrm" android:host="payment-success"/>
             </intent-filter>
         </activity>
+        <!-- Meta SDK. Auto-logging stays off until DPDP consent — see
+             applyStoredConsent() in lib/features/legal/consent_screen.dart. -->
+        <meta-data
+            android:name="com.facebook.sdk.ApplicationId"
+            android:value="@string/facebook_app_id" />
+        <meta-data
+            android:name="com.facebook.sdk.ClientToken"
+            android:value="@string/facebook_client_token" />
+        <meta-data
+            android:name="com.facebook.sdk.AutoLogAppEventsEnabled"
+            android:value="false" />
+        <!-- The advertising ID rides along with app events; it is what lets Meta
+             tie a subscription back to the ad that paid for it. The plugin has
+             no runtime setter for this, so the gate is on the events instead:
+             auto-logging is off until consent, and AppEvents checks the same
+             flag before every manual call. No event, no advertising ID. -->
+        <meta-data
+            android:name="com.facebook.sdk.AdvertiserIDCollectionEnabled"
+            android:value="true" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

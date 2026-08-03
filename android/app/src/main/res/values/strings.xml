@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Meta (Facebook) SDK credentials. Both come from the app's dashboard at
+         developers.facebook.com → Settings → Basic. The client token is under
+         Advanced. Neither is a secret; both ship in the APK by design. -->
+    <string name="facebook_app_id">1013410908097301</string>
+    <string name="facebook_client_token">73556825fce0f7d8283c5fc374cb08e0</string>
+</resources>
