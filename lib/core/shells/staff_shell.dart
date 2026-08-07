@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +8,7 @@ import '../../core/providers/revenue_cat_provider.dart';
 import '../../core/services/coachmark_service.dart';
 import '../../core/services/onesignal_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/platform_info.dart';
 import '../../core/widgets/plan_expiry_banner.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/staff/paywall/paywall_screen.dart';
@@ -37,7 +36,7 @@ class StaffShell extends ConsumerWidget {
 
     // Billing gate — iOS uses RevenueCat entitlement; Android uses Supabase plan data.
     if (profileAsync.hasValue) {
-      final hasAccess = Platform.isIOS
+      final hasAccess = isIOS
           ? ref.watch(iosProAccessProvider) ||
               hasActiveBillingAccess(gym, ignoreTrial: true)
           : hasActiveBillingAccess(gym);

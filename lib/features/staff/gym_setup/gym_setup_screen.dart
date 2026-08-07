@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:country_picker/country_picker.dart';
 import 'package:currency_picker/currency_picker.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/platform_info.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -69,7 +68,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
       _phoneCtrl.text = phone;
     } else {
       // No phone field on iOS (App Review 5.1.1).
-      _needsPhone = !Platform.isIOS;
+      _needsPhone = !isIOS;
     }
   }
 
@@ -347,7 +346,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                           const SizedBox(height: 20),
                           ElevatedButton(
                             onPressed: _submit,
-                            child: Text(Platform.isIOS ? 'Create Gym' : 'Start Free Trial'),
+                            child: Text(isIOS ? 'Create Gym' : 'Start Free Trial'),
                           ),
                         ],
                       ),
@@ -357,7 +356,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
               ),
 
               const SizedBox(height: 16),
-              if (!Platform.isIOS)
+              if (!isIOS)
                 Center(
                   child: Text('1-day free trial · No credit card needed',
                       style: TextStyle(

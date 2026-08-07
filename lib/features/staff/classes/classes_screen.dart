@@ -1474,7 +1474,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
     final results = _allMembers.where((m) {
       if (enrolledIds.contains(m['id'])) return false;
       if (query.isEmpty) return true;
-      final name = '${m['first_name']} ${m['last_name']}'.toLowerCase();
+      final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase();
       final phone = (m['phone'] as String? ?? '').toLowerCase();
       final email = (m['email'] as String? ?? '').toLowerCase();
       return name.contains(query) ||
@@ -1561,7 +1561,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                     else
                       CardList(
                         children: results.map((m) {
-                          final name = '${m['first_name']} ${m['last_name']}';
+                          final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
                           final busy = _busyMemberId == m['id'];
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1607,7 +1607,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                               final member = row['members'] as Map<String, dynamic>?;
                               if (member == null) return const SizedBox.shrink();
                               final memberId = member['id'] as String;
-                              final name = '${member['first_name']} ${member['last_name']}';
+                              final name = '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim();
                               final busy = _busyMemberId == memberId;
                               return Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

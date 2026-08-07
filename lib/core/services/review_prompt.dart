@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:in_app_review/in_app_review.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,6 +21,7 @@ class ReviewPrompt {
   /// recorded). Cheap and safe to call on every success — it only reaches the
   /// Play API on a milestone.
   static Future<void> recordSuccess() async {
+    if (kIsWeb) return;
     final prefs = await SharedPreferences.getInstance();
     final count = (prefs.getInt(_countKey) ?? 0) + 1;
     await prefs.setInt(_countKey, count);

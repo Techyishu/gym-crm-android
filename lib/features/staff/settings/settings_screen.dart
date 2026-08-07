@@ -1,17 +1,20 @@
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:in_app_review/in_app_review.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/platform_info.dart' as platform_info;
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -160,6 +163,23 @@ class SettingsScreen extends ConsumerWidget {
             // ── APP section ──────────────────────────────────────────────────
             _SectionLabel(label: 'APP'),
             _SettingsCard(items: [
+              if (!kIsWeb)
+                _SettingsRow(
+                  icon: Icons.share_outlined,
+                  label: platform_info.isIOS ? 'Rate us on the App Store' : 'Rate us on Play Store',
+                  onTap: () async {
+                    final inAppReview = InAppReview.instance;
+                    try {
+                      await inAppReview.openStoreListing(appStoreId: '6778882176');
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Could not open the ${platform_info.isIOS ? 'App Store' : 'Play Store'}. Please try again.')),
+                        );
+                      }
+                    }
+                  },
+                ),
               _SettingsRow(
                 icon: Icons.info_outline,
                 label: 'Help & Support',

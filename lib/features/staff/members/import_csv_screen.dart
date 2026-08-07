@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/platform_info.dart';
 import '../../auth/providers/auth_provider.dart';
 
 /// Bulk member import from a CSV file. Mirrors the web import-csv-dialog:
@@ -172,7 +172,7 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
     } on MissingPluginException {
       // The file picker ships as native code; an over-the-air patch can't add
       // it. Surface a clear message instead of crashing until the next release.
-      _toast('CSV import needs the latest app version — please update from the ${Platform.isIOS ? 'App Store' : 'Play Store'}.');
+      _toast('CSV import needs the latest app version — please update from the ${isIOS ? 'App Store' : 'Play Store'}.');
       return;
     } on PlatformException catch (e) {
       _toast('Could not open the file picker: ${e.message ?? e.code}');

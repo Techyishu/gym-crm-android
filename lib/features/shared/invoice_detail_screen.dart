@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,13 +8,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/invoice_pdf.dart';
+import '../../core/utils/platform_info.dart' as platform_info;
 import '../../shared/widgets/redesign.dart';
 
 final _invoiceDetailProvider =
     FutureProvider.family<Map<String, dynamic>, String>((ref, id) async {
   final data = await Supabase.instance.client
       .from('invoices')
-      .select('*, members(first_name, last_name, email), gyms(name, settings)')
+      .select('*, members(first_name, last_name, email), gyms(name, settings), payments(method, status)')
       .eq('id', id)
       .single();
   return data;
@@ -40,7 +42,7 @@ class InvoiceDetailScreen extends ConsumerWidget {
         ),
         actions: [
           if (async.hasValue) ...[
-            if (!Platform.isIOS)
+            if (!kIsWeb && !platform_info.isIOS)
               IconButton(
                 icon: const Icon(Icons.download_outlined),
                 onPressed: () => _downloadPdf(context, async.value!),
@@ -132,7 +134,7 @@ class _InvoiceBody extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${member['first_name']} ${member['last_name']}',
+                          '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim(),
                           style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink),
                         ),
                         if ((member['email'] as String?)?.isNotEmpty == true) ...[
@@ -164,7 +166,7 @@ class _InvoiceBody extends StatelessWidget {
               ),
 
             // Footer
-            _Footer(invNumber: invNum),
+            _Footer(invNumber: invNum, gymName: gym?['name'] as String? ?? 'the gym'),
           ],
         ),
       ),
@@ -272,33 +274,40 @@ class _MetaRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final paidAt = invoice['paid_at'] as String?;
+    final payments = (invoice['payments'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final succeeded = payments.where((p) => p['status'] == 'succeeded');
+    final method = succeeded.isEmpty ? null : succeeded.first['method'] as String?;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: const BoxDecoration(
         color: Color(0xFFF8F8F8),
         border: Border(bottom: BorderSide(color: AppTheme.border)),
       ),
-      child: Row(
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 10,
         children: [
           _MetaCell(
             label: 'Issue Date',
             value: formatDateFromString(invoice['created_at'] as String?),
           ),
-          const SizedBox(width: 24),
           _MetaCell(
             label: 'Due Date',
             value: invoice['due_at'] != null
                 ? formatDateFromString(invoice['due_at'] as String?)
                 : '—',
           ),
-          if (paidAt != null) ...[
-            const SizedBox(width: 24),
+          if (paidAt != null)
             _MetaCell(
               label: 'Paid On',
               value: formatDateFromString(paidAt),
               valueColor: AppTheme.statusActive,
             ),
-          ],
+          if (method != null && method.isNotEmpty)
+            _MetaCell(
+              label: 'Method',
+              value: method[0].toUpperCase() + method.substring(1).replaceAll('_', ' '),
+            ),
         ],
       ),
     );
@@ -516,17 +525,25 @@ class _Total extends StatelessWidget {
 
 class _Footer extends StatelessWidget {
   final String invNumber;
-  const _Footer({required this.invNumber});
+  final String gymName;
+  const _Footer({required this.invNumber, required this.gymName});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+      child: Column(
         children: [
-          Text(invNumber, style: const TextStyle(fontSize: 10, color: AppTheme.inkHint)),
-          const Text('Powered by GymCRM', style: TextStyle(fontSize: 10, color: AppTheme.inkHint)),
+          Text('Thank you for being a member of $gymName',
+            style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft), textAlign: TextAlign.center),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(invNumber, style: const TextStyle(fontSize: 10, color: AppTheme.inkHint)),
+              const Text('Powered by GymCRM', style: TextStyle(fontSize: 10, color: AppTheme.inkHint)),
+            ],
+          ),
         ],
       ),
     );

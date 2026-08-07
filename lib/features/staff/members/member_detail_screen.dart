@@ -1022,16 +1022,19 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       if (m.status == 'expired' || m.status == 'cancelled') {
         await _client.from('members').update({'status': 'active'}).eq('id', m.id);
       }
-      // Recompute next_payment_date from join date + the newly selected
-      // plan's duration every time a plan is assigned/changed — not only
-      // when it was empty. Otherwise switching plans after an earlier
-      // assignment leaves the old plan's due date stuck in place.
+      // Extend from the member's current next_payment_date when one exists —
+      // matches how Collect Payment already advances dates (from the date
+      // itself, not from today or from join date). Only members who never
+      // had a next_payment_date fall back to join date + plan duration.
       final plan = plans.firstWhere((p) => p['id'] == selected, orElse: () => {});
       final months = (plan['billing_interval_months'] as int?) ??
           const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']] ??
           1;
-      final joinedStr = startsAt.toIso8601String().split('T').first;
-      final derived = advancePaymentDate(joinedStr, months: months);
+      final currentNpd = m.nextPaymentDate;
+      final anchor = (currentNpd != null && currentNpd.isNotEmpty)
+          ? currentNpd
+          : startsAt.toIso8601String().split('T').first;
+      final derived = advancePaymentDate(anchor, months: months);
       if (derived != null) {
         await _client.from('members').update({
           'next_payment_date': derived,

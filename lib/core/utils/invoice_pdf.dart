@@ -22,7 +22,7 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> inv) async {
   final website    = settings['website'] as String?;
 
   final memberName  = member != null
-      ? '${member['first_name']} ${member['last_name']}'.trim()
+      ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim()
       : 'Member';
   final memberEmail = (member?['email'] as String?) ?? '';
 

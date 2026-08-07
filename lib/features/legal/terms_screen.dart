@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/platform_info.dart';
 
 class TermsScreen extends StatelessWidget {
   const TermsScreen({super.key});
@@ -42,7 +41,6 @@ class _TermsContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isIOS = Platform.isIOS;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

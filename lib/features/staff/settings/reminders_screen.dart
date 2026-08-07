@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/platform_info.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // pack key → (Dodo checkout key [Android], App Store product ID [iOS]).
@@ -20,6 +20,30 @@ const _kCreditPacks = [
 ];
 
 const _kReminderDayOptions = [1, 2, 3, 5, 7, 14];
+
+// Approved MSG91 WhatsApp templates. `id` must match a key in TEMPLATES in
+// supabase/functions/whatsapp-reminders/index.ts — add to both when a new
+// template is approved.
+const _kWhatsAppTemplates = [
+  (
+    id: 'payment_reminder',
+    label: 'English · short',
+    preview: 'Hi Rahul! Your membership expires in 3 days. Please contact FitZone to renew.',
+  ),
+  (
+    id: 'payment_due_3',
+    label: 'English · polite',
+    preview: 'Hi Rahul, just a quick reminder that your FitZone membership will expire in 3 days. '
+        'Renew it before the expiry date to keep your access active',
+  ),
+  (
+    id: 'payment_reminder_2',
+    label: 'हिंदी',
+    preview: 'Hi Rahul! 👋\n'
+        'आपकी FitZone की मेंबरशिप 3 दिन में खत्म होने वाली है। '
+        'बिना किसी रुकावट के वर्कआउट जारी रखने के लिए समय पर रिन्यू करवा लें.',
+  ),
+];
 
 // One-screen accent colors distinguishing the two channels — push uses a
 // warm orange, WhatsApp reuses AppTheme.darkCard (already a deep green).
@@ -292,7 +316,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
   Future<void> _buyCredits(String pack, String iosProductId) async {
     setState(() => _buyingPack = pack);
     try {
-      if (Platform.isIOS) {
+      if (isIOS) {
         await _buyCreditsIos(iosProductId);
       } else {
         await _buyCreditsAndroid(pack);
@@ -397,7 +421,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
     }
   }
 
-  Future<void> _save({bool? enabled, Set<int>? days}) async {
+  Future<void> _save({bool? enabled, Set<int>? days, String? template}) async {
     final gymId = widget.gym['id'] as String;
     final nextEnabled = enabled ?? (widget.gym['whatsapp_reminder_enabled'] as bool? ?? false);
     final nextDays = days ?? _currentDays();
@@ -406,6 +430,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       await Supabase.instance.client.from('gyms').update({
         'whatsapp_reminder_enabled': nextEnabled,
         'whatsapp_reminder_days': nextDays.toList()..sort(),
+        'whatsapp_template': template ?? _currentTemplate(),
       }).eq('id', gymId);
       widget.onChanged();
     } finally {
@@ -416,6 +441,11 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
   Set<int> _currentDays() {
     final raw = widget.gym['whatsapp_reminder_days'] as List?;
     return raw != null ? raw.map((d) => d as int).toSet() : {3};
+  }
+
+  String _currentTemplate() {
+    final raw = widget.gym['whatsapp_template'] as String?;
+    return _kWhatsAppTemplates.any((t) => t.id == raw) ? raw! : _kWhatsAppTemplates.first.id;
   }
 
   void _toggleDay(int day) {
@@ -436,6 +466,8 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
     final quota = _planQuota(widget.gym['plan'] as String?);
     final quotaUsed = widget.gym['whatsapp_monthly_quota_used'] as int? ?? 0;
     final credits = widget.gym['whatsapp_credits'] as int? ?? 0;
+    final templateId = _currentTemplate();
+    final template = _kWhatsAppTemplates.firstWhere((t) => t.id == templateId);
 
     return _ChannelCard(
       icon: Icons.chat_bubble_outline,
@@ -460,6 +492,35 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
               selectedColor: AppTheme.darkCard,
               onTap: _saving ? () {} : () => _toggleDay(d),
             )).toList(),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'MESSAGE',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 0.6),
+          ),
+          const SizedBox(height: 10),
+          // Picker only earns its space once there's a real choice.
+          if (_kWhatsAppTemplates.length > 1) ...[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _kWhatsAppTemplates.map((t) => _DayPill(
+                label: t.label,
+                selected: t.id == template.id,
+                selectedColor: AppTheme.darkCard,
+                onTap: _saving ? () {} : () => _save(template: t.id),
+              )).toList(),
+            ),
+            const SizedBox(height: 10),
+          ],
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(14)),
+            child: Text(
+              template.preview,
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft, height: 1.45),
+            ),
           ),
           const SizedBox(height: 16),
           _CreditsBlock(quota: quota, quotaUsed: quotaUsed, credits: credits),
@@ -545,11 +606,12 @@ class _CreditsBlock extends StatelessWidget {
             Container(height: 1, color: AppTheme.border),
             const SizedBox(height: 14),
           ],
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              const Expanded(
-                child: Text('Purchased credits', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-              ),
+              const Text('Purchased credits', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppTheme.ink)),
               Text('$credits credits remaining', style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
             ],
           ),

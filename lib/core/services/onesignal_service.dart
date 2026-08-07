@@ -10,6 +10,10 @@ class OneSignalService {
   OneSignalService._();
 
   static Future<void> initialize() async {
+    // ponytail: web needs the OneSignal Web SDK script + service worker in
+    // web/index.html, which isn't set up yet — skip rather than risk the
+    // uncaught init call blocking app boot. Add web push when that's wired up.
+    if (kIsWeb) return;
     OneSignal.Debug.setLogLevel(
       kReleaseMode ? OSLogLevel.none : OSLogLevel.verbose,
     );

@@ -11,7 +11,7 @@ class UpdatePrompt {
   /// background, then Play installs it. Immediate (blocking) updates are for
   /// shipping a fix to a broken build — not for routine releases.
   static Future<void> check() async {
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     try {
       final info = await InAppUpdate.checkForUpdate();
       if (info.updateAvailability != UpdateAvailability.updateAvailable) return;

@@ -33,7 +33,7 @@ Future<void> applyStoredConsent(SharedPreferences prefs) async {
   // Set before the platform check — Sentry runs on every platform.
   analyticsConsentGranted = prefs.getBool(kConsentAnalytics) ?? false;
 
-  if (defaultTargetPlatform != TargetPlatform.android) return;
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
   await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
     prefs.getBool(kConsentAnalytics) ?? false,
   );
@@ -393,10 +393,11 @@ class _RightsNote extends StatelessWidget {
           ),
           SizedBox(height: 8),
           Text(
-            'You can ask us to show, correct or delete your data, nominate someone '
-            'to act for you, or withdraw consent — from Settings, or by writing to '
-            'our Grievance Officer at privacy@gymcrm.app. If we do not resolve it, '
-            'you may complain to the Data Protection Board of India.',
+            'You can see, correct or delete your data, nominate someone to act for '
+            'you, or withdraw consent — most of it straight from Settings. Anything '
+            'else, write to our Grievance Officer at shashanksingh67567@gmail.com '
+            'and we will '
+            'sort it out.',
             style: TextStyle(
               fontSize: 12.5,
               height: 1.5,

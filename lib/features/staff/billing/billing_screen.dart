@@ -12,6 +12,7 @@ import '../../../core/utils/invoice_pdf.dart';
 import '../../../shared/models/invoice.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../members/upcoming_payments_screen.dart' show QuickCollectSheet;
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
@@ -84,11 +85,24 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
         .eq('invoices.gym_id', gymId)
         .eq('status', 'succeeded')
         .gte('created_at', statsFrom.toIso8601String()),
+    // Members whose next renewal has passed or falls in the next 30 days but
+    // don't have an open invoice yet (mirrors Upcoming Payments' window) —
+    // Collect on these creates the invoice on the spot.
+    client
+        .from('members')
+        .select('id, first_name, last_name, next_payment_date, memberships(status, discount_amount, membership_plans(price, name))')
+        .eq('gym_id', gymId)
+        .not('status', 'eq', 'cancelled')
+        .lte('next_payment_date', now.add(const Duration(days: 30)).toIso8601String().split('T').first)
+        .order('next_payment_date'),
   ]);
 
   final payments = (results[0] as List).cast<Map<String, dynamic>>();
   final dues = (results[1] as List).cast<Map<String, dynamic>>();
   final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
+  final renewingMembers = (results[3] as List).cast<Map<String, dynamic>>();
+  final invoicedMemberIds = dues.map((d) => d['member_id']).toSet();
+  final projected = renewingMembers.where((m) => !invoicedMemberIds.contains(m['id']));
 
   double sumBetween(DateTime from, DateTime to) => statsPayments
       .where((p) {
@@ -110,7 +124,19 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
   final items = <_TxnItem>[
     for (final p in payments) _TxnItem.payment(p),
     for (final d in dues) _TxnItem.due(d),
+    for (final m in projected) _TxnItem.projected(m),
   ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
+
+  final invoicedTotal = dues.fold<double>(0, (s, d) => s + ((d['amount'] as num?)?.toDouble() ?? 0));
+  final projectedTotal = projected.fold<double>(0, (s, m) => s + _activePlanPrice(m));
+  final overdueCount = dues.where((d) {
+        final due = DateTime.tryParse(d['due_at'] as String? ?? '');
+        return due != null && due.isBefore(now);
+      }).length +
+      projected.where((m) {
+        final due = DateTime.tryParse(m['next_payment_date'] as String? ?? '');
+        return due != null && due.isBefore(now);
+      }).length;
 
   return _BillingFeed(
     collected: {
@@ -123,28 +149,46 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
       BillingPeriod.week: pctChange(collectedWeek, collectedPrevWeek),
       BillingPeriod.month: pctChange(collectedMonth, collectedPrevMonth),
     },
-    dueCount: dues.length,
+    dueCount: dues.length + projected.length,
+    dueTotal: invoicedTotal + projectedTotal,
+    dueMembers: invoicedMemberIds.length + projected.length,
+    overdueCount: overdueCount,
     items: items,
-    periodStart: {
-      BillingPeriod.today: startOfToday,
-      BillingPeriod.week: startOfWeek,
-      BillingPeriod.month: startOfMonth,
-    },
   );
 });
+
+// Active plan price minus any per-member discount — same rule QuickCollectSheet
+// uses to autofill the amount when it creates the invoice on Collect.
+double _activePlanPrice(Map<String, dynamic> member) {
+  final memberships = (member['memberships'] as List?) ?? const [];
+  for (final m in memberships) {
+    final map = (m as Map).cast<String, dynamic>();
+    if (map['status'] != 'active') continue;
+    final plan = map['membership_plans'] as Map?;
+    if (plan == null || plan['price'] == null) continue;
+    final listPrice = (plan['price'] as num).toDouble();
+    final discount = (map['discount_amount'] as num?)?.toDouble() ?? 0;
+    return (listPrice - discount).clamp(0, listPrice);
+  }
+  return 0;
+}
 
 class _BillingFeed {
   final Map<BillingPeriod, double> collected;
   final Map<BillingPeriod, int?> growthPct;
   final int dueCount;
+  final double dueTotal;
+  final int dueMembers;
+  final int overdueCount;
   final List<_TxnItem> items;
-  final Map<BillingPeriod, DateTime> periodStart;
   const _BillingFeed({
     required this.collected,
     required this.growthPct,
     required this.dueCount,
+    required this.dueTotal,
+    required this.dueMembers,
+    required this.overdueCount,
     required this.items,
-    required this.periodStart,
   });
 }
 
@@ -152,6 +196,7 @@ class _BillingFeed {
 class _TxnItem {
   final bool isDue;
   final String invoiceId;
+  final String? memberId;
   final String name;
   final double amount;
   final String subtitle;
@@ -162,6 +207,7 @@ class _TxnItem {
   const _TxnItem._({
     required this.isDue,
     required this.invoiceId,
+    this.memberId,
     required this.name,
     required this.amount,
     required this.subtitle,
@@ -169,6 +215,17 @@ class _TxnItem {
     required this.sortKey,
     required this.raw,
   });
+
+  // No invoice exists yet for this due — Collect creates one on the spot.
+  bool get needsInvoice => isDue && invoiceId.isEmpty;
+
+  static ({String subtitle, Color color}) _dueSubtitle(DateTime? due) {
+    if (due == null) return (subtitle: 'Due', color: AppTheme.statusWarn);
+    final days = due.difference(DateTime.now()).inDays;
+    if (days < 0) return (subtitle: '${days.abs()} day${days == -1 ? '' : 's'} overdue', color: AppTheme.statusDanger);
+    if (days == 0) return (subtitle: 'Due today', color: AppTheme.statusWarn);
+    return (subtitle: 'Due in $days day${days == 1 ? '' : 's'}', color: AppTheme.statusWarn);
+  }
 
   factory _TxnItem.payment(Map<String, dynamic> p) {
     final invoice = p['invoices'] as Map<String, dynamic>?;
@@ -179,7 +236,7 @@ class _TxnItem {
     return _TxnItem._(
       isDue: false,
       invoiceId: p['invoice_id'] as String? ?? '',
-      name: member != null ? '${member['first_name']} ${member['last_name']}' : 'Unknown',
+      name: member != null ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim() : 'Unknown',
       amount: (p['amount'] as num?)?.toDouble() ?? 0,
       subtitle: '$methodLabel · ${DateFormat('d MMM, h:mm a').format(created.toLocal())}',
       color: AppTheme.statusActive,
@@ -191,33 +248,34 @@ class _TxnItem {
   factory _TxnItem.due(Map<String, dynamic> inv) {
     final member = inv['members'] as Map<String, dynamic>?;
     final due = DateTime.tryParse(inv['due_at'] as String? ?? '');
-    String subtitle;
-    Color color;
-    if (due == null) {
-      subtitle = 'Due';
-      color = AppTheme.statusWarn;
-    } else {
-      final days = due.difference(DateTime.now()).inDays;
-      if (days < 0) {
-        subtitle = '${days.abs()} day${days == -1 ? '' : 's'} overdue';
-        color = AppTheme.statusDanger;
-      } else if (days == 0) {
-        subtitle = 'Due today';
-        color = AppTheme.statusWarn;
-      } else {
-        subtitle = 'Due in $days day${days == 1 ? '' : 's'}';
-        color = AppTheme.statusWarn;
-      }
-    }
+    final s = _dueSubtitle(due);
     return _TxnItem._(
       isDue: true,
       invoiceId: inv['id'] as String? ?? '',
-      name: member != null ? '${member['first_name']} ${member['last_name']}' : 'Unknown',
+      memberId: inv['member_id'] as String?,
+      name: member != null ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim() : 'Unknown',
       amount: (inv['amount'] as num?)?.toDouble() ?? 0,
-      subtitle: subtitle,
-      color: color,
+      subtitle: s.subtitle,
+      color: s.color,
       sortKey: due ?? DateTime.now(),
       raw: inv,
+    );
+  }
+
+  // A member whose renewal is due/overdue but has no open invoice yet.
+  factory _TxnItem.projected(Map<String, dynamic> member) {
+    final due = DateTime.tryParse(member['next_payment_date'] as String? ?? '');
+    final s = _dueSubtitle(due);
+    return _TxnItem._(
+      isDue: true,
+      invoiceId: '',
+      memberId: member['id'] as String?,
+      name: '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim(),
+      amount: _activePlanPrice(member),
+      subtitle: s.subtitle,
+      color: s.color,
+      sortKey: due ?? DateTime.now(),
+      raw: member,
     );
   }
 }
@@ -232,7 +290,6 @@ class BillingScreen extends ConsumerStatefulWidget {
 class _BillingScreenState extends ConsumerState<BillingScreen> {
   // 'all' | 'due' | 'collected'
   String _filter = 'all';
-  BillingPeriod _period = BillingPeriod.month;
 
   @override
   Widget build(BuildContext context) {
@@ -260,10 +317,11 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                     loading: () => const _BalanceCardSkeleton(),
                     error: (_, __) => const _BalanceCardSkeleton(),
                     data: (data) => _BalanceCard(
-                      period: _period,
-                      onPeriodChange: (p) => setState(() => _period = p),
-                      collected: data.collected[_period] ?? 0,
-                      growthPct: data.growthPct[_period],
+                      dueTotal: data.dueTotal,
+                      dueMembers: data.dueMembers,
+                      overdueCount: data.overdueCount,
+                      collectedMonth: data.collected[BillingPeriod.month] ?? 0,
+                      growthPct: data.growthPct[BillingPeriod.month],
                       dueCount: data.dueCount,
                       onRecord: () => setState(() => _filter = 'due'),
                       onInvoice: () => _showCreateInvoiceSheet(context),
@@ -278,27 +336,20 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                 sliver: SliverToBoxAdapter(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('All transactions',
                         style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-                      const Spacer(),
-                      PopupMenuButton<String>(
-                        initialValue: _filter,
-                        onSelected: (v) => setState(() => _filter = v),
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'all', child: Text('All')),
-                          PopupMenuItem(value: 'due', child: Text('Due')),
-                          PopupMenuItem(value: 'collected', child: Text('Collected')),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          PillChip(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+                          const SizedBox(width: 8),
+                          PillChip(label: 'Due', selected: _filter == 'due', onTap: () => setState(() => _filter = 'due')),
+                          const SizedBox(width: 8),
+                          PillChip(label: 'Collected', selected: _filter == 'collected', onTap: () => setState(() => _filter = 'collected')),
                         ],
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('Filter', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppTheme.accent)),
-                            SizedBox(width: 2),
-                            Icon(Icons.keyboard_arrow_down, size: 18, color: AppTheme.accent),
-                          ],
-                        ),
                       ),
                     ],
                   ),
@@ -327,13 +378,10 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                   ),
                 ),
                 data: (data) {
-                  final periodStart = data.periodStart[_period];
-                  bool inPeriod(_TxnItem t) =>
-                      t.isDue || periodStart == null || !t.sortKey.isBefore(periodStart);
                   final items = data.items.where((t) {
                     if (_filter == 'due') return t.isDue;
-                    if (_filter == 'collected') return !t.isDue && inPeriod(t);
-                    return inPeriod(t);
+                    if (_filter == 'collected') return !t.isDue;
+                    return true;
                   }).toList();
                   if (items.isEmpty) {
                     return const SliverToBoxAdapter(
@@ -369,6 +417,17 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   }
 
   void _collect(BuildContext context, _TxnItem item) {
+    if (item.needsInvoice) {
+      // No invoice exists yet for this renewal — QuickCollectSheet creates
+      // one and records the payment in a single step.
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => QuickCollectSheet(memberId: item.memberId!, memberName: item.name),
+      ).then((_) => ref.invalidate(_billingFeedProvider));
+      return;
+    }
     final invoice = Invoice.fromJson(item.raw);
     showModalBottomSheet(
       context: context,
@@ -391,9 +450,10 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 // ── Balance Card (banking-app hero) ─────────────────────────────────────────
 
 class _BalanceCard extends StatelessWidget {
-  final BillingPeriod period;
-  final ValueChanged<BillingPeriod> onPeriodChange;
-  final double collected;
+  final double dueTotal;
+  final int dueMembers;
+  final int overdueCount;
+  final double collectedMonth;
   final int? growthPct;
   final int dueCount;
   final VoidCallback onRecord;
@@ -401,9 +461,10 @@ class _BalanceCard extends StatelessWidget {
   final VoidCallback onNewPlan;
   final VoidCallback onDue;
   const _BalanceCard({
-    required this.period,
-    required this.onPeriodChange,
-    required this.collected,
+    required this.dueTotal,
+    required this.dueMembers,
+    required this.overdueCount,
+    required this.collectedMonth,
     required this.growthPct,
     required this.dueCount,
     required this.onRecord,
@@ -412,99 +473,63 @@ class _BalanceCard extends StatelessWidget {
     required this.onDue,
   });
 
-  String get _label => switch (period) {
-    BillingPeriod.today => 'Collected today',
-    BillingPeriod.week => 'Collected this week',
-    BillingPeriod.month => 'Collected this month',
-  };
-
-  String get _growthSuffix => switch (period) {
-    BillingPeriod.today => 'vs yesterday',
-    BillingPeriod.week => 'vs last week',
-    BillingPeriod.month => 'vs last month',
-  };
-
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
       decoration: AppTheme.darkCardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _PeriodTabs(period: period, onChange: onPeriodChange),
-          const SizedBox(height: 14),
-          Text(_label,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
-          const SizedBox(height: 8),
+          Text('Amount due',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.statusWarn)),
+          const SizedBox(height: 6),
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text(formatCurrency(collected),
-              style: AppTheme.numberStyle(fontSize: 34, color: AppTheme.onDark, height: 1.0)),
+            child: Text(formatCurrency(dueTotal),
+              style: AppTheme.numberStyle(fontSize: 38, color: AppTheme.onDark, height: 1.0)),
           ),
-          if (growthPct != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              '${growthPct! >= 0 ? '↑' : '↓'} ${growthPct!.abs()}% $_growthSuffix',
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark),
-            ),
-          ],
+          const SizedBox(height: 6),
+          Text('$dueMembers member${dueMembers == 1 ? '' : 's'} · $overdueCount overdue',
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+          const SizedBox(height: 18),
+          const Divider(height: 1, color: Color(0x1FFFFFFF)),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Collected this month',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+              Row(
+                children: [
+                  Text(formatCurrency(collectedMonth),
+                    style: AppTheme.numberStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.onDark)),
+                  if (growthPct != null) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      '${growthPct! >= 0 ? '↑' : '↓'}${growthPct!.abs()}%',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: growthPct! >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
           const SizedBox(height: 18),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _DockAction(icon: Icons.credit_card_outlined, label: 'Record', onTap: onRecord),
               _DockAction(icon: Icons.receipt_outlined, label: 'Invoice', onTap: onInvoice),
-              _DockAction(icon: Icons.sell_outlined, label: 'New plan', onTap: onNewPlan),
+              _DockAction(icon: Icons.sell_outlined, label: 'Plans', onTap: onNewPlan),
               _DockAction(icon: Icons.schedule_outlined, label: 'Due · $dueCount', onTap: onDue),
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-// Small Today/Week/Month segmented control.
-class _PeriodTabs extends StatelessWidget {
-  final BillingPeriod period;
-  final ValueChanged<BillingPeriod> onChange;
-  const _PeriodTabs({required this.period, required this.onChange});
-
-  static const _options = [
-    (BillingPeriod.today, 'Today'),
-    (BillingPeriod.week, 'Week'),
-    (BillingPeriod.month, 'Month'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(color: AppTheme.darkCard2, borderRadius: BorderRadius.circular(11)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: _options.map((o) {
-          final selected = o.$1 == period;
-          return GestureDetector(
-            onTap: () => onChange(o.$1),
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: selected ? AppTheme.onDark : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(o.$2,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? AppTheme.darkCard : AppTheme.onDarkSoft,
-                )),
-            ),
-          );
-        }).toList(),
       ),
     );
   }
@@ -909,7 +934,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                 isExpanded: true,
                 hint: const Text('Select member'),
                 items: list.map((m) {
-                  final name = '${m['first_name']} ${m['last_name']}';
+                  final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
                   return DropdownMenuItem(value: m['id'] as String, child: Text(name));
                 }).toList(),
                 onChanged: (v) {
@@ -1140,7 +1165,7 @@ class _PlansTab extends ConsumerWidget {
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
-                      builder: (_) => _PlanFormSheet(plan: plan),
+                      builder: (_) => PlanFormSheet(plan: plan),
                     ).then((_) => ref.invalidate(_plansProvider)),
                   )).toList(),
                 ),
@@ -1150,7 +1175,7 @@ class _PlansTab extends ConsumerWidget {
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
-                  builder: (_) => const _PlanFormSheet(),
+                  builder: (_) => const PlanFormSheet(),
                 ).then((_) => ref.invalidate(_plansProvider)),
                 child: DottedBorderBox(
                   child: Row(
@@ -1245,15 +1270,18 @@ class _PlanCard extends StatelessWidget {
 
 // ── Plan Form Sheet ───────────────────────────────────────────────────────────
 
-class _PlanFormSheet extends ConsumerStatefulWidget {
+/// Create/edit a membership plan. Public because the add-member sheet opens it
+/// inline when a gym has no plans yet — on create it pops the new plan row so
+/// the caller can select it without a round-trip.
+class PlanFormSheet extends ConsumerStatefulWidget {
   final Map<String, dynamic>? plan;
-  const _PlanFormSheet({this.plan});
+  const PlanFormSheet({super.key, this.plan});
 
   @override
-  ConsumerState<_PlanFormSheet> createState() => _PlanFormSheetState();
+  ConsumerState<PlanFormSheet> createState() => _PlanFormSheetState();
 }
 
-class _PlanFormSheetState extends ConsumerState<_PlanFormSheet> {
+class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _priceCtrl;
@@ -1313,14 +1341,19 @@ class _PlanFormSheetState extends ConsumerState<_PlanFormSheet> {
         'is_active': _isActive,
       };
 
+      Map<String, dynamic>? created;
       if (_isEdit) {
         await client.from('membership_plans').update(data).eq('id', widget.plan!['id']);
       } else {
         data['gym_id'] = await ref.read(gymIdProvider.future);
-        await client.from('membership_plans').insert(data);
+        created = await client
+            .from('membership_plans')
+            .insert(data)
+            .select('id, name, price, billing_interval, billing_interval_months')
+            .single();
       }
 
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context, created);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));

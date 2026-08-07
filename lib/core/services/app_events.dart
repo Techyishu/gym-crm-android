@@ -20,7 +20,7 @@ class AppEvents {
       (await SharedPreferences.getInstance()).getBool(kConsentAds) ?? false;
 
   static Future<void> _log(String name, [Map<String, Object>? params]) async {
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     await FirebaseAnalytics.instance.logEvent(name: name, parameters: params);
     if (await _adsConsented()) {
       await _fb.logEvent(name: name, parameters: params);
@@ -31,7 +31,7 @@ class AppEvents {
   /// worth bidding on while purchase volume is still too thin to optimise.
   static Future<void> signUpCompleted() async {
     await _log('sign_up_completed');
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     if (!await _adsConsented()) return;
     await _fb.logCompletedRegistration(registrationMethod: 'email_otp');
   }
@@ -49,7 +49,7 @@ class AppEvents {
     String currency = 'INR',
     String? plan,
   }) async {
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     await FirebaseAnalytics.instance.logPurchase(
       value: amount,
       currency: currency,

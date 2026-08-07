@@ -251,7 +251,7 @@ class _SetupChecklist extends StatelessWidget {
   Widget build(BuildContext context) {
     final steps = [
       (label: 'Add members',    done: memberCount >= 3,    route: '/staff/members'),
-      (label: 'Create plan',    done: planCount > 0,       route: '/staff/settings'),
+      (label: 'Create plan',    done: planCount > 0,       route: '/staff/billing'),
       (label: 'First check-in', done: allTimeCheckins > 0, route: '/staff/check-in'),
     ];
     final doneCount = steps.where((s) => s.done).length;
@@ -696,7 +696,11 @@ class _CollectedHero extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   '${growth >= 0 ? '↑' : '↓'} ${growth.abs()}%',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: growth >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger,
+                  ),
                 ),
               ),
             ],

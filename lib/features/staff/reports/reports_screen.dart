@@ -403,9 +403,9 @@ class _RevenueTab extends ConsumerWidget {
                       child: Row(
                         children: [
                           Text(r.trendPct >= 0 ? '↑' : '↓',
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark)),
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: r.trendPct >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger)),
                           Text('${r.trendPct.abs().toStringAsFixed(0)}%',
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark)),
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: r.trendPct >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger)),
                         ],
                       ),
                     ),
@@ -738,6 +738,7 @@ class _HeroLineChart extends StatelessWidget {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 22,
+              interval: 1,
               getTitlesWidget: (value, _) {
                 final idx = value.toInt();
                 if (idx < 0 || idx >= data.length) return const SizedBox.shrink();

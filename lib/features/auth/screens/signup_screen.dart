@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +8,7 @@ import 'package:country_picker/country_picker.dart';
 import 'package:currency_picker/currency_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/platform_info.dart';
 import '../../../core/widgets/auth_blob_background.dart';
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
@@ -273,8 +273,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 24),
-          const AuthLogoBadge(),
-          const SizedBox(height: 36),
           Text(
             'Create your gym',
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
@@ -297,7 +295,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           // Continue with Google — hidden on iOS (Apple guideline 4.8
           // would then require Sign in with Apple too). Google signups finish
           // gym creation on the /gym-setup screen (they never fill this form).
-          if (!Platform.isIOS) ...[
+          if (!isIOS) ...[
             AuthGoogleButton(
               loading: _googleLoading,
               onPressed: (_googleLoading || _loading) ? null : _signUpWithGoogle,
@@ -411,7 +409,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
           // Mobile number with +91 prefix — hidden on iOS (App Review 5.1.1:
           // phone is not required for core functionality).
-          if (!Platform.isIOS) ...[
+          if (!isIOS) ...[
             const AuthFieldLabel('Mobile number (optional)'),
             const SizedBox(height: 6),
             AuthPillField(
@@ -522,8 +520,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(height: 24),
-        const AuthLogoBadge(),
-        const SizedBox(height: 28),
         Container(
           height: 56,
           width: 56,

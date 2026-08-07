@@ -14,6 +14,7 @@ import '../../../core/utils/validators.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../shared/models/member.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../billing/billing_screen.dart' show PlanFormSheet;
 import 'import_csv_screen.dart';
 
 final _membersProvider = FutureProvider<List<Member>>((ref) async {
@@ -419,6 +420,46 @@ class _EmptyMembers extends StatelessWidget {
   }
 }
 
+// Shown in place of the plan dropdown when the gym hasn't created any plan yet.
+class _NoPlansBox extends StatelessWidget {
+  final VoidCallback onCreate;
+  const _NoPlansBox({required this.onCreate});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onCreate,
+      child: DottedBorderBox(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'No membership plans yet',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Every member needs a plan — it is what generates their invoices.',
+              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.add, size: 18, color: AppTheme.accent),
+                SizedBox(width: 6),
+                Text('Create a plan',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ── Add Member Sheet ──────────────────────────────────────────────────────────
 
 class _AddMemberSheet extends ConsumerStatefulWidget {
@@ -458,6 +499,25 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     _customIdCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
+  }
+
+  void _selectPlan(Map<String, dynamic> plan) {
+    _planId = plan['id'] as String?;
+    _planBillingIntervalMonths = plan['billing_interval_months'] as int? ??
+        const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']];
+  }
+
+  // Gym has no plans yet — let staff make one without losing the half-filled
+  // member form. Reuses the Billing screen's sheet, which pops the new row.
+  Future<void> _createPlan() async {
+    final created = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const PlanFormSheet(),
+    );
+    ref.invalidate(_memberPlansProvider);
+    if (created != null && mounted) setState(() => _selectPlan(created));
   }
 
   Future<void> _pickAvatar() async {
@@ -522,6 +582,14 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    // With zero plans the dropdown isn't in the tree, so validate() can't catch
+    // this one — the empty-state box is shown instead.
+    if (_planId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Create a membership plan first — members need one to be invoiced')),
+      );
+      return;
+    }
     setState(() => _loading = true);
 
     try {
@@ -535,7 +603,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
       // upcoming-payments and reminders (both key off next_payment_date).
       var nextPaymentDate = _nextPaymentDate;
       var billingIntervalMonths = _billingIntervalMonths;
-      if (nextPaymentDate == null && _planId != null) {
+      if (nextPaymentDate == null) {
         billingIntervalMonths = _planBillingIntervalMonths ?? 1;
         final joined = _joinedAt ?? DateTime.now().toIso8601String().split('T').first;
         nextPaymentDate = advancePaymentDate(joined, months: billingIntervalMonths);
@@ -560,34 +628,32 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
 
       // Assign the selected membership plan (open-ended, matches the web flow).
       // A DB trigger auto-creates the invoice the moment this insert commits.
-      if (_planId != null) {
-        await client.from('memberships').insert({
-          'member_id': inserted['id'],
-          'plan_id': _planId,
-          'status': 'active',
-          'starts_at': DateTime.now().toUtc().toIso8601String(),
-          'ends_at': null,
-          'discount_amount': _planDiscountAmount,
-        });
+      await client.from('memberships').insert({
+        'member_id': inserted['id'],
+        'plan_id': _planId,
+        'status': 'active',
+        'starts_at': DateTime.now().toUtc().toIso8601String(),
+        'ends_at': null,
+        'discount_amount': _planDiscountAmount,
+      });
 
-        if (_paidToday) {
-          final invoice = await client
-              .from('invoices')
-              .select('id')
-              .eq('member_id', inserted['id'])
-              .eq('status', 'open')
-              .order('created_at', ascending: false)
-              .limit(1)
-              .maybeSingle();
-          if (invoice != null) {
-            await client.rpc('record_invoice_payment', params: {
-              'p_invoice_id': invoice['id'],
-              'p_method': _paymentMethod,
-              // next_payment_date was just set by the staff above — don't
-              // advance it again, or a 30-day pick becomes ~60 days.
-              'p_advance_date': false,
-            });
-          }
+      if (_paidToday) {
+        final invoice = await client
+            .from('invoices')
+            .select('id')
+            .eq('member_id', inserted['id'])
+            .eq('status', 'open')
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+        if (invoice != null) {
+          await client.rpc('record_invoice_payment', params: {
+            'p_invoice_id': invoice['id'],
+            'p_method': _paymentMethod,
+            // next_payment_date was just set by the staff above — don't
+            // advance it again, or a 30-day pick becomes ~60 days.
+            'p_advance_date': false,
+          });
         }
       }
 
@@ -756,39 +822,34 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                 ),
               ],
               const SizedBox(height: 12),
-              // Membership plan (optional) — assigns a plan on creation
+              // Membership plan — required. Without one there is no `memberships`
+              // row, and both invoice paths (the create_invoice_for_membership
+              // trigger and the nightly generate_monthly_invoices cron) key off
+              // that row, so a plan-less member is silently never billed.
               Consumer(
                 builder: (context, ref, _) {
                   final plans = ref.watch(_memberPlansProvider);
                   return plans.maybeWhen(
-                    data: (list) => list.isEmpty
-                        ? const SizedBox.shrink()
-                        : Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: DropdownButtonFormField<String?>(
+                    data: (list) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: list.isEmpty
+                          ? _NoPlansBox(onCreate: _createPlan)
+                          : DropdownButtonFormField<String>(
                               value: _planId,
                               isExpanded: true,
-                              decoration: const InputDecoration(labelText: 'Membership plan (optional)'),
-                              items: [
-                                const DropdownMenuItem<String?>(value: null, child: Text('No plan')),
-                                ...list.map((p) => DropdownMenuItem<String?>(
-                                      value: p['id'] as String,
-                                      child: Text(_planLabel(p), overflow: TextOverflow.ellipsis),
-                                    )),
-                              ],
-                              onChanged: (v) => setState(() {
-                                _planId = v;
-                                if (v == null) {
-                                  _planDiscountAmount = 0;
-                                  _planBillingIntervalMonths = null;
-                                } else {
-                                  final plan = list.firstWhere((p) => p['id'] == v, orElse: () => {});
-                                  _planBillingIntervalMonths = plan['billing_interval_months'] as int? ??
-                                      const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']];
-                                }
-                              }),
+                              decoration: const InputDecoration(labelText: 'Membership plan *'),
+                              validator: (v) => v == null ? 'Required' : null,
+                              items: list
+                                  .map((p) => DropdownMenuItem<String>(
+                                        value: p['id'] as String,
+                                        child: Text(_planLabel(p), overflow: TextOverflow.ellipsis),
+                                      ))
+                                  .toList(),
+                              onChanged: (v) => setState(() => _selectPlan(
+                                    list.firstWhere((p) => p['id'] == v, orElse: () => {}),
+                                  )),
                             ),
-                          ),
+                    ),
                     orElse: () => const SizedBox.shrink(),
                   );
                 },

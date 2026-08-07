@@ -24,8 +24,6 @@ const _sentryDsn =
     'https://01a220921e1bfadef6df0380bfacec1f@o4511580229402624.ingest.us.sentry.io/4511580238774272';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
   assert(
     _supabaseUrl.isNotEmpty && _supabaseAnonKey.isNotEmpty,
     'Build with --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...',
@@ -63,6 +61,8 @@ Future<void> main() async {
       };
     },
     appRunner: () async {
+      WidgetsFlutterBinding.ensureInitialized();
+
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
         Sentry.captureException(details.exception, stackTrace: details.stack);
@@ -72,8 +72,8 @@ Future<void> main() async {
         );
       };
 
-      // firebase_options.dart is Android-only for now; skip on iOS.
-      if (defaultTargetPlatform == TargetPlatform.android) {
+      // firebase_options.dart is Android-only for now; skip on iOS and web.
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
         );

@@ -56,7 +56,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
     if (selected == null || !mounted) return;
 
     final memberId = selected['id'] as String;
-    final memberName = '${selected['first_name']} ${selected['last_name']}'.trim();
+    final memberName = '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
 
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -110,7 +110,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
                   final filtered = _query.trim().isEmpty
                       ? members
                       : members.where((m) =>
-                          '${m['first_name']} ${m['last_name']}'.toLowerCase().contains(_query.toLowerCase())).toList();
+                          '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase().contains(_query.toLowerCase())).toList();
 
                   if (filtered.isEmpty) return const _EmptyState();
 
@@ -123,7 +123,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
                       itemBuilder: (_, i) {
                         final m = filtered[i];
                         final memberId = m['id'] as String;
-                        final memberName = '${m['first_name']} ${m['last_name']}'.trim();
+                        final memberName = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
                         final plans = (m['workout_plans'] as List? ?? []).cast<Map<String, dynamic>>();
                         if (plans.isEmpty) {
                           return _NoPlanRow(
@@ -527,7 +527,7 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
   Widget build(BuildContext context) {
     final filtered = widget.members.where((m) {
       final name =
-          '${m['first_name']} ${m['last_name']}'.toLowerCase();
+          '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase();
       return name.contains(_query.toLowerCase());
     }).toList();
 
@@ -557,7 +557,7 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
               itemCount: filtered.length,
               itemBuilder: (_, i) {
                 final m = filtered[i];
-                final name = '${m['first_name']} ${m['last_name']}'.trim();
+                final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: InkWell(

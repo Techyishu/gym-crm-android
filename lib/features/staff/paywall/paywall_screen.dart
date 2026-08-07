@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/providers/revenue_cat_provider.dart';
 import '../../../core/services/revenue_cat_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/platform_info.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'ios_custom_paywall.dart';
 
@@ -82,7 +82,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
     final gym = profileAsync.valueOrNull?['gyms'] as Map<String, dynamic>?;
 
     // On iOS, show the RC customer center directly from Settings.
-    if (Platform.isIOS) {
+    if (isIOS) {
       return Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
@@ -113,7 +113,7 @@ class _PlanBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (Platform.isIOS) {
+    if (isIOS) {
       return _IosPaywall(gym: gym);
     }
 
@@ -290,7 +290,7 @@ class _StatusBanner extends StatelessWidget {
     final daysLeft = trialEndsAt != null
         ? DateTime.tryParse(trialEndsAt)?.toUtc().difference(now).inDays
         : null;
-    if (!Platform.isIOS && daysLeft != null && daysLeft > 0) {
+    if (!isIOS && daysLeft != null && daysLeft > 0) {
       return _Banner(
         icon: Icons.access_time_outlined,
         message: 'Your free trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}.',
@@ -302,7 +302,7 @@ class _StatusBanner extends StatelessWidget {
     // Expired / no subscription
     return _Banner(
       icon: Icons.lock_outline,
-      message: Platform.isIOS
+      message: isIOS
           ? 'Subscribe to continue using GymCRM.'
           : 'Your free trial has ended. Subscribe to continue using GymCRM.',
       color: AppTheme.statusDangerBg,

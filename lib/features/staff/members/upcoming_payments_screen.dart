@@ -573,7 +573,7 @@ class _CollectButton extends ConsumerWidget {
             context: context,
             isScrollControlled: true,
             useSafeArea: true,
-            builder: (_) => _QuickCollectSheet(
+            builder: (_) => QuickCollectSheet(
               memberId: memberId,
               memberName: memberName,
             ),
@@ -598,16 +598,16 @@ class _CollectButton extends ConsumerWidget {
 
 // ── Quick Collect Sheet ────────────────────────────────────────────────────────
 
-class _QuickCollectSheet extends ConsumerStatefulWidget {
+class QuickCollectSheet extends ConsumerStatefulWidget {
   final String memberId;
   final String memberName;
-  const _QuickCollectSheet({required this.memberId, required this.memberName});
+  const QuickCollectSheet({super.key, required this.memberId, required this.memberName});
 
   @override
-  ConsumerState<_QuickCollectSheet> createState() => _QuickCollectSheetState();
+  ConsumerState<QuickCollectSheet> createState() => QuickCollectSheetState();
 }
 
-class _QuickCollectSheetState extends ConsumerState<_QuickCollectSheet> {
+class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   final _amountCtrl = TextEditingController();
   final _refCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();

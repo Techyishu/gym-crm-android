@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/platform_info.dart';
 import '../../../core/widgets/auth_blob_background.dart';
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
@@ -73,8 +72,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 24),
-                      const AuthLogoBadge(),
-                      const SizedBox(height: 36),
                       Text(
                         'Welcome back',
                         style: Theme.of(context).textTheme.headlineMedium?.copyWith(
@@ -98,7 +95,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       // Google sign-in is hidden on iOS: Apple guideline 4.8
                       // would then require Sign in with Apple too, so iOS
                       // uses email/password only.
-                      if (!Platform.isIOS) ...[
+                      if (!isIOS) ...[
                         AuthGoogleButton(
                           loading: _googleLoading,
                           onPressed: (_loading || _googleLoading) ? null : _signInWithGoogle,

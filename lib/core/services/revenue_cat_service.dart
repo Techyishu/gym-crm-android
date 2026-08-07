@@ -1,7 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
+
+import '../utils/platform_info.dart';
 
 // iOS-only RevenueCat public SDK key (Apple App Store).
 const _kRcApiKeyIos = 'appl_nIbDtTyPmDxXhpHcWKXfGoRRZyS';
@@ -13,7 +13,7 @@ class RevenueCatService {
   RevenueCatService._();
 
   static Future<void> initialize() async {
-    if (!Platform.isIOS) return;
+    if (!isIOS) return;
     await Purchases.setLogLevel(
       kReleaseMode ? LogLevel.error : LogLevel.verbose,
     );
@@ -23,7 +23,7 @@ class RevenueCatService {
 
   /// Call after Supabase sign-in so RC ties purchases to this user.
   static Future<void> loginUser(String userId) async {
-    if (!Platform.isIOS) return;
+    if (!isIOS) return;
     try {
       await Purchases.logIn(userId);
     } catch (e, s) {
@@ -33,7 +33,7 @@ class RevenueCatService {
 
   /// Call on sign-out so RC resets to anonymous identity.
   static Future<void> logoutUser() async {
-    if (!Platform.isIOS) return;
+    if (!isIOS) return;
     try {
       await Purchases.logOut();
     } catch (e, s) {
@@ -43,7 +43,7 @@ class RevenueCatService {
 
   /// One-shot check — prefer the stream provider for reactive UI.
   static Future<bool> hasProAccess() async {
-    if (!Platform.isIOS) return false;
+    if (!isIOS) return false;
     try {
       final info = await Purchases.getCustomerInfo();
       return info.entitlements.active.containsKey(kRcEntitlement);

@@ -356,7 +356,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   // Screen tracking. A delegate listener (not navigator observers) because
   // StatefulShellRoute branches have their own navigators the root observer
   // never sees. Firebase is only initialized on Android (see main.dart).
-  if (defaultTargetPlatform == TargetPlatform.android) {
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     String? lastScreen;
     router.routerDelegate.addListener(() {
       final path = router.routerDelegate.currentConfiguration.uri.path;

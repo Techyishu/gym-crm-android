@@ -20,6 +20,9 @@ class OfflineCheckInQueue {
   // ── Connectivity ─────────────────────────────────────────────────────────
 
   static Future<bool> isOnline() async {
+    // dart:io sockets aren't available on web; the browser wouldn't have
+    // loaded the app at all if it had no network, so assume online.
+    if (kIsWeb) return true;
     try {
       final results = await InternetAddress.lookup('8.8.8.8')
           .timeout(const Duration(seconds: 3));
