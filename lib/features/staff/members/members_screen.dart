@@ -60,9 +60,69 @@ class MembersScreen extends ConsumerStatefulWidget {
   ConsumerState<MembersScreen> createState() => _MembersScreenState();
 }
 
+const _kLapsingWindows = [3, 7, 15];
+
+/// Same look as [PillChip] but with a caret that opens the day-window picker,
+/// separate from the tap-to-select-filter body.
+class _LapsingChip extends StatelessWidget {
+  final String label;
+  final String count;
+  final bool selected;
+  final Color? tintBg;
+  final Color? tintFg;
+  final VoidCallback onTap;
+  final VoidCallback onPickWindow;
+
+  const _LapsingChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.tintBg,
+    required this.tintFg,
+    required this.onTap,
+    required this.onPickWindow,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = selected ? AppTheme.ink : (tintBg ?? AppTheme.surface);
+    final fg = selected ? Colors.white : (tintFg ?? AppTheme.ink);
+    return Container(
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 14, top: 9, bottom: 9, right: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: fg)),
+                  Text(count, style: AppTheme.numberStyle(fontSize: 14, fontWeight: FontWeight.w800, color: fg)),
+                ],
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: onPickWindow,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10, left: 2),
+              child: Icon(Icons.arrow_drop_down, size: 20, color: fg),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MembersScreenState extends ConsumerState<MembersScreen> {
   String _filter = 'all';
   String _search = '';
+  int _lapsingDays = 7;
   final _searchCtrl = TextEditingController();
 
   @override
@@ -71,21 +131,77 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     super.dispose();
   }
 
-  static bool _isLapsing(Member m) {
+  static bool _isLapsing(Member m, int withinDays) {
     if (m.status != 'active') return false;
     final npd = m.nextPaymentDate;
     if (npd == null || npd.isEmpty) return false;
     final due = DateTime.tryParse(npd);
     if (due == null) return false;
     final days = due.difference(DateTime.now()).inDays;
-    return days >= 0 && days <= 7;
+    return days >= 0 && days <= withinDays;
   }
 
   List<Member> _applyFilter(List<Member> list) => switch (_filter) {
     'all'     => list,
-    'lapsing' => list.where(_isLapsing).toList(),
+    'lapsing' => list.where((m) => _isLapsing(m, _lapsingDays)).toList(),
     _         => list.where((m) => m.status == _filter).toList(),
   };
+
+  void _pickLapsingWindow() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SheetHeader(title: 'Lapsing within'),
+            const SizedBox(height: 16),
+            ..._kLapsingWindows.map((d) {
+              final selected = d == _lapsingDays;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _lapsingDays = d;
+                      _filter = 'lapsing';
+                    });
+                    Navigator.pop(context);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: selected ? AppTheme.accentSoft : AppTheme.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
+                    ),
+                    child: Row(children: [
+                      Container(
+                        width: 20, height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: selected ? AppTheme.accent : Colors.transparent,
+                          border: Border.all(color: selected ? AppTheme.accent : AppTheme.inkHint, width: 1.5),
+                        ),
+                        child: selected ? const Icon(Icons.check, size: 13, color: Colors.white) : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Text('$d days',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
+                    ]),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -200,14 +316,14 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     final counts = {
       'all':     all.length,
       'active':  all.where((m) => m.status == 'active').length,
-      'lapsing': all.where(_isLapsing).length,
+      'lapsing': all.where((m) => _isLapsing(m, _lapsingDays)).length,
       'frozen':  all.where((m) => m.status == 'frozen').length,
       'expired': all.where((m) => m.status == 'expired').length,
     };
-    const filters = [
+    final filters = [
       ('all', 'All', null, null),
       ('active', 'Active', null, null),
-      ('lapsing', 'Lapsing', AppTheme.statusWarnBg, AppTheme.statusWarn),
+      ('lapsing', 'Lapsing ${_lapsingDays}d', AppTheme.statusWarnBg, AppTheme.statusWarn),
       ('frozen', 'On hold', null, null),
       ('expired', 'Expired', null, null),
     ];
@@ -231,6 +347,20 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             child: Row(
               children: filters.map((f) {
                 final (key, label, tintBg, tintFg) = f;
+                if (key == 'lapsing') {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _LapsingChip(
+                      label: label,
+                      count: '${counts[key] ?? 0}',
+                      selected: _filter == key,
+                      tintBg: tintBg,
+                      tintFg: tintFg,
+                      onTap: () => setState(() => _filter = key),
+                      onPickWindow: _pickLapsingWindow,
+                    ),
+                  );
+                }
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: PillChip(

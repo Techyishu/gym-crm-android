@@ -19,7 +19,7 @@
  *     the app. Requires the caller's JWT to belong to that gym (checked below).
  *
  * Credits model:
- *   - Each gym gets a free monthly quota based on plan (PLAN_QUOTA below).
+ *   - Each gym gets a free monthly quota based on plan/legacy status (planQuota() below).
  *     Tracked by whatsapp_monthly_quota_used, reset to 0 on the 1st of each
  *     month by the "whatsapp-quota-monthly-reset" cron job (pure SQL, no
  *     edge function call needed for that part).
@@ -54,18 +54,28 @@ const MSG91_INTEGRATED_NUMBER = Deno.env.get('MSG91_INTEGRATED_NUMBER') ?? '9194
 const MSG91_TEMPLATE_NAME = Deno.env.get('MSG91_TEMPLATE_NAME') ?? 'payment_reminder'
 const MSG91_TEMPLATE_LANG = Deno.env.get('MSG91_TEMPLATE_LANG') ?? 'en'
 
-const PLAN_QUOTA: Record<string, number> = { pro: 100, starter: 0 }
 const DAY_MS = 86400000
 
 interface GymSettings {
   id: string
   name: string
   plan: string
+  legacy_pricing: boolean
   whatsapp_reminder_enabled: boolean
   whatsapp_reminder_days: number[]
   whatsapp_credits: number
   whatsapp_monthly_quota_used: number
   whatsapp_template: string | null
+}
+
+/** Legacy (₹249, pre-price-change) gyms keep the old 100/mo cap regardless of
+ * plan value; new tiers get their own cap. Keyed off legacy_pricing rather
+ * than plan_price since plan_price is also used ad hoc for manual overrides. */
+function planQuota(gym: { plan: string; legacy_pricing?: boolean }): number {
+  if (gym.legacy_pricing) return 100
+  if (gym.plan === 'pro') return 500
+  if (gym.plan === 'elite') return 1500
+  return 0
 }
 
 function dateStr(d: Date) {
@@ -194,7 +204,7 @@ Deno.serve(async (req: Request) => {
 
   let gymsQuery = supabase
     .from('gyms')
-    .select('id, name, plan, whatsapp_reminder_enabled, whatsapp_reminder_days, whatsapp_credits, whatsapp_monthly_quota_used, whatsapp_template')
+    .select('id, name, plan, legacy_pricing, whatsapp_reminder_enabled, whatsapp_reminder_days, whatsapp_credits, whatsapp_monthly_quota_used, whatsapp_template')
     .eq('whatsapp_reminder_enabled', true)
   if (filterGymId) gymsQuery = gymsQuery.eq('id', filterGymId)
 
@@ -260,7 +270,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const ascDays = [...days].sort((a, b) => a - b)
-    const quota = PLAN_QUOTA[gym.plan] ?? 0
+    const quota = planQuota(gym)
     // Unknown/removed template name falls back to the default rather than
     // failing every send for that gym.
     const templateName = gym.whatsapp_template && TEMPLATES[gym.whatsapp_template]

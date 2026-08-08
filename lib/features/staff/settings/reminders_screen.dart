@@ -45,10 +45,6 @@ const _kWhatsAppTemplates = [
   ),
 ];
 
-// One-screen accent colors distinguishing the two channels — push uses a
-// warm orange, WhatsApp reuses AppTheme.darkCard (already a deep green).
-const _pushAccent = Color(0xFFDD5A34);
-
 int _planQuota(String? plan) => plan == 'pro' ? 100 : 0;
 
 final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
@@ -56,11 +52,18 @@ final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>(
   return await Supabase.instance.client.from('gyms').select().eq('id', gymId).maybeSingle();
 });
 
-class RemindersScreen extends ConsumerWidget {
+class RemindersScreen extends ConsumerStatefulWidget {
   const RemindersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RemindersScreen> createState() => _RemindersScreenState();
+}
+
+class _RemindersScreenState extends ConsumerState<RemindersScreen> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) {
     final gymAsync = ref.watch(_remindersGymProvider);
 
     return Scaffold(
@@ -71,21 +74,54 @@ class RemindersScreen extends ConsumerWidget {
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (gym) {
           if (gym == null) return const Center(child: Text('Gym not found'));
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
+          void onChanged() => ref.invalidate(_remindersGymProvider);
+
+          final tabs = [
+            (icon: Icons.notifications_outlined, label: 'Push', on: gym['push_reminder_enabled'] as bool? ?? false),
+            (icon: Icons.chat_bubble_outline, label: 'WhatsApp', on: gym['whatsapp_reminder_enabled'] as bool? ?? false),
+            (icon: Icons.receipt_long_outlined, label: 'Invoices', on: gym['whatsapp_invoice_enabled'] as bool? ?? false),
+          ];
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
+                child: Text(
                   'Automatic nudges before a membership expires',
-                  style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft),
+                  style: TextStyle(fontSize: 13, color: AppTheme.inkHint, fontWeight: FontWeight.w600),
                 ),
-                const SizedBox(height: 20),
-                _PushReminderCard(gym: gym, onChanged: () => ref.invalidate(_remindersGymProvider)),
-                const SizedBox(height: 16),
-                _WhatsAppReminderCard(gym: gym, onChanged: () => ref.invalidate(_remindersGymProvider)),
-              ],
-            ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    for (var i = 0; i < tabs.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(
+                        child: _ChannelTab(
+                          icon: tabs[i].icon,
+                          label: tabs[i].label,
+                          on: tabs[i].on,
+                          active: _tab == i,
+                          onTap: () => setState(() => _tab = i),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+                  child: switch (_tab) {
+                    0 => _PushReminderCard(gym: gym, onChanged: onChanged),
+                    1 => _WhatsAppReminderCard(gym: gym, onChanged: onChanged),
+                    _ => _InvoiceWhatsAppCard(gym: gym, onChanged: onChanged),
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -93,12 +129,85 @@ class RemindersScreen extends ConsumerWidget {
   }
 }
 
-// ── Shared channel card scaffold ───────────────────────────────────────────
+// ── Channel tab ────────────────────────────────────────────────────────────
+
+class _ChannelTab extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool on;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _ChannelTab({
+    required this.icon,
+    required this.label,
+    required this.on,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = on
+        ? (active ? AppTheme.mintOnDark : AppTheme.accent)
+        : (active ? Colors.white24 : AppTheme.inkHint);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.fromLTRB(6, 11, 6, 10),
+        decoration: BoxDecoration(
+          color: active ? AppTheme.ink : AppTheme.surface,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: active ? AppTheme.ink : AppTheme.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 19,
+              color: active ? Colors.white : (on ? AppTheme.accent : AppTheme.inkHint),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: active ? Colors.white : AppTheme.ink,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(width: 5, height: 5, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+                const SizedBox(width: 4),
+                Text(
+                  on ? 'On' : 'Off',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                    color: active ? Colors.white70 : (on ? AppTheme.inkSoft : AppTheme.inkHint),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Shared channel panel scaffold ──────────────────────────────────────────
 
 class _ChannelCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconBg;
-  final Color iconFg;
   final String title;
   final String subtitle;
   final bool enabled;
@@ -107,9 +216,6 @@ class _ChannelCard extends StatelessWidget {
   final Widget child;
 
   const _ChannelCard({
-    required this.icon,
-    required this.iconBg,
-    required this.iconFg,
     required this.title,
     required this.subtitle,
     required this.enabled,
@@ -121,41 +227,42 @@ class _ChannelCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: AppTheme.cardDecoration(),
-      padding: const EdgeInsets.all(20),
+      decoration: AppTheme.cardDecoration(radius: 20),
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
-                child: Icon(icon, color: iconFg, size: 20),
-              ),
-              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                    Text(title, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
                     const SizedBox(height: 2),
-                    Text(subtitle, style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft, height: 1.3)),
+                    Text(subtitle, style: const TextStyle(fontSize: 12, color: AppTheme.inkHint, height: 1.35, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
               Switch(
                 value: enabled,
-                activeThumbColor: AppTheme.accent,
+                activeThumbColor: Colors.white,
+                activeTrackColor: AppTheme.accent,
                 onChanged: saving ? null : onToggle,
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Container(height: 1, color: AppTheme.border),
           const SizedBox(height: 16),
-          child,
+          // Panel content dims out when the channel is off — same affordance as
+          // the design: settings stay visible but are not editable.
+          AnimatedOpacity(
+            duration: const Duration(milliseconds: 150),
+            opacity: enabled ? 1 : 0.4,
+            child: IgnorePointer(ignoring: !enabled, child: child),
+          ),
         ],
       ),
     );
@@ -180,9 +287,9 @@ class _DayPill extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? selectedColor : AppTheme.surface,
+          color: selected ? selectedColor : AppTheme.surface2,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: selected ? selectedColor : AppTheme.border),
         ),
@@ -199,14 +306,57 @@ class _DayPill extends StatelessWidget {
   }
 }
 
-class _SendBeforeLabel extends StatelessWidget {
-  const _SendBeforeLabel();
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 0.6),
+      );
+}
+
+class _PanelDivider extends StatelessWidget {
+  const _PanelDivider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 1,
+        color: AppTheme.border,
+        margin: const EdgeInsets.symmetric(vertical: 16),
+      );
+}
+
+class _CreditPack extends StatelessWidget {
+  final String price;
+  final String msgs;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  const _CreditPack({required this.price, required this.msgs, required this.busy, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return const Text(
-      'SEND BEFORE RENEWAL',
-      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 0.6),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        decoration: BoxDecoration(
+          color: AppTheme.surface2,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: busy
+            ? const SizedBox(height: 32, child: Center(child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+            : Column(
+                children: [
+                  Text(price, style: AppTheme.numberStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 1),
+                  Text(msgs, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppTheme.inkHint)),
+                ],
+              ),
+      ),
     );
   }
 }
@@ -263,9 +413,6 @@ class _PushReminderCardState extends State<_PushReminderCard> {
     final days = _currentDays();
 
     return _ChannelCard(
-      icon: Icons.notifications_outlined,
-      iconBg: _pushAccent.withValues(alpha: 0.12),
-      iconFg: _pushAccent,
       title: 'Push reminders',
       subtitle: 'In-app notification to the member',
       enabled: enabled,
@@ -274,7 +421,7 @@ class _PushReminderCardState extends State<_PushReminderCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SendBeforeLabel(),
+          const _SectionLabel('SEND BEFORE RENEWAL'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -282,14 +429,14 @@ class _PushReminderCardState extends State<_PushReminderCard> {
             children: _kReminderDayOptions.map((d) => _DayPill(
               label: '$d day${d == 1 ? '' : 's'}',
               selected: days.contains(d),
-              selectedColor: _pushAccent,
+              selectedColor: AppTheme.accent,
               onTap: _saving ? () {} : () => _toggleDay(d),
             )).toList(),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           const Text(
             'Reminders are sent once a day for members whose renewal date matches one of the selected windows.',
-            style: TextStyle(fontSize: 12, color: AppTheme.inkHint, height: 1.4),
+            style: TextStyle(fontSize: 11.5, color: AppTheme.inkHint, height: 1.5),
           ),
         ],
       ),
@@ -470,9 +617,6 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
     final template = _kWhatsAppTemplates.firstWhere((t) => t.id == templateId);
 
     return _ChannelCard(
-      icon: Icons.chat_bubble_outline,
-      iconBg: AppTheme.darkCard,
-      iconFg: AppTheme.mintOnDark,
       title: 'WhatsApp reminders',
       subtitle: "Message sent to the member's WhatsApp",
       enabled: enabled,
@@ -481,7 +625,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SendBeforeLabel(),
+          const _SectionLabel('SEND BEFORE RENEWAL'),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -489,15 +633,17 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
             children: _kReminderDayOptions.map((d) => _DayPill(
               label: '$d day${d == 1 ? '' : 's'}',
               selected: days.contains(d),
-              selectedColor: AppTheme.darkCard,
+              selectedColor: AppTheme.accent,
               onTap: _saving ? () {} : () => _toggleDay(d),
             )).toList(),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 10),
           const Text(
-            'MESSAGE',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 0.6),
+            'One message per member per window. Each send uses one credit.',
+            style: TextStyle(fontSize: 11.5, color: AppTheme.inkHint, height: 1.5),
           ),
+          const _PanelDivider(),
+          const _SectionLabel('MESSAGE'),
           const SizedBox(height: 10),
           // Picker only earns its space once there's a real choice.
           if (_kWhatsAppTemplates.length > 1) ...[
@@ -507,54 +653,160 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
               children: _kWhatsAppTemplates.map((t) => _DayPill(
                 label: t.label,
                 selected: t.id == template.id,
-                selectedColor: AppTheme.darkCard,
+                selectedColor: AppTheme.accent,
                 onTap: _saving ? () {} : () => _save(template: t.id),
               )).toList(),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 11),
           ],
+          // Chat-bubble preview on the dark hero surface, per the design.
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(14)),
-            child: Text(
-              template.preview,
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft, height: 1.45),
+            padding: const EdgeInsets.fromLTRB(13, 13, 13, 12),
+            decoration: AppTheme.darkCardDecoration(radius: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'PREVIEW',
+                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.6, color: AppTheme.onDarkSoft),
+                ),
+                const SizedBox(height: 9),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(13, 11, 13, 9),
+                    decoration: const BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(14),
+                        topRight: Radius.circular(14),
+                        bottomRight: Radius.circular(14),
+                        bottomLeft: Radius.circular(4),
+                      ),
+                    ),
+                    child: Text(
+                      template.preview,
+                      style: const TextStyle(fontSize: 12.5, color: AppTheme.ink, height: 1.55, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
+          const _PanelDivider(),
+          const _SectionLabel('CREDITS'),
+          const SizedBox(height: 11),
           _CreditsBlock(quota: quota, quotaUsed: quotaUsed, credits: credits),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _kCreditPacks.map((p) => OutlinedButton(
-              onPressed: _buyingPack != null ? null : () => _buyCredits(p.pack, p.iosProductId),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.darkCard,
-                side: const BorderSide(color: AppTheme.border),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              ),
-              child: _buyingPack == p.pack
-                  ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text('${p.label} · ${p.price}', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-            )).toList(),
+          Row(
+            children: [
+              for (var i = 0; i < _kCreditPacks.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: _CreditPack(
+                    price: _kCreditPacks[i].price,
+                    msgs: _kCreditPacks[i].label,
+                    busy: _buyingPack == _kCreditPacks[i].pack,
+                    onTap: _buyingPack != null
+                        ? null
+                        : () => _buyCredits(_kCreditPacks[i].pack, _kCreditPacks[i].iosProductId),
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 14),
+          const _PanelDivider(),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
+            child: ElevatedButton.icon(
               onPressed: _sendingNow ? null : _sendNow,
               icon: _sendingNow
-                  ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 15,
+                      width: 15,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.send_outlined, size: 17),
               label: Text(_sendingNow ? 'Sending…' : 'Send reminders now'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.ink,
-                side: const BorderSide(color: AppTheme.border),
-                minimumSize: const Size(0, 46),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                foregroundColor: AppTheme.accentFg,
+                minimumSize: const Size(0, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Invoice WhatsApp card ────────────────────────────────────────────────────
+// Gates trg_notify_invoice_whatsapp / trg_notify_invoice_paid_whatsapp
+// (supabase/migrations/20260805_invoice_whatsapp_trigger.sql) on
+// gyms.whatsapp_invoice_enabled — off by default so no gym spends WhatsApp
+// credits on invoice messages without opting in here.
+
+class _InvoiceWhatsAppCard extends StatefulWidget {
+  final Map<String, dynamic> gym;
+  final VoidCallback onChanged;
+  const _InvoiceWhatsAppCard({required this.gym, required this.onChanged});
+
+  @override
+  State<_InvoiceWhatsAppCard> createState() => _InvoiceWhatsAppCardState();
+}
+
+class _InvoiceWhatsAppCardState extends State<_InvoiceWhatsAppCard> {
+  bool _saving = false;
+
+  Future<void> _save(bool enabled) async {
+    final gymId = widget.gym['id'] as String;
+    setState(() => _saving = true);
+    try {
+      await Supabase.instance.client
+          .from('gyms')
+          .update({'whatsapp_invoice_enabled': enabled}).eq('id', gymId);
+      widget.onChanged();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.gym['whatsapp_invoice_enabled'] as bool? ?? false;
+
+    return _ChannelCard(
+      title: 'Invoice WhatsApp messages',
+      subtitle: 'Auto-send invoice + payment receipt to the member',
+      enabled: enabled,
+      saving: _saving,
+      onToggle: _save,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'When a new invoice is generated or a payment is collected, the member '
+            'gets a WhatsApp message with a link to download the invoice/receipt.',
+            style: TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.6),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+            decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(13)),
+            child: Row(
+              children: [
+                Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppTheme.accent, shape: BoxShape.circle)),
+                const SizedBox(width: 9),
+                const Expanded(
+                  child: Text(
+                    'Uses the same WhatsApp credits as reminders.',
+                    style: TextStyle(fontSize: 11.5, height: 1.45, color: AppTheme.inkHint, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -575,48 +827,41 @@ class _CreditsBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final progress = quota > 0 ? (quotaUsed / quota).clamp(0.0, 1.0) : 0.0;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(14)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (quota > 0) ...[
-            Row(
-              children: [
-                const Expanded(
-                  child: Text('Free monthly quota', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-                ),
-                Text('$quotaUsed/$quota used', style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 6,
-                backgroundColor: AppTheme.border,
-                valueColor: const AlwaysStoppedAnimation(AppTheme.darkCard),
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text('Resets on the 1st of the month', style: TextStyle(fontSize: 11.5, color: AppTheme.inkHint)),
-            const SizedBox(height: 14),
-            Container(height: 1, color: AppTheme.border),
-            const SizedBox(height: 14),
-          ],
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (quota > 0) ...[
+          Row(
             children: [
-              const Text('Purchased credits', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-              Text('$credits credits remaining', style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              const Expanded(
+                child: Text('Free monthly quota', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+              ),
+              Text('$quotaUsed/$quota used', style: AppTheme.numberStyle(fontSize: 13)),
             ],
           ),
+          const SizedBox(height: 7),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              backgroundColor: AppTheme.surface2,
+              valueColor: const AlwaysStoppedAnimation(AppTheme.accent),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text('Resets on the 1st of the month', style: TextStyle(fontSize: 11, color: AppTheme.inkHint, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 13),
         ],
-      ),
+        Row(
+          children: [
+            const Expanded(
+              child: Text('Purchased credits', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+            ),
+            Text('$credits credits remaining', style: AppTheme.numberStyle(fontSize: 13)),
+          ],
+        ),
+      ],
     );
   }
 }

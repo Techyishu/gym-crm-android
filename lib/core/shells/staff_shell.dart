@@ -97,6 +97,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     _MoreItem(icon: Icons.notifications_outlined,   label: 'Reminders', route: '/staff/reminders'),
     _MoreItem(icon: Icons.manage_accounts_outlined, label: 'Staff & roles', route: '/staff/staff'),
     _MoreItem(icon: Icons.bar_chart_outlined,       label: 'Reports',  route: '/staff/reports'),
+    _MoreItem(icon: Icons.receipt_long_outlined,    label: 'Expenses', route: '/staff/expenses'),
     _MoreItem(icon: Icons.settings_outlined,        label: 'Settings', route: '/staff/settings'),
   ];
 
@@ -111,6 +112,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     if (item.route == '/staff/reminders') return RoleAccess.canSeeCommunications(widget.role);
     if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(widget.role);
     if (item.route == '/staff/reports') return RoleAccess.canSeeReports(widget.role);
+    if (item.route == '/staff/expenses') return RoleAccess.canSeeExpenses(widget.role);
     if (item.route == '/staff/settings') return RoleAccess.canSeeSettings(widget.role);
     return true;
   }).toList();

@@ -2,7 +2,8 @@
 ///
 /// Roles in ascending privilege order: staff < trainer < manager < owner.
 /// Rules come from explicit product decisions:
-///   - Billing / Leads / Messages / Reports / Settings / Staff mgmt: manager+
+///   - Billing / Leads / Messages / Reports / Settings / Staff mgmt / Expenses: manager+
+///   - Deleting an expense: owner only
 ///   - Check-in: staff + manager + owner (NOT trainer)
 ///   - Classes/Batches: trainer + manager + owner (NOT staff)
 ///   - Member PII (email, phone): manager + owner only
@@ -28,4 +29,6 @@ class RoleAccess {
       role == 'owner' || role == 'manager' || role == 'trainer' || role == 'staff';
   static bool canManageDietPlans(String? role) =>
       role == 'owner' || role == 'manager' || role == 'trainer' || role == 'staff';
+  static bool canSeeExpenses(String? role) => _isManagerOrAbove(role);
+  static bool canDeleteExpense(String? role) => role == 'owner';
 }

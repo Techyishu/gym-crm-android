@@ -57,7 +57,7 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
         'id, role, gym_id, first_name, last_name, phone, '
         'gyms(id, name, slug, plan, settings, razorpay_key_id, '
         'registration_enabled, registration_token, '
-        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status)',
+        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing)',
       )
       .eq('id', user.id)
       .maybeSingle();

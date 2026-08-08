@@ -23,6 +23,7 @@ import '../features/staff/paywall/paywall_screen.dart';
 import '../features/staff/classes/classes_screen.dart';
 import '../features/staff/check_in/check_in_screen.dart';
 import '../features/staff/leads/leads_screen.dart';
+import '../features/staff/expenses/expenses_screen.dart';
 import '../features/staff/reports/reports_screen.dart';
 import '../features/staff/settings/settings_screen.dart';
 import '../features/staff/settings/reminders_screen.dart';
@@ -267,6 +268,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: '/staff/classes', builder: (_, __) => const ClassesScreen()),
       GoRoute(path: '/staff/leads', builder: (_, __) => const LeadsScreen()),
+      GoRoute(path: '/staff/expenses', builder: (_, __) => const ExpensesScreen()),
       GoRoute(path: '/staff/reports', builder: (_, __) => const ReportsScreen()),
       GoRoute(path: '/staff/settings', builder: (_, __) => const SettingsScreen()),
       GoRoute(path: '/staff/reminders', builder: (_, __) => const RemindersScreen()),

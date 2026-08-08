@@ -117,6 +117,8 @@ class _PlanBody extends StatelessWidget {
       return _IosPaywall(gym: gym);
     }
 
+    final isLegacy = gym?['legacy_pricing'] == true;
+
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -125,43 +127,37 @@ class _PlanBody extends StatelessWidget {
           children: [
             _StatusBanner(gym: gym),
             const SizedBox(height: 24),
-            _PlanCard(
-              name: 'Starter',
-              features: const [
-                '1 staff login',
-                'Up to 300 members',
-                'QR code check-ins',
-                'Lead tracking & follow-ups',
-                'UPI payment collection',
-                'Member portal app',
-                'Earnings reports',
-              ],
-            ),
-            const SizedBox(height: 16),
-            _PlanCard(
-              name: 'Pro',
-              highlighted: true,
-              price: '₹249/mo',
-              features: const [
-                'Unlimited members & check-ins',
-                'Unlimited staff logins & roles',
-                'Automatic email due reminders',
-                'WhatsApp due reminders',
-                'Advanced reports & analytics',
-                'Class scheduling & bookings',
-                'Leads & CRM',
-                'Member portal & QR check-in',
-                'Priority support',
-              ],
-            ),
-            const SizedBox(height: 16),
-            _UpgradeButton(gym: gym),
+            if (isLegacy) ..._legacyPro(gym) else _NewProPricing(gym: gym),
             const SizedBox(height: 24),
             _ContactForPricing(),
           ],
         ),
       ),
     );
+  }
+
+  List<Widget> _legacyPro(Map<String, dynamic>? gym) {
+    final price = gym?['plan_price'] as int? ?? 249;
+    return [
+      _PlanCard(
+        name: 'Pro',
+        highlighted: true,
+        price: '₹$price/mo',
+        features: const [
+          'Unlimited members & check-ins',
+          'Unlimited staff logins & roles',
+          'Automatic email due reminders',
+          'WhatsApp due reminders',
+          'Advanced reports & analytics',
+          'Class scheduling & bookings',
+          'Leads & CRM',
+          'Member portal & QR check-in',
+          'Priority support',
+        ],
+      ),
+      const SizedBox(height: 16),
+      _UpgradeButton(gym: gym, term: '1mo'),
+    ];
   }
 }
 
@@ -438,6 +434,260 @@ class _PlanCard extends StatelessWidget {
   }
 }
 
+// ── New-customer Pro pricing: 4 billing terms ─────────────────────────────────
+
+class _TermOption {
+  final String id;
+  final String label;
+  final int totalPrice;
+  final int months;
+  final int? discountPct;
+  final String? badge;
+
+  const _TermOption(this.id, this.label, this.totalPrice, this.months,
+      {this.discountPct, this.badge});
+}
+
+const _kProTerms = [
+  _TermOption('1mo', '1 Month', 499, 1),
+  _TermOption('3mo', '3 Months', 1399, 3, discountPct: 7),
+  _TermOption('6mo', '6 Months', 2599, 6, discountPct: 12),
+  _TermOption('12mo', '12 Months', 4799, 12, discountPct: 20, badge: 'Best Value'),
+];
+
+// No 3mo Elite product exists in Dodo yet — omitted here rather than showing
+// a term that would 503 at checkout.
+const _kEliteTerms = [
+  _TermOption('1mo', '1 Month', 999, 1),
+  _TermOption('6mo', '6 Months', 5299, 6, discountPct: 12),
+  _TermOption('12mo', '12 Months', 9599, 12, discountPct: 20, badge: 'Best Value'),
+];
+
+const _kProFeatures = [
+  'Up to 500 members & check-ins',
+  'Up to 33 staff logins & roles',
+  'Automatic email due reminders',
+  '500 free WhatsApp due reminders/month',
+  'Advanced reports & analytics',
+  'Class scheduling & bookings',
+  'Leads & CRM',
+  'Member portal & QR check-in',
+  'Priority support',
+];
+
+const _kEliteFeatures = [
+  'Unlimited members & check-ins',
+  'Unlimited staff logins & roles',
+  'Automatic email due reminders',
+  '1,500 free WhatsApp due reminders/month',
+  'Advanced reports & analytics',
+  'Class scheduling & bookings',
+  'Leads & CRM',
+  'Member portal & QR check-in',
+  'Priority support',
+];
+
+class _NewProPricing extends StatefulWidget {
+  final Map<String, dynamic>? gym;
+  const _NewProPricing({required this.gym});
+
+  @override
+  State<_NewProPricing> createState() => _NewProPricingState();
+}
+
+class _NewProPricingState extends State<_NewProPricing> {
+  String _tier = 'pro';
+  String _selectedTerm = '1mo';
+
+  List<_TermOption> get _terms => _tier == 'pro' ? _kProTerms : _kEliteTerms;
+
+  void _selectTier(String tier) {
+    if (tier == _tier) return;
+    setState(() {
+      _tier = tier;
+      _selectedTerm = (tier == 'pro' ? _kProTerms : _kEliteTerms).first.id;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _TierToggle(tier: _tier, onChanged: _selectTier),
+        const SizedBox(height: 16),
+        _PlanCard(
+          name: _tier == 'pro' ? 'Pro' : 'Elite',
+          highlighted: true,
+          features: _tier == 'pro' ? _kProFeatures : _kEliteFeatures,
+        ),
+        const SizedBox(height: 16),
+        ..._terms.map((t) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _TermCard(
+                term: t,
+                isSelected: _selectedTerm == t.id,
+                onTap: () => setState(() => _selectedTerm = t.id),
+              ),
+            )),
+        const SizedBox(height: 8),
+        _UpgradeButton(gym: widget.gym, plan: _tier, term: _selectedTerm),
+      ],
+    );
+  }
+}
+
+class _TierToggle extends StatelessWidget {
+  final String tier;
+  final ValueChanged<String> onChanged;
+  const _TierToggle({required this.tier, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _TierTab(label: 'Pro', selected: tier == 'pro', onTap: () => onChanged('pro'))),
+          Expanded(child: _TierTab(label: 'Elite', selected: tier == 'elite', onTap: () => onChanged('elite'))),
+        ],
+      ),
+    );
+  }
+}
+
+class _TierTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _TierTab({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: selected ? AppTheme.accentFg : AppTheme.inkSoft,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TermCard extends StatelessWidget {
+  final _TermOption term;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _TermCard({required this.term, required this.isSelected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final perMonth = (term.totalPrice / term.months).round();
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.accentSoft : AppTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected ? AppTheme.accent : AppTheme.border,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? AppTheme.accent : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? AppTheme.accent : AppTheme.inkHint,
+                  width: isSelected ? 6 : 2,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text(
+                      term.label,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: isSelected ? AppTheme.ink : AppTheme.inkSoft,
+                      ),
+                    ),
+                    if (term.badge != null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(
+                          term.badge!,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.accentFg,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ]),
+                  if (term.discountPct != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹$perMonth/mo · ${term.discountPct}% off',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Text(
+              '₹${term.totalPrice}',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: isSelected ? AppTheme.ink : AppTheme.inkSoft,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ── Contact for pricing ───────────────────────────────────────────────────────
 
 class _ContactForPricing extends StatelessWidget {
@@ -489,7 +739,9 @@ class _ContactForPricing extends StatelessWidget {
 
 class _UpgradeButton extends ConsumerStatefulWidget {
   final Map<String, dynamic>? gym;
-  const _UpgradeButton({required this.gym});
+  final String plan;
+  final String term;
+  const _UpgradeButton({required this.gym, this.plan = 'pro', required this.term});
 
   @override
   ConsumerState<_UpgradeButton> createState() => _UpgradeButtonState();
@@ -535,7 +787,7 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
           'Authorization': 'Bearer ${session.accessToken}',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'plan': 'pro'}),
+        body: jsonEncode({'plan': widget.plan, 'term': widget.term}),
       );
 
       if (response.statusCode != 200) {

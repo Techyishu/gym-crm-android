@@ -47,6 +47,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
       client.from('check_ins').select('id, checked_in_at, members(first_name, last_name, avatar_url)').eq('gym_id', gymId).gte('checked_in_at', startOfDay).order('checked_in_at', ascending: false).limit(5),
       // Latest leads.
       client.from('leads').select('id, first_name, last_name, phone, source, status, created_at').eq('gym_id', gymId).order('created_at', ascending: false).limit(4),
+      // This month's logged expenses, for the profit figure below.
+      client.from('expenses').select('amount').eq('gym_id', gymId).gte('expense_date', startOfMonth.split('T')[0]),
     ]),
   ]);
 
@@ -86,6 +88,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
     'recentPaid':       rows[5],
     'todayCheckinsList': rows[6],
     'recentLeads':      rows[7],
+    'monthExpenses':    sum(rows[8]),
+    'profit':           monthRevenue - sum(rows[8]),
   };
 });
 
@@ -176,6 +180,7 @@ class _DashboardBody extends ConsumerWidget {
     final canBilling = RoleAccess.canSeeBilling(role);
     final canCollect = RoleAccess.canRecordPayment(role);
     final canLeads   = RoleAccess.canSeeLeads(role);
+    final canExpenses = RoleAccess.canSeeExpenses(role);
 
     final profile = ref.watch(staffProfileProvider).valueOrNull;
     final gym     = profile?['gyms'] as Map<String, dynamic>?;
@@ -204,6 +209,10 @@ class _DashboardBody extends ConsumerWidget {
           ],
           if (canBilling) ...[
             _CollectedHero(data: data),
+            const SizedBox(height: 10),
+          ],
+          if (canExpenses) ...[
+            _ProfitStrip(data: data),
             const SizedBox(height: 10),
           ],
           _StatRow(
@@ -732,6 +741,53 @@ class _CollectedHero extends StatelessWidget {
             ),
           ]),
         ]),
+      ),
+    );
+  }
+}
+
+// ─── Profit strip (revenue − expenses this month) ─────────────────────────────
+
+class _ProfitStrip extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ProfitStrip({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final expenses = (data['monthExpenses'] as double?) ?? 0;
+    final profit   = (data['profit'] as double?) ?? 0;
+
+    return GestureDetector(
+      onTap: () => context.push('/staff/expenses'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: AppTheme.cardDecoration(),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Expenses this month', style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                const SizedBox(height: 2),
+                Text(formatCurrency(expenses),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              ]),
+            ),
+            Container(width: 1, height: 32, color: AppTheme.border),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Profit', style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                const SizedBox(height: 2),
+                Text(formatCurrency(profit),
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: profit >= 0 ? AppTheme.statusActive : AppTheme.statusDanger,
+                  )),
+              ]),
+            ),
+          ],
+        ),
       ),
     );
   }
