@@ -73,7 +73,7 @@ interface GymSettings {
  * than plan_price since plan_price is also used ad hoc for manual overrides. */
 function planQuota(gym: { plan: string; legacy_pricing?: boolean }): number {
   if (gym.legacy_pricing) return 100
-  if (gym.plan === 'pro') return 500
+  if (gym.plan === 'pro') return 300
   if (gym.plan === 'elite') return 1500
   return 0
 }

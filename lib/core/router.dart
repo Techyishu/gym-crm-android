@@ -31,6 +31,7 @@ import '../features/staff/communications/communications_screen.dart';
 import '../features/staff/staff/staff_screen.dart';
 import '../features/staff/workout/staff_workout_plans_screen.dart';
 import '../features/staff/diet/staff_diet_plans_screen.dart';
+import '../features/staff/notifications/notifications_screen.dart';
 import '../features/member/portal/portal_home_screen.dart';
 import '../features/member/bookings/bookings_screen.dart';
 import '../features/member/billing/member_billing_screen.dart';
@@ -276,6 +277,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/staff/staff', builder: (_, __) => const StaffScreen()),
       GoRoute(path: '/staff/workout-plans', builder: (_, __) => const StaffWorkoutPlansScreen()),
       GoRoute(path: '/staff/diet-plans', builder: (_, __) => const StaffDietPlansScreen()),
+      GoRoute(path: '/staff/notifications', builder: (_, __) => const NotificationsScreen()),
 
       // Member shell with bottom nav
       StatefulShellRoute.indexedStack(

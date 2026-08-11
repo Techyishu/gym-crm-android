@@ -4,11 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/billing_access.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../notifications/notifications_screen.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -150,6 +152,8 @@ class _ErrorBody extends ConsumerWidget {
           const Icon(Icons.cloud_off_outlined, size: 52, color: AppTheme.inkHint),
           const SizedBox(height: 16),
           const Text('Failed to load dashboard', style: TextStyle(fontSize: 14, color: AppTheme.inkHint)),
+          const SizedBox(height: 6),
+          Text(error, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
           const SizedBox(height: 20),
           SizedBox(
             width: 140,
@@ -203,6 +207,10 @@ class _DashboardBody extends ConsumerWidget {
         children: [
           _Header(gymName: gymName, ownerName: ownerName),
           const SizedBox(height: 12),
+          if (canBilling) ...[
+            _SubscriptionBanner(gym: gym),
+            const SizedBox(height: 12),
+          ],
           if (showChecklist) ...[
             _SetupChecklist(memberCount: memberCount, planCount: planCount, allTimeCheckins: allTimeCheckins),
             const SizedBox(height: 12),
@@ -604,7 +612,7 @@ class _NewLeads extends StatelessWidget {
 
 // ─── Header (date · gym name · bell · avatar) ─────────────────────────────────
 
-class _Header extends StatelessWidget {
+class _Header extends ConsumerWidget {
   final String gymName;
   final String ownerName;
   const _Header({required this.gymName, required this.ownerName});
@@ -614,9 +622,10 @@ class _Header extends StatelessWidget {
     'July', 'August', 'September', 'October', 'November', 'December'];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
     final dateLabel = '${_weekdays[now.weekday - 1]} · ${now.day} ${_months[now.month - 1]}';
+    final unreadCount = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
 
     return Row(
       children: [
@@ -628,10 +637,30 @@ class _Header extends StatelessWidget {
               style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.4)),
           ]),
         ),
-        Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
-          child: const Icon(Icons.notifications_none, size: 19, color: AppTheme.ink),
+        GestureDetector(
+          onTap: () => context.push('/staff/notifications'),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 38, height: 38,
+                decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
+                child: const Icon(Icons.notifications_none, size: 19, color: AppTheme.ink),
+              ),
+              if (unreadCount > 0)
+                Positioned(
+                  top: -2, right: -2,
+                  child: Container(
+                    width: 10, height: 10,
+                    decoration: BoxDecoration(
+                      color: AppTheme.statusDanger,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppTheme.background, width: 1.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
         const SizedBox(width: 8),
         GestureDetector(
@@ -647,6 +676,48 @@ class _Header extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Subscription status banner ────────────────────────────────────────────────
+
+class _SubscriptionBanner extends StatelessWidget {
+  final Map<String, dynamic>? gym;
+  const _SubscriptionBanner({required this.gym});
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = gym?['plan'] as String?;
+    final daysLeft = planExpiryDaysRemaining(gym);
+    final planName = plan != null && plan.isNotEmpty
+        ? plan[0].toUpperCase() + plan.substring(1)
+        : 'Free';
+
+    final label = daysLeft != null
+        ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
+        : '$planName plan';
+
+    return GestureDetector(
+      onTap: () => context.push('/staff/subscription'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.workspace_premium_outlined, size: 18, color: AppTheme.accent),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+            ),
+            const Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
+          ],
+        ),
+      ),
     );
   }
 }

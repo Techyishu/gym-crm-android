@@ -62,8 +62,56 @@ class MembersScreen extends ConsumerStatefulWidget {
 
 const _kLapsingWindows = [3, 7, 15];
 
-/// Same look as [PillChip] but with a caret that opens the day-window picker,
-/// separate from the tap-to-select-filter body.
+/// Compact single-line filter pill: label + a small count badge, fixed
+/// 34dp height so it never sits taller/bulkier than its neighbours.
+class _FilterPill extends StatelessWidget {
+  final String label;
+  final String count;
+  final bool selected;
+  final Color? tintBg;
+  final Color? tintFg;
+  final VoidCallback onTap;
+
+  const _FilterPill({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+    this.tintBg,
+    this.tintFg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = selected ? AppTheme.ink : (tintBg ?? AppTheme.surface);
+    final fg = selected ? Colors.white : (tintFg ?? AppTheme.ink);
+    final badgeBg = selected ? Colors.white.withValues(alpha: 0.18) : AppTheme.background;
+    final badgeFg = selected ? Colors.white : (tintFg ?? AppTheme.inkSoft);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(17)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: fg)),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(999)),
+              child: Text(count, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: badgeFg)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Same compact single line as [_FilterPill], plus a caret that opens the
+/// day-window picker, separate from the tap-to-select-filter body.
 class _LapsingChip extends StatelessWidget {
   final String label;
   final String count;
@@ -87,21 +135,28 @@ class _LapsingChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final bg = selected ? AppTheme.ink : (tintBg ?? AppTheme.surface);
     final fg = selected ? Colors.white : (tintFg ?? AppTheme.ink);
+    final badgeBg = selected ? Colors.white.withValues(alpha: 0.18) : AppTheme.background;
+    final badgeFg = selected ? Colors.white : (tintFg ?? AppTheme.inkSoft);
     return Container(
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+      height: 34,
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(17)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           GestureDetector(
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.only(left: 14, top: 9, bottom: 9, right: 4),
-              child: Column(
+              padding: const EdgeInsets.only(left: 12, right: 2),
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: fg)),
-                  Text(count, style: AppTheme.numberStyle(fontSize: 14, fontWeight: FontWeight.w800, color: fg)),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(999)),
+                    child: Text(count, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: badgeFg)),
+                  ),
                 ],
               ),
             ),
@@ -109,7 +164,7 @@ class _LapsingChip extends StatelessWidget {
           GestureDetector(
             onTap: onPickWindow,
             child: Padding(
-              padding: const EdgeInsets.only(right: 10, left: 2),
+              padding: const EdgeInsets.only(right: 8, left: 2),
               child: Icon(Icons.arrow_drop_down, size: 20, color: fg),
             ),
           ),
@@ -363,7 +418,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 }
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: PillChip(
+                  child: _FilterPill(
                     label: label,
                     count: '${counts[key] ?? 0}',
                     selected: _filter == key,

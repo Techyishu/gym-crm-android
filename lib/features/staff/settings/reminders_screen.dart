@@ -8,15 +8,31 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/services/coachmark_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // pack key → (Dodo checkout key [Android], App Store product ID [iOS]).
 const _kCreditPacks = [
-  (pack: 'pack_200', iosProductId: 'gymcrm_credits_200', label: '200 msgs', price: '₹100'),
-  (pack: 'pack_300', iosProductId: 'gymcrm_credits_300', label: '300 msgs', price: '₹150'),
-  (pack: 'pack_500', iosProductId: 'gymcrm_credits_500', label: '500 msgs', price: '₹250'),
+  (
+    pack: 'pack_200',
+    iosProductId: 'gymcrm_credits_200',
+    label: '200 msgs',
+    price: '₹100',
+  ),
+  (
+    pack: 'pack_300',
+    iosProductId: 'gymcrm_credits_300',
+    label: '300 msgs',
+    price: '₹150',
+  ),
+  (
+    pack: 'pack_500',
+    iosProductId: 'gymcrm_credits_500',
+    label: '500 msgs',
+    price: '₹250',
+  ),
 ];
 
 const _kReminderDayOptions = [1, 2, 3, 5, 7, 14];
@@ -28,18 +44,21 @@ const _kWhatsAppTemplates = [
   (
     id: 'payment_reminder',
     label: 'English · short',
-    preview: 'Hi Rahul! Your membership expires in 3 days. Please contact FitZone to renew.',
+    preview:
+        'Hi Rahul! Your membership expires in 3 days. Please contact FitZone to renew.',
   ),
   (
     id: 'payment_due_3',
     label: 'English · polite',
-    preview: 'Hi Rahul, just a quick reminder that your FitZone membership will expire in 3 days. '
+    preview:
+        'Hi Rahul, just a quick reminder that your FitZone membership will expire in 3 days. '
         'Renew it before the expiry date to keep your access active',
   ),
   (
     id: 'payment_reminder_2',
     label: 'हिंदी',
-    preview: 'Hi Rahul! 👋\n'
+    preview:
+        'Hi Rahul! 👋\n'
         'आपकी FitZone की मेंबरशिप 3 दिन में खत्म होने वाली है। '
         'बिना किसी रुकावट के वर्कआउट जारी रखने के लिए समय पर रिन्यू करवा लें.',
   ),
@@ -47,10 +66,16 @@ const _kWhatsAppTemplates = [
 
 int _planQuota(String? plan) => plan == 'pro' ? 100 : 0;
 
-final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
-  final gymId = await ref.watch(gymIdProvider.future);
-  return await Supabase.instance.client.from('gyms').select().eq('id', gymId).maybeSingle();
-});
+final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>(
+  (ref) async {
+    final gymId = await ref.watch(gymIdProvider.future);
+    return await Supabase.instance.client
+        .from('gyms')
+        .select()
+        .eq('id', gymId)
+        .maybeSingle();
+  },
+);
 
 class RemindersScreen extends ConsumerStatefulWidget {
   const RemindersScreen({super.key});
@@ -68,18 +93,39 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Reminders'), leading: const BackButton()),
+      appBar: AppBar(
+        title: const Text('Reminders'),
+        leading: const BackButton(),
+      ),
       body: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (gym) {
           if (gym == null) return const Center(child: Text('Gym not found'));
           void onChanged() => ref.invalidate(_remindersGymProvider);
+          final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
+          final showInvoiceBadge =
+              coachmark?.shouldShow('feature_invoice_whatsapp') ?? false;
 
           final tabs = [
-            (icon: Icons.notifications_outlined, label: 'Push', on: gym['push_reminder_enabled'] as bool? ?? false),
-            (icon: Icons.chat_bubble_outline, label: 'WhatsApp', on: gym['whatsapp_reminder_enabled'] as bool? ?? false),
-            (icon: Icons.receipt_long_outlined, label: 'Invoices', on: gym['whatsapp_invoice_enabled'] as bool? ?? false),
+            (
+              icon: Icons.notifications_outlined,
+              label: 'Push',
+              on: gym['push_reminder_enabled'] as bool? ?? false,
+              isNew: false,
+            ),
+            (
+              icon: Icons.chat_bubble_outline,
+              label: 'WhatsApp',
+              on: gym['whatsapp_reminder_enabled'] as bool? ?? false,
+              isNew: false,
+            ),
+            (
+              icon: Icons.receipt_long_outlined,
+              label: 'Invoices',
+              on: gym['whatsapp_invoice_enabled'] as bool? ?? false,
+              isNew: showInvoiceBadge,
+            ),
           ];
 
           return Column(
@@ -89,7 +135,11 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
                 padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
                 child: Text(
                   'Automatic nudges before a membership expires',
-                  style: TextStyle(fontSize: 13, color: AppTheme.inkHint, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.inkHint,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               Padding(
@@ -104,7 +154,12 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
                           label: tabs[i].label,
                           on: tabs[i].on,
                           active: _tab == i,
-                          onTap: () => setState(() => _tab = i),
+                          isNew: tabs[i].isNew,
+                          onTap: () {
+                            if (tabs[i].isNew)
+                              coachmark?.markSeen('feature_invoice_whatsapp');
+                            setState(() => _tab = i);
+                          },
                         ),
                       ),
                     ],
@@ -136,6 +191,7 @@ class _ChannelTab extends StatelessWidget {
   final String label;
   final bool on;
   final bool active;
+  final bool isNew;
   final VoidCallback onTap;
 
   const _ChannelTab({
@@ -144,6 +200,7 @@ class _ChannelTab extends StatelessWidget {
     required this.on,
     required this.active,
     required this.onTap,
+    this.isNew = false,
   });
 
   @override
@@ -154,52 +211,91 @@ class _ChannelTab extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.fromLTRB(6, 11, 6, 10),
-        decoration: BoxDecoration(
-          color: active ? AppTheme.ink : AppTheme.surface,
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: active ? AppTheme.ink : AppTheme.border),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 19,
-              color: active ? Colors.white : (on ? AppTheme.accent : AppTheme.inkHint),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: active ? Colors.white : AppTheme.ink,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.fromLTRB(6, 11, 6, 10),
+            decoration: BoxDecoration(
+              color: active ? AppTheme.ink : AppTheme.surface,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(
+                color: active ? AppTheme.ink : AppTheme.border,
               ),
             ),
-            const SizedBox(height: 5),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Container(width: 5, height: 5, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-                const SizedBox(width: 4),
+                Icon(
+                  icon,
+                  size: 19,
+                  color: active
+                      ? Colors.white
+                      : (on ? AppTheme.accent : AppTheme.inkHint),
+                ),
+                const SizedBox(height: 6),
                 Text(
-                  on ? 'On' : 'Off',
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 9.5,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                    color: active ? Colors.white70 : (on ? AppTheme.inkSoft : AppTheme.inkHint),
+                    color: active ? Colors.white : AppTheme.ink,
                   ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: dot,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      on ? 'On' : 'Off',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                        color: active
+                            ? Colors.white70
+                            : (on ? AppTheme.inkSoft : AppTheme.inkHint),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          if (isNew)
+            Positioned(
+              top: -6,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'NEW',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -239,9 +335,24 @@ class _ChannelCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.ink,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(subtitle, style: const TextStyle(fontSize: 12, color: AppTheme.inkHint, height: 1.35, fontWeight: FontWeight.w600)),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.inkHint,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -312,9 +423,14 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 0.6),
-      );
+    text,
+    style: const TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      color: AppTheme.inkHint,
+      letterSpacing: 0.6,
+    ),
+  );
 }
 
 class _PanelDivider extends StatelessWidget {
@@ -322,10 +438,10 @@ class _PanelDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        height: 1,
-        color: AppTheme.border,
-        margin: const EdgeInsets.symmetric(vertical: 16),
-      );
+    height: 1,
+    color: AppTheme.border,
+    margin: const EdgeInsets.symmetric(vertical: 16),
+  );
 }
 
 class _CreditPack extends StatelessWidget {
@@ -334,7 +450,12 @@ class _CreditPack extends StatelessWidget {
   final bool busy;
   final VoidCallback? onTap;
 
-  const _CreditPack({required this.price, required this.msgs, required this.busy, required this.onTap});
+  const _CreditPack({
+    required this.price,
+    required this.msgs,
+    required this.busy,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -348,12 +469,34 @@ class _CreditPack extends StatelessWidget {
           border: Border.all(color: AppTheme.border),
         ),
         child: busy
-            ? const SizedBox(height: 32, child: Center(child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+            ? const SizedBox(
+                height: 32,
+                child: Center(
+                  child: SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              )
             : Column(
                 children: [
-                  Text(price, style: AppTheme.numberStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
+                  Text(
+                    price,
+                    style: AppTheme.numberStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   const SizedBox(height: 1),
-                  Text(msgs, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppTheme.inkHint)),
+                  Text(
+                    msgs,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
                 ],
               ),
       ),
@@ -377,14 +520,18 @@ class _PushReminderCardState extends State<_PushReminderCard> {
 
   Future<void> _save({bool? enabled, Set<int>? days}) async {
     final gymId = widget.gym['id'] as String;
-    final nextEnabled = enabled ?? (widget.gym['push_reminder_enabled'] as bool? ?? false);
+    final nextEnabled =
+        enabled ?? (widget.gym['push_reminder_enabled'] as bool? ?? false);
     final nextDays = days ?? _currentDays();
     setState(() => _saving = true);
     try {
-      await Supabase.instance.client.from('gyms').update({
-        'push_reminder_enabled': nextEnabled,
-        'push_reminder_days': nextDays.toList()..sort(),
-      }).eq('id', gymId);
+      await Supabase.instance.client
+          .from('gyms')
+          .update({
+            'push_reminder_enabled': nextEnabled,
+            'push_reminder_days': nextDays.toList()..sort(),
+          })
+          .eq('id', gymId);
       widget.onChanged();
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -426,17 +573,25 @@ class _PushReminderCardState extends State<_PushReminderCard> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _kReminderDayOptions.map((d) => _DayPill(
-              label: '$d day${d == 1 ? '' : 's'}',
-              selected: days.contains(d),
-              selectedColor: AppTheme.accent,
-              onTap: _saving ? () {} : () => _toggleDay(d),
-            )).toList(),
+            children: _kReminderDayOptions
+                .map(
+                  (d) => _DayPill(
+                    label: '$d day${d == 1 ? '' : 's'}',
+                    selected: days.contains(d),
+                    selectedColor: AppTheme.accent,
+                    onTap: _saving ? () {} : () => _toggleDay(d),
+                  ),
+                )
+                .toList(),
           ),
           const SizedBox(height: 12),
           const Text(
             'Reminders are sent once a day for members whose renewal date matches one of the selected windows.',
-            style: TextStyle(fontSize: 11.5, color: AppTheme.inkHint, height: 1.5),
+            style: TextStyle(
+              fontSize: 11.5,
+              color: AppTheme.inkHint,
+              height: 1.5,
+            ),
           ),
         ],
       ),
@@ -491,19 +646,24 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       if (response.statusCode != 200) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not start checkout. Please try again.')),
+            const SnackBar(
+              content: Text('Could not start checkout. Please try again.'),
+            ),
           );
         }
         return;
       }
 
-      final url = (jsonDecode(response.body) as Map<String, dynamic>)['url'] as String?;
+      final url =
+          (jsonDecode(response.body) as Map<String, dynamic>)['url'] as String?;
       if (url == null) return;
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start checkout. Please try again.')),
+          const SnackBar(
+            content: Text('Could not start checkout. Please try again.'),
+          ),
         );
       }
     }
@@ -518,7 +678,9 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       if (products.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('This pack is not available right now.')),
+            const SnackBar(
+              content: Text('This pack is not available right now.'),
+            ),
           );
         }
         return;
@@ -527,7 +689,9 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       widget.onChanged();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Purchase successful — credits will appear shortly.')),
+          const SnackBar(
+            content: Text('Purchase successful — credits will appear shortly.'),
+          ),
         );
       }
     } on PlatformException catch (e) {
@@ -549,19 +713,27 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
         body: {'gym_id': widget.gym['id']},
       );
       final raw = res.data;
-      final parsed = raw is String ? jsonDecode(raw) as Map<String, dynamic> : raw as Map<String, dynamic>?;
+      final parsed = raw is String
+          ? jsonDecode(raw) as Map<String, dynamic>
+          : raw as Map<String, dynamic>?;
       final sent = parsed?['sent'] as int? ?? 0;
       widget.onChanged();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(sent > 0
-              ? 'Sent $sent reminder${sent == 1 ? '' : 's'}'
-              : 'No members due for a reminder right now'),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              sent > 0
+                  ? 'Sent $sent reminder${sent == 1 ? '' : 's'}'
+                  : 'No members due for a reminder right now',
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
       }
     } finally {
       if (mounted) setState(() => _sendingNow = false);
@@ -570,15 +742,19 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
 
   Future<void> _save({bool? enabled, Set<int>? days, String? template}) async {
     final gymId = widget.gym['id'] as String;
-    final nextEnabled = enabled ?? (widget.gym['whatsapp_reminder_enabled'] as bool? ?? false);
+    final nextEnabled =
+        enabled ?? (widget.gym['whatsapp_reminder_enabled'] as bool? ?? false);
     final nextDays = days ?? _currentDays();
     setState(() => _saving = true);
     try {
-      await Supabase.instance.client.from('gyms').update({
-        'whatsapp_reminder_enabled': nextEnabled,
-        'whatsapp_reminder_days': nextDays.toList()..sort(),
-        'whatsapp_template': template ?? _currentTemplate(),
-      }).eq('id', gymId);
+      await Supabase.instance.client
+          .from('gyms')
+          .update({
+            'whatsapp_reminder_enabled': nextEnabled,
+            'whatsapp_reminder_days': nextDays.toList()..sort(),
+            'whatsapp_template': template ?? _currentTemplate(),
+          })
+          .eq('id', gymId);
       widget.onChanged();
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -592,7 +768,9 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
 
   String _currentTemplate() {
     final raw = widget.gym['whatsapp_template'] as String?;
-    return _kWhatsAppTemplates.any((t) => t.id == raw) ? raw! : _kWhatsAppTemplates.first.id;
+    return _kWhatsAppTemplates.any((t) => t.id == raw)
+        ? raw!
+        : _kWhatsAppTemplates.first.id;
   }
 
   void _toggleDay(int day) {
@@ -630,17 +808,25 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _kReminderDayOptions.map((d) => _DayPill(
-              label: '$d day${d == 1 ? '' : 's'}',
-              selected: days.contains(d),
-              selectedColor: AppTheme.accent,
-              onTap: _saving ? () {} : () => _toggleDay(d),
-            )).toList(),
+            children: _kReminderDayOptions
+                .map(
+                  (d) => _DayPill(
+                    label: '$d day${d == 1 ? '' : 's'}',
+                    selected: days.contains(d),
+                    selectedColor: AppTheme.accent,
+                    onTap: _saving ? () {} : () => _toggleDay(d),
+                  ),
+                )
+                .toList(),
           ),
           const SizedBox(height: 10),
           const Text(
             'One message per member per window. Each send uses one credit.',
-            style: TextStyle(fontSize: 11.5, color: AppTheme.inkHint, height: 1.5),
+            style: TextStyle(
+              fontSize: 11.5,
+              color: AppTheme.inkHint,
+              height: 1.5,
+            ),
           ),
           const _PanelDivider(),
           const _SectionLabel('MESSAGE'),
@@ -650,12 +836,16 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _kWhatsAppTemplates.map((t) => _DayPill(
-                label: t.label,
-                selected: t.id == template.id,
-                selectedColor: AppTheme.accent,
-                onTap: _saving ? () {} : () => _save(template: t.id),
-              )).toList(),
+              children: _kWhatsAppTemplates
+                  .map(
+                    (t) => _DayPill(
+                      label: t.label,
+                      selected: t.id == template.id,
+                      selectedColor: AppTheme.accent,
+                      onTap: _saving ? () {} : () => _save(template: t.id),
+                    ),
+                  )
+                  .toList(),
             ),
             const SizedBox(height: 11),
           ],
@@ -669,7 +859,12 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
               children: [
                 const Text(
                   'PREVIEW',
-                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.6, color: AppTheme.onDarkSoft),
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: AppTheme.onDarkSoft,
+                  ),
                 ),
                 const SizedBox(height: 9),
                 Align(
@@ -687,7 +882,12 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
                     ),
                     child: Text(
                       template.preview,
-                      style: const TextStyle(fontSize: 12.5, color: AppTheme.ink, height: 1.55, fontWeight: FontWeight.w500),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppTheme.ink,
+                        height: 1.55,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
@@ -710,7 +910,10 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
                     busy: _buyingPack == _kCreditPacks[i].pack,
                     onTap: _buyingPack != null
                         ? null
-                        : () => _buyCredits(_kCreditPacks[i].pack, _kCreditPacks[i].iosProductId),
+                        : () => _buyCredits(
+                            _kCreditPacks[i].pack,
+                            _kCreditPacks[i].iosProductId,
+                          ),
                   ),
                 ),
               ],
@@ -725,15 +928,24 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
                   ? const SizedBox(
                       height: 15,
                       width: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Icon(Icons.send_outlined, size: 17),
               label: Text(_sendingNow ? 'Sending…' : 'Send reminders now'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.accent,
                 foregroundColor: AppTheme.accentFg,
                 minimumSize: const Size(0, 48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -767,7 +979,8 @@ class _InvoiceWhatsAppCardState extends State<_InvoiceWhatsAppCard> {
     try {
       await Supabase.instance.client
           .from('gyms')
-          .update({'whatsapp_invoice_enabled': enabled}).eq('id', gymId);
+          .update({'whatsapp_invoice_enabled': enabled})
+          .eq('id', gymId);
       widget.onChanged();
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -790,20 +1003,39 @@ class _InvoiceWhatsAppCardState extends State<_InvoiceWhatsAppCard> {
           const Text(
             'When a new invoice is generated or a payment is collected, the member '
             'gets a WhatsApp message with a link to download the invoice/receipt.',
-            style: TextStyle(fontSize: 12, color: AppTheme.inkSoft, height: 1.6),
+            style: TextStyle(
+              fontSize: 12,
+              color: AppTheme.inkSoft,
+              height: 1.6,
+            ),
           ),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-            decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(13)),
+            decoration: BoxDecoration(
+              color: AppTheme.surface2,
+              borderRadius: BorderRadius.circular(13),
+            ),
             child: Row(
               children: [
-                Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppTheme.accent, shape: BoxShape.circle)),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: AppTheme.accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
                 const SizedBox(width: 9),
                 const Expanded(
                   child: Text(
                     'Uses the same WhatsApp credits as reminders.',
-                    style: TextStyle(fontSize: 11.5, height: 1.45, color: AppTheme.inkHint, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.45,
+                      color: AppTheme.inkHint,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -821,7 +1053,11 @@ class _CreditsBlock extends StatelessWidget {
   final int quota;
   final int quotaUsed;
   final int credits;
-  const _CreditsBlock({required this.quota, required this.quotaUsed, required this.credits});
+  const _CreditsBlock({
+    required this.quota,
+    required this.quotaUsed,
+    required this.credits,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -834,9 +1070,19 @@ class _CreditsBlock extends StatelessWidget {
           Row(
             children: [
               const Expanded(
-                child: Text('Free monthly quota', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+                child: Text(
+                  'Free monthly quota',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
               ),
-              Text('$quotaUsed/$quota used', style: AppTheme.numberStyle(fontSize: 13)),
+              Text(
+                '$quotaUsed/$quota used',
+                style: AppTheme.numberStyle(fontSize: 13),
+              ),
             ],
           ),
           const SizedBox(height: 7),
@@ -850,15 +1096,32 @@ class _CreditsBlock extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          const Text('Resets on the 1st of the month', style: TextStyle(fontSize: 11, color: AppTheme.inkHint, fontWeight: FontWeight.w600)),
+          const Text(
+            'Resets on the 1st of the month',
+            style: TextStyle(
+              fontSize: 11,
+              color: AppTheme.inkHint,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 13),
         ],
         Row(
           children: [
             const Expanded(
-              child: Text('Purchased credits', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
+              child: Text(
+                'Purchased credits',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.inkSoft,
+                ),
+              ),
             ),
-            Text('$credits credits remaining', style: AppTheme.numberStyle(fontSize: 13)),
+            Text(
+              '$credits credits remaining',
+              style: AppTheme.numberStyle(fontSize: 13),
+            ),
           ],
         ),
       ],

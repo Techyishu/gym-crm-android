@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_provider.dart';
@@ -15,6 +16,7 @@ class GymCRMApp extends ConsumerStatefulWidget {
 
 class _GymCRMAppState extends ConsumerState<GymCRMApp> {
   StreamSubscription<Uri>? _linkSub;
+  ProviderSubscription<AsyncValue<AuthState>>? _authSub;
 
   @override
   void initState() {
@@ -28,11 +30,28 @@ class _GymCRMAppState extends ConsumerState<GymCRMApp> {
         ref.invalidate(staffProfileProvider);
       }
     });
+
+    // Email/OTP sign-in paths invalidate these caches themselves right after
+    // the session is created (see AuthNotifier). OAuth (Google) can't do that
+    // — signInWithOAuth() just launches the browser and returns immediately;
+    // the real session lands later via deep link, racing whatever screen is
+    // already on-screen. If a provider fetches during that race window it
+    // caches the failure and never retries. Catch every sign-in here instead,
+    // in one place, so no auth path can skip it.
+    _authSub = ref.listenManual(authStateProvider, (previous, next) {
+      if (next.valueOrNull?.event == AuthChangeEvent.signedIn) {
+        ref.invalidate(gymIdProvider);
+        ref.invalidate(staffProfileProvider);
+        ref.invalidate(userTypeProvider);
+        ref.invalidate(memberRecordProvider);
+      }
+    });
   }
 
   @override
   void dispose() {
     _linkSub?.cancel();
+    _authSub?.close();
     super.dispose();
   }
 

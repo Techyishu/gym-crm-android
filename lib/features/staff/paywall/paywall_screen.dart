@@ -452,11 +452,13 @@ const _kProTerms = [
   _TermOption('1mo', '1 Month', 499, 1),
   _TermOption('3mo', '3 Months', 1399, 3, discountPct: 7),
   _TermOption('6mo', '6 Months', 2599, 6, discountPct: 12),
-  _TermOption('12mo', '12 Months', 4799, 12, discountPct: 20, badge: 'Best Value'),
+  _TermOption('12mo', '12 Months', 4799, 12, discountPct: 20, badge: '2 months free'),
 ];
 
+// Elite is hidden until plan gating is enforced. Do not delete.
 // No 3mo Elite product exists in Dodo yet — omitted here rather than showing
 // a term that would 503 at checkout.
+// ignore: unused_element
 const _kEliteTerms = [
   _TermOption('1mo', '1 Month', 999, 1),
   _TermOption('6mo', '6 Months', 5299, 6, discountPct: 12),
@@ -465,16 +467,17 @@ const _kEliteTerms = [
 
 const _kProFeatures = [
   'Up to 500 members & check-ins',
-  'Up to 33 staff logins & roles',
+  'Up to 4 staff logins & roles',
   'Automatic email due reminders',
-  '500 free WhatsApp due reminders/month',
+  '300 free WhatsApp due reminders/month',
   'Advanced reports & analytics',
   'Class scheduling & bookings',
   'Leads & CRM',
   'Member portal & QR check-in',
-  'Priority support',
 ];
 
+// Elite is hidden until plan gating is enforced. Do not delete.
+// ignore: unused_element
 const _kEliteFeatures = [
   'Unlimited members & check-ins',
   'Unlimited staff logins & roles',
@@ -496,30 +499,19 @@ class _NewProPricing extends StatefulWidget {
 }
 
 class _NewProPricingState extends State<_NewProPricing> {
-  String _tier = 'pro';
-  String _selectedTerm = '1mo';
+  String _selectedTerm = '12mo';
 
-  List<_TermOption> get _terms => _tier == 'pro' ? _kProTerms : _kEliteTerms;
-
-  void _selectTier(String tier) {
-    if (tier == _tier) return;
-    setState(() {
-      _tier = tier;
-      _selectedTerm = (tier == 'pro' ? _kProTerms : _kEliteTerms).first.id;
-    });
-  }
+  List<_TermOption> get _terms => _kProTerms;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _TierToggle(tier: _tier, onChanged: _selectTier),
-        const SizedBox(height: 16),
         _PlanCard(
-          name: _tier == 'pro' ? 'Pro' : 'Elite',
+          name: 'Pro',
           highlighted: true,
-          features: _tier == 'pro' ? _kProFeatures : _kEliteFeatures,
+          features: _kProFeatures,
         ),
         const SizedBox(height: 16),
         ..._terms.map((t) => Padding(
@@ -531,12 +523,14 @@ class _NewProPricingState extends State<_NewProPricing> {
               ),
             )),
         const SizedBox(height: 8),
-        _UpgradeButton(gym: widget.gym, plan: _tier, term: _selectedTerm),
+        _UpgradeButton(gym: widget.gym, plan: 'pro', term: _selectedTerm),
       ],
     );
   }
 }
 
+// Elite is hidden until plan gating is enforced. Do not delete.
+// ignore: unused_element
 class _TierToggle extends StatelessWidget {
   final String tier;
   final ValueChanged<String> onChanged;
@@ -561,6 +555,8 @@ class _TierToggle extends StatelessWidget {
   }
 }
 
+// Elite is hidden until plan gating is enforced. Do not delete.
+// ignore: unused_element
 class _TierTab extends StatelessWidget {
   final String label;
   final bool selected;

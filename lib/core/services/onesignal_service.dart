@@ -20,6 +20,7 @@ class OneSignalService {
     OneSignal.initialize(_kOneSignalAppId);
     await OneSignal.Notifications.requestPermission(true);
     _registerInAppMessageClickListener();
+    _registerNotificationClickListener();
   }
 
   // Handles the "url" set on an In-App Message button/image in the OneSignal
@@ -33,6 +34,30 @@ class OneSignalService {
       final context = rootNavigatorKey.currentContext;
       if (url.startsWith('/') && context != null) {
         GoRouter.of(context).push(url);
+      } else {
+        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      }
+    });
+  }
+
+  // Deep link for a regular OS push notification travels in the custom
+  // "data.deep_link" field, NOT OneSignal's built-in "url" field — that one
+  // gets auto-opened externally by the native SDK before our Dart code ever
+  // runs (preventDefault() loses that race more often than not). Reading it
+  // from additionalData sidesteps the native auto-open entirely.
+  static void _registerNotificationClickListener() {
+    OneSignal.Notifications.addClickListener((event) {
+      final url = event.notification.additionalData?['deep_link'] as String?;
+      if (url == null || url.isEmpty) return;
+
+      final context = rootNavigatorKey.currentContext;
+      if (url.startsWith('/') && context != null) {
+        // go(), not push(): some deep-link targets (e.g. /staff/members,
+        // /staff/billing) are StatefulShellRoute branches. Pushing them from
+        // the root navigator context mounts them outside their branch's
+        // IndexedStack and renders blank. go() re-resolves the full route
+        // tree — shell + correct branch — every time.
+        GoRouter.of(context).go(url);
       } else {
         launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       }

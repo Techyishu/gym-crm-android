@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../../core/access/role_access.dart';
 import '../../core/billing/billing_access.dart';
@@ -11,14 +12,51 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/platform_info.dart';
 import '../../core/widgets/plan_expiry_banner.dart';
 import '../../features/auth/providers/auth_provider.dart';
+import '../../features/staff/notifications/notifications_screen.dart';
 import '../../features/staff/paywall/paywall_screen.dart';
 
-class StaffShell extends ConsumerWidget {
+class StaffShell extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
   const StaffShell({super.key, required this.shell});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<StaffShell> createState() => _StaffShellState();
+}
+
+class _StaffShellState extends ConsumerState<StaffShell> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // The staff_notifications row lands the moment the push is sent, but the
+    // bell badge/list are cached FutureProviders — nothing tells them to
+    // refetch. Foreground push arrival and app resume are the two moments a
+    // new row is most likely to exist, so refresh on both.
+    OneSignal.Notifications.addForegroundWillDisplayListener((event) {
+      event.notification.display();
+      ref.invalidate(unreadNotificationCountProvider);
+      ref.invalidate(staffNotificationsProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(unreadNotificationCountProvider);
+      ref.invalidate(staffNotificationsProvider);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = widget.shell;
     final profileAsync = ref.watch(staffProfileProvider);
 
     ref.listen(staffProfileProvider, (previous, next) {
@@ -38,7 +76,7 @@ class StaffShell extends ConsumerWidget {
     if (profileAsync.hasValue) {
       final hasAccess = isIOS
           ? ref.watch(iosProAccessProvider) ||
-              hasActiveBillingAccess(gym, ignoreTrial: true)
+                hasActiveBillingAccess(gym, ignoreTrial: true)
           : hasActiveBillingAccess(gym);
       if (!hasAccess) return const PaywallScreen();
     }
@@ -53,7 +91,11 @@ class StaffShell extends ConsumerWidget {
             Expanded(child: shell),
           ],
         ),
-        bottomNavigationBar: _StaffBottomNav(shell: shell, profile: profile, onSignOut: onSignOut),
+        bottomNavigationBar: _StaffBottomNav(
+          shell: shell,
+          profile: profile,
+          onSignOut: onSignOut,
+        ),
       ),
     );
   }
@@ -65,7 +107,11 @@ class _StaffBottomNav extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
   final Map<String, dynamic>? profile;
   final VoidCallback onSignOut;
-  const _StaffBottomNav({required this.shell, required this.profile, required this.onSignOut});
+  const _StaffBottomNav({
+    required this.shell,
+    required this.profile,
+    required this.onSignOut,
+  });
 
   String? get role => profile?['role'] as String?;
 
@@ -82,38 +128,98 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
   // Visual order: Home · Members · [Check-in center button] · Money · More.
   // Branch indices stay tied to router branches (0 home, 1 members, 2 billing, 3 check-in).
   static const _leftTabs = [
-    _Tab(icon: Icons.home_outlined,  activeIcon: Icons.home,   label: 'Home',    index: 0),
-    _Tab(icon: Icons.people_outline, activeIcon: Icons.people, label: 'Members', index: 1),
+    _Tab(
+      icon: Icons.home_outlined,
+      activeIcon: Icons.home,
+      label: 'Home',
+      index: 0,
+    ),
+    _Tab(
+      icon: Icons.people_outline,
+      activeIcon: Icons.people,
+      label: 'Members',
+      index: 1,
+    ),
   ];
-  static const _moneyTab =
-      _Tab(icon: Icons.credit_card_outlined, activeIcon: Icons.credit_card, label: 'Billing', index: 2);
+  static const _moneyTab = _Tab(
+    icon: Icons.credit_card_outlined,
+    activeIcon: Icons.credit_card,
+    label: 'Billing',
+    index: 2,
+  );
   static const int _checkInIndex = 3;
 
   static const _allMoreItems = [
-    _MoreItem(icon: Icons.person_add_outlined,      label: 'Leads',    route: '/staff/leads'),
-    _MoreItem(icon: Icons.calendar_today_outlined,  label: 'Batches',  route: '/staff/classes'),
-    _MoreItem(icon: Icons.fitness_center_outlined,  label: 'Workout plans', route: '/staff/workout-plans'),
-    _MoreItem(icon: Icons.restaurant_menu_outlined, label: 'Diet plans', route: '/staff/diet-plans'),
-    _MoreItem(icon: Icons.notifications_outlined,   label: 'Reminders', route: '/staff/reminders'),
-    _MoreItem(icon: Icons.manage_accounts_outlined, label: 'Staff & roles', route: '/staff/staff'),
-    _MoreItem(icon: Icons.bar_chart_outlined,       label: 'Reports',  route: '/staff/reports'),
-    _MoreItem(icon: Icons.receipt_long_outlined,    label: 'Expenses', route: '/staff/expenses'),
-    _MoreItem(icon: Icons.settings_outlined,        label: 'Settings', route: '/staff/settings'),
+    _MoreItem(
+      icon: Icons.person_add_outlined,
+      label: 'Leads',
+      route: '/staff/leads',
+    ),
+    _MoreItem(
+      icon: Icons.calendar_today_outlined,
+      label: 'Batches',
+      route: '/staff/classes',
+    ),
+    _MoreItem(
+      icon: Icons.fitness_center_outlined,
+      label: 'Workout plans',
+      route: '/staff/workout-plans',
+    ),
+    _MoreItem(
+      icon: Icons.restaurant_menu_outlined,
+      label: 'Diet plans',
+      route: '/staff/diet-plans',
+    ),
+    _MoreItem(
+      icon: Icons.notifications_outlined,
+      label: 'Reminders',
+      route: '/staff/reminders',
+    ),
+    _MoreItem(
+      icon: Icons.manage_accounts_outlined,
+      label: 'Staff & roles',
+      route: '/staff/staff',
+    ),
+    _MoreItem(
+      icon: Icons.bar_chart_outlined,
+      label: 'Reports',
+      route: '/staff/reports',
+    ),
+    _MoreItem(
+      icon: Icons.receipt_long_outlined,
+      label: 'Expenses',
+      route: '/staff/expenses',
+      newBadgeKey: 'feature_expenses',
+    ),
+    _MoreItem(
+      icon: Icons.settings_outlined,
+      label: 'Settings',
+      route: '/staff/settings',
+    ),
   ];
 
   bool get _showMoney => RoleAccess.canSeeBilling(widget.role);
   bool get _showCheckIn => RoleAccess.canCheckIn(widget.role);
 
   List<_MoreItem> get _visibleMoreItems => _allMoreItems.where((item) {
-    if (item.route == '/staff/classes') return RoleAccess.canSeeBatches(widget.role);
-    if (item.route == '/staff/leads') return RoleAccess.canSeeLeads(widget.role);
-    if (item.route == '/staff/workout-plans') return RoleAccess.canManageWorkoutPlans(widget.role);
-    if (item.route == '/staff/diet-plans') return RoleAccess.canManageDietPlans(widget.role);
-    if (item.route == '/staff/reminders') return RoleAccess.canSeeCommunications(widget.role);
-    if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(widget.role);
-    if (item.route == '/staff/reports') return RoleAccess.canSeeReports(widget.role);
-    if (item.route == '/staff/expenses') return RoleAccess.canSeeExpenses(widget.role);
-    if (item.route == '/staff/settings') return RoleAccess.canSeeSettings(widget.role);
+    if (item.route == '/staff/classes')
+      return RoleAccess.canSeeBatches(widget.role);
+    if (item.route == '/staff/leads')
+      return RoleAccess.canSeeLeads(widget.role);
+    if (item.route == '/staff/workout-plans')
+      return RoleAccess.canManageWorkoutPlans(widget.role);
+    if (item.route == '/staff/diet-plans')
+      return RoleAccess.canManageDietPlans(widget.role);
+    if (item.route == '/staff/reminders')
+      return RoleAccess.canSeeCommunications(widget.role);
+    if (item.route == '/staff/staff')
+      return RoleAccess.canSeeStaff(widget.role);
+    if (item.route == '/staff/reports')
+      return RoleAccess.canSeeReports(widget.role);
+    if (item.route == '/staff/expenses')
+      return RoleAccess.canSeeExpenses(widget.role);
+    if (item.route == '/staff/settings')
+      return RoleAccess.canSeeSettings(widget.role);
     return true;
   }).toList();
 
@@ -125,7 +231,11 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     _tourTriggered = true;
 
     try {
-      const stepOrder = ['staff_nav_members', 'staff_nav_checkin', 'staff_nav_more'];
+      const stepOrder = [
+        'staff_nav_members',
+        'staff_nav_checkin',
+        'staff_nav_more',
+      ];
       final keys = <GlobalKey>[];
       for (final key in stepOrder) {
         if (key == 'staff_nav_checkin' && !_showCheckIn) continue;
@@ -157,10 +267,19 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
         title: const Text('Sign Out'),
         content: const Text('Are you sure you want to sign out?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
-            onPressed: () { Navigator.pop(ctx); widget.onSignOut(); },
-            child: const Text('Sign Out', style: TextStyle(color: AppTheme.statusDanger)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              widget.onSignOut();
+            },
+            child: const Text(
+              'Sign Out',
+              style: TextStyle(color: AppTheme.statusDanger),
+            ),
           ),
         ],
       ),
@@ -224,7 +343,8 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
 
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final moreActive = _moreActive(context);
-    final checkInActive = widget.shell.currentIndex == _checkInIndex && !moreActive;
+    final checkInActive =
+        widget.shell.currentIndex == _checkInIndex && !moreActive;
 
     return Container(
       height: 66 + bottomPadding,
@@ -246,7 +366,8 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
                     active: checkInActive,
                     onTap: () => widget.shell.goBranch(
                       _checkInIndex,
-                      initialLocation: _checkInIndex == widget.shell.currentIndex,
+                      initialLocation:
+                          _checkInIndex == widget.shell.currentIndex,
                     ),
                   ),
                 ),
@@ -254,7 +375,8 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
             if (_showMoney) _branchTab(context, _moneyTab, moreActive),
             Showcase(
               key: _moreTourKey,
-              description: 'Find Leads, Classes, Staff, Reports and Settings here.',
+              description:
+                  'Find Leads, Classes, Staff, Reports and Settings here.',
               child: _NavTab(
                 icon: Icons.menu,
                 activeIcon: Icons.menu,
@@ -295,15 +417,27 @@ class _CheckInButton extends StatelessWidget {
                 color: active ? AppTheme.accentDark : AppTheme.accent,
                 borderRadius: BorderRadius.circular(18),
                 boxShadow: const [
-                  BoxShadow(color: Color(0x33DF5B34), blurRadius: 12, offset: Offset(0, 4)),
+                  BoxShadow(
+                    color: Color(0x33DF5B34),
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
                 ],
               ),
-              child: const Icon(Icons.qr_code_scanner, color: Colors.white, size: 26),
+              child: const Icon(
+                Icons.qr_code_scanner,
+                color: Colors.white,
+                size: 26,
+              ),
             ),
             const SizedBox(height: 4),
             const Text(
               'Check-in',
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.accent),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.accent,
+              ),
             ),
             const SizedBox(height: 6),
           ],
@@ -386,7 +520,9 @@ class _MoreSheet extends StatelessWidget {
     final lastName = (profile?['last_name'] as String?) ?? '';
     final fullName = '$firstName $lastName'.trim();
     final role = (profile?['role'] as String?) ?? '';
-    final roleLabel = role.isEmpty ? '' : role[0].toUpperCase() + role.substring(1);
+    final roleLabel = role.isEmpty
+        ? ''
+        : role[0].toUpperCase() + role.substring(1);
     final initials = _initials(fullName.isEmpty ? gymName : fullName);
 
     return Container(
@@ -436,13 +572,23 @@ class _MoreSheet extends StatelessWidget {
                     children: [
                       Text(
                         gymName,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.ink,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        [fullName, roleLabel].where((s) => s.isNotEmpty).join(' · '),
-                        style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                        [
+                          fullName,
+                          roleLabel,
+                        ].where((s) => s.isNotEmpty).join(' · '),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.inkSoft,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
@@ -459,7 +605,11 @@ class _MoreSheet extends StatelessWidget {
                       color: AppTheme.surface2,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.logout, size: 18, color: AppTheme.ink),
+                    child: const Icon(
+                      Icons.logout,
+                      size: 18,
+                      color: AppTheme.ink,
+                    ),
                   ),
                 ),
               ],
@@ -484,22 +634,33 @@ class _MoreSheet extends StatelessWidget {
   }
 
   static String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((s) => s.isNotEmpty)
+        .toList();
     if (parts.isEmpty) return '';
     if (parts.length == 1) return parts[0].substring(0, 1).toUpperCase();
     return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
   }
 }
 
-class _MoreRow extends StatelessWidget {
+class _MoreRow extends ConsumerWidget {
   final _MoreItem item;
   final VoidCallback onTap;
   const _MoreRow({required this.item, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final key = item.newBadgeKey;
+    final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
+    final showBadge = key != null && (coachmark?.shouldShow(key) ?? false);
+
     return InkWell(
-      onTap: onTap,
+      onTap: () {
+        if (key != null) coachmark?.markSeen(key);
+        onTap();
+      },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
@@ -507,9 +668,24 @@ class _MoreRow extends StatelessWidget {
             Icon(item.icon, size: 22, color: AppTheme.ink),
             const SizedBox(width: 16),
             Expanded(
-              child: Text(
-                item.label,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      item.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                  ),
+                  if (showBadge) ...[
+                    const SizedBox(width: 8),
+                    const _NewBadge(),
+                  ],
+                ],
               ),
             ),
             const Icon(Icons.chevron_right, size: 20, color: AppTheme.inkHint),
@@ -527,12 +703,50 @@ class _Tab {
   final IconData activeIcon;
   final String label;
   final int index;
-  const _Tab({required this.icon, required this.activeIcon, required this.label, required this.index});
+  const _Tab({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.index,
+  });
 }
 
 class _MoreItem {
   final IconData icon;
   final String label;
   final String route;
-  const _MoreItem({required this.icon, required this.label, required this.route});
+
+  /// Coachmark key gating a "NEW" badge — reuses the same per-user "seen"
+  /// tracking as the tour tooltips. Null = no badge for this item.
+  final String? newBadgeKey;
+  const _MoreItem({
+    required this.icon,
+    required this.label,
+    required this.route,
+    this.newBadgeKey,
+  });
+}
+
+class _NewBadge extends StatelessWidget {
+  const _NewBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.accent,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'NEW',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.4,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
 }
