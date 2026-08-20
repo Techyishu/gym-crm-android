@@ -70,6 +70,44 @@ async function verifyMsg91AccessToken(accessToken: string): Promise<string> {
   return normalizePhone(String(verifiedPhone))
 }
 
+// Member self-serve signup: phone must match an existing `members` row for
+// THIS specific gym (staff must have already added the member — just not
+// invited them). Deliberately does not touch `phone_identities` — that table
+// is keyed by phone alone (staff-only), and a member could share a phone
+// with a staff account (e.g. family running the gym); mixing them would let
+// one login resolve to the other's account.
+async function findOrCreateMemberUserId(phone: string, gymId: string): Promise<{ userId: string; error?: string }> {
+  const { data: members, error } = await supabase
+    .from('members')
+    .select('id, phone, user_id')
+    .eq('gym_id', gymId)
+  if (error) return { userId: '', error: 'Could not look up members for this gym' }
+
+  const match = (members ?? []).find((m: { phone: string | null }) =>
+    m.phone && normalizePhone(m.phone) === phone
+  ) as { id: string; phone: string | null; user_id: string | null } | undefined
+
+  if (!match) {
+    return { userId: '', error: 'No member found with this number at this gym. Ask your gym to add you as a member first.' }
+  }
+  if (match.user_id) {
+    return { userId: '', error: 'An account already exists for this number. Please log in instead.' }
+  }
+
+  const digits = phone.replace(/^91/, '').slice(-10)
+  const syntheticEmail = `${digits}@member.gymcrm.internal`
+  const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+    phone,
+    email: syntheticEmail,
+    phone_confirm: true,
+    email_confirm: true,
+  })
+  if (createErr || !created?.user) return { userId: '', error: createErr?.message ?? 'Failed to create account' }
+
+  await supabase.from('members').update({ user_id: created.user.id }).eq('id', match.id)
+  return { userId: created.user.id }
+}
+
 async function findOrCreateUserId(phone: string): Promise<string> {
   const { data: existing } = await supabase
     .from('phone_identities')
@@ -106,11 +144,25 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => ({}))
   const accessToken = body?.accessToken as string | undefined
+  const gymId = body?.gymId as string | undefined
   if (!accessToken) return new Response('accessToken is required', { status: 400 })
 
   try {
     const phone = await verifyMsg91AccessToken(accessToken)
-    const userId = await findOrCreateUserId(phone)
+
+    let userId: string
+    if (gymId) {
+      const result = await findOrCreateMemberUserId(phone, gymId)
+      if (result.error) {
+        return new Response(JSON.stringify({ error: result.error }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      userId = result.userId
+    } else {
+      userId = await findOrCreateUserId(phone)
+    }
 
     const { data: userRecord, error: userErr } = await supabase.auth.admin.getUserById(userId)
     if (userErr || !userRecord?.user?.email) throw new Error('Could not resolve user email')

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // ─── Models ───────────────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ class _RevReport {
   final double prevTotalRevenue;
   final int totalInvoices;
   final int paidCount;
+  final int partialCount;
   final int failedCount;
   final int activeMembers;
   final double? avgDaysToPay;
@@ -27,6 +29,7 @@ class _RevReport {
     required this.prevTotalRevenue,
     required this.totalInvoices,
     required this.paidCount,
+    required this.partialCount,
     required this.failedCount,
     required this.activeMembers,
     required this.avgDaysToPay,
@@ -124,6 +127,7 @@ final _revReportProvider =
     prevTotalRevenue: (raw['prev_total_revenue'] as num).toDouble(),
     totalInvoices: (raw['total_invoices'] as num).toInt(),
     paidCount: (raw['paid_count'] as num).toInt(),
+    partialCount: (raw['partial_count'] as num?)?.toInt() ?? 0,
     failedCount: (raw['failed_count'] as num).toInt(),
     activeMembers: (raw['active_members'] as num).toInt(),
     avgDaysToPay: (raw['avg_days_to_pay'] as num?)?.toDouble(),
@@ -221,7 +225,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: SafeArea(
+      body: ResponsiveContent(child: SafeArea(
         child: Column(
           children: [
             Padding(
@@ -271,7 +275,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -466,52 +470,68 @@ class _RevenueTab extends ConsumerWidget {
         ),
         const SizedBox(height: 14),
 
-        // Payment method donut
+        // Payment method donut + dues aging — side by side once there's room
         async.when(
           loading: () => const SizedBox.shrink(),
           error: (_, __) => const SizedBox.shrink(),
-          data: (r) => r.paymentMethod.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _DonutCard(
+          data: (r) {
+            final donut = r.paymentMethod.isEmpty
+                ? null
+                : _DonutCard(
                     title: 'Payment method',
                     entries: r.paymentMethod
                         .asMap()
                         .entries
                         .map((e) => (_methodLabel(e.value.$1), e.value.$2, _methodColor(e.key)))
                         .toList(),
-                  ),
-                ),
-        ),
-
-        // Dues aging
-        async.when(
-          loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
-          data: (r) => r.duesAging.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _DuesAgingCard(entries: r.duesAging),
-                ),
+                  );
+            final duesAging = r.duesAging.isEmpty ? null : _DuesAgingCard(entries: r.duesAging);
+            if (donut == null && duesAging == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: ResponsiveContent.isWide(context) && donut != null && duesAging != null
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: donut),
+                        const SizedBox(width: 12),
+                        Expanded(child: duesAging),
+                      ],
+                    )
+                  : Column(children: [
+                      if (donut != null) donut,
+                      if (donut != null && duesAging != null) const SizedBox(height: 14),
+                      if (duesAging != null) duesAging,
+                    ]),
+            );
+          },
         ),
 
         // Invoice counts (existing ops data, not in the mockup — kept)
         async.when(
           loading: () => _kpiShimmerRow3(),
           error: (e, _) => _ErrorText('$e'),
-          data: (r) => Row(
+          data: (r) => Column(
             children: [
-              Expanded(child: _MetricCard(label: 'Invoices', value: '${r.totalInvoices}', sub: '${r.paidCount} paid')),
-              const SizedBox(width: 8),
-              Expanded(child: _MetricCard(label: 'Paid', value: '${r.paidCount}', sub: 'of ${r.totalInvoices}')),
-              const SizedBox(width: 8),
-              Expanded(child: _MetricCard(
-                label: 'Failed',
-                value: '${r.failedCount}',
-                sub: r.totalInvoices > 0 ? '${((r.failedCount / r.totalInvoices) * 100).toStringAsFixed(1)}%' : '0%',
-              )),
+              Row(
+                children: [
+                  Expanded(child: _MetricCard(label: 'Invoices', value: '${r.totalInvoices}', sub: '${r.paidCount} paid')),
+                  const SizedBox(width: 8),
+                  Expanded(child: _MetricCard(label: 'Paid', value: '${r.paidCount}', sub: 'of ${r.totalInvoices}')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(child: _MetricCard(label: 'Partial', value: '${r.partialCount}', sub: 'still owing')),
+                  const SizedBox(width: 8),
+                  Expanded(child: _MetricCard(
+                    label: 'Failed',
+                    value: '${r.failedCount}',
+                    sub: r.totalInvoices > 0 ? '${((r.failedCount / r.totalInvoices) * 100).toStringAsFixed(1)}%' : '0%',
+                  )),
+                ],
+              ),
             ],
           ),
         ),
@@ -628,35 +648,41 @@ class _MembersTab extends ConsumerWidget {
         ),
         const SizedBox(height: 14),
 
-        // Plan mix donut
+        // Plan mix donut + lead conversion — side by side once there's room
         async.when(
           loading: () => const SizedBox.shrink(),
           error: (_, __) => const SizedBox.shrink(),
-          data: (r) => r.planMix.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _DonutCard(
+          data: (r) {
+            final donut = r.planMix.isEmpty
+                ? null
+                : _DonutCard(
                     title: 'Plan mix',
                     entries: r.planMix
                         .asMap()
                         .entries
                         .map((e) => (_planLabel(e.value.$1), e.value.$2.toDouble(), _methodColor(e.key)))
                         .toList(),
-                  ),
-                ),
-        ),
-
-        // Lead conversion
-        async.when(
-          loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
-          data: (r) => r.leadsTotal == 0
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _LeadConversionCard(report: r),
-                ),
+                  );
+            final leadConversion = r.leadsTotal == 0 ? null : _LeadConversionCard(report: r);
+            if (donut == null && leadConversion == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: ResponsiveContent.isWide(context) && donut != null && leadConversion != null
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: donut),
+                        const SizedBox(width: 12),
+                        Expanded(child: leadConversion),
+                      ],
+                    )
+                  : Column(children: [
+                      if (donut != null) donut,
+                      if (donut != null && leadConversion != null) const SizedBox(height: 14),
+                      if (leadConversion != null) leadConversion,
+                    ]),
+            );
+          },
         ),
 
         // Member status breakdown (existing feature, not in the mockup — kept)

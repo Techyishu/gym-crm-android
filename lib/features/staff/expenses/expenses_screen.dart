@@ -7,6 +7,8 @@ import '../../../core/utils/formatters.dart';
 import '../../../shared/models/expense.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../shared/widgets/responsive_content.dart';
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +58,7 @@ class ExpensesScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: expenses.when(
+      body: ResponsiveContent(child: expenses.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (list) {
@@ -93,12 +95,12 @@ class ExpensesScreen extends ConsumerWidget {
             ],
           );
         },
-      ),
+      )),
     );
   }
 
   void _showAddSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

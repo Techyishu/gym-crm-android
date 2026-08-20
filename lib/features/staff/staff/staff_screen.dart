@@ -7,6 +7,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../shared/widgets/responsive_content.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 final staffListProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -43,7 +45,7 @@ class StaffScreen extends ConsumerWidget {
         title: const Text('Staff & roles'),
         leading: const BackButton(),
       ),
-      body: staffAsync.when(
+      body: ResponsiveContent(child: staffAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error:   (e, _) => Center(
           child: Text('Error: $e', style: const TextStyle(color: AppTheme.inkSoft)),
@@ -98,12 +100,12 @@ class StaffScreen extends ConsumerWidget {
             const SizedBox(height: 32),
           ],
         ),
-      ),
+      )),
     );
   }
 
   void _showInviteSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

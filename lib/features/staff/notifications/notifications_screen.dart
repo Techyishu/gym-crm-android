@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 
 class StaffNotification {
@@ -56,7 +57,7 @@ void _openNotification(BuildContext context, WidgetRef ref, StaffNotification n)
         .update({'read_at': DateTime.now().toIso8601String()})
         .eq('id', n.id)
         .then((_) {
-      ref.invalidate(staffNotificationsProvider);
+      if (context.mounted) ref.invalidate(staffNotificationsProvider);
     });
   }
 
@@ -84,7 +85,7 @@ class NotificationsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('Notifications'), leading: const BackButton()),
-      body: notifications.when(
+      body: ResponsiveContent(child: notifications.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Failed to load: $e')),
         data: (items) {
@@ -106,7 +107,7 @@ class NotificationsScreen extends ConsumerWidget {
             ),
           );
         },
-      ),
+      )),
     );
   }
 }

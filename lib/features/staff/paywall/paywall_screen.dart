@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -11,6 +12,7 @@ import '../../../core/providers/revenue_cat_provider.dart';
 import '../../../core/services/revenue_cat_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'ios_custom_paywall.dart';
 
@@ -61,7 +63,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           ),
         ],
       ),
-      body: _PlanBody(gym: gym),
+      body: ResponsiveContent(child: _PlanBody(gym: gym)),
     );
   }
 }
@@ -89,7 +91,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
           title: const Text('Subscription'),
           leading: const BackButton(),
         ),
-        body: _IosActiveSubscription(gym: gym),
+        body: ResponsiveContent(child: _IosActiveSubscription(gym: gym)),
       );
     }
 
@@ -99,7 +101,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
         title: const Text('Subscription'),
         leading: const BackButton(),
       ),
-      body: _PlanBody(gym: gym),
+      body: ResponsiveContent(child: _PlanBody(gym: gym)),
     );
   }
 }
@@ -127,7 +129,7 @@ class _PlanBody extends StatelessWidget {
           children: [
             _StatusBanner(gym: gym),
             const SizedBox(height: 24),
-            if (isLegacy) ..._legacyPro(gym) else _NewProPricing(gym: gym),
+            if (isLegacy) _LegacyPricing(gym: gym) else _NewProPricing(gym: gym),
             const SizedBox(height: 24),
             _ContactForPricing(),
           ],
@@ -135,29 +137,73 @@ class _PlanBody extends StatelessWidget {
       ),
     );
   }
+}
 
-  List<Widget> _legacyPro(Map<String, dynamic>? gym) {
-    final price = gym?['plan_price'] as int? ?? 249;
-    return [
-      _PlanCard(
-        name: 'Pro',
-        highlighted: true,
-        price: '₹$price/mo',
-        features: const [
-          'Unlimited members & check-ins',
-          'Unlimited staff logins & roles',
-          'Automatic email due reminders',
-          'WhatsApp due reminders',
-          'Advanced reports & analytics',
-          'Class scheduling & bookings',
-          'Leads & CRM',
-          'Member portal & QR check-in',
-          'Priority support',
-        ],
-      ),
-      const SizedBox(height: 16),
-      _UpgradeButton(gym: gym, term: '1mo'),
+// ── Legacy (₹249/mo grandfathered) pricing: adds 3/6/12mo terms ──────────────
+
+const _kLegacyFeatures = [
+  'Unlimited members & check-ins',
+  'Unlimited staff logins & roles',
+  'Automatic email due reminders',
+  'WhatsApp due reminders',
+  'Advanced reports & analytics',
+  'Class scheduling & bookings',
+  'Leads & CRM',
+  'Member portal & QR check-in',
+  'Priority support',
+];
+
+// Multi-month terms at legacy gyms' locked-in ₹249/mo rate, same 7/12/20%
+// discount curve as _kProTerms. Dodo products: pdt_0NlI9s2bexR61Mzwwegj9 (3mo),
+// pdt_0NlIA0KQM7ZEHFNmfFNmw (6mo), pdt_0NlIDT6RzXCRV4YNUXYwN (12mo) — checkout
+// backend must map these against legacy_pricing gyms same way it already does
+// for the 1mo legacy_dodo_product_id.
+const _kLegacyMultiMonthTerms = [
+  _TermOption('3mo', '3 Months', 694, 3, discountPct: 7),
+  _TermOption('6mo', '6 Months', 1315, 6, discountPct: 12),
+  _TermOption('12mo', '12 Months', 2390, 12, discountPct: 20, badge: '2 months free'),
+];
+
+class _LegacyPricing extends StatefulWidget {
+  final Map<String, dynamic>? gym;
+  const _LegacyPricing({required this.gym});
+
+  @override
+  State<_LegacyPricing> createState() => _LegacyPricingState();
+}
+
+class _LegacyPricingState extends State<_LegacyPricing> {
+  String _selectedTerm = '1mo';
+
+  @override
+  Widget build(BuildContext context) {
+    final monthlyPrice = widget.gym?['plan_price'] as int? ?? 249;
+    final terms = [
+      _TermOption('1mo', '1 Month', monthlyPrice, 1),
+      ..._kLegacyMultiMonthTerms,
     ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PlanCard(
+          name: 'Pro',
+          highlighted: true,
+          features: _kLegacyFeatures,
+        ),
+        const SizedBox(height: 16),
+        ...terms.map((t) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _TermCard(
+                term: t,
+                isSelected: _selectedTerm == t.id,
+                onTap: () => setState(() => _selectedTerm = t.id),
+              ),
+            )),
+        const SizedBox(height: 8),
+        _UpgradeButton(gym: widget.gym, term: _selectedTerm),
+      ],
+    );
   }
 }
 
@@ -263,9 +309,10 @@ class _StatusBanner extends StatelessWidget {
         hasExpiry;
 
     if (isActive) {
-      final planName = plan != null
-          ? plan[0].toUpperCase() + plan.substring(1)
-          : 'Active';
+      // Only 'pro' is a real paid plan name — anything else (e.g. 'starter')
+      // reaching this branch is a trial row with a stray plan_expires_at, so
+      // don't print the raw plan string.
+      final planName = plan == 'pro' ? 'Pro' : 'Active';
       String sub = 'You have an active $planName plan.';
       if (planExpiresAt != null) {
         final exp = DateTime.tryParse(planExpiresAt)?.toLocal();
@@ -283,10 +330,11 @@ class _StatusBanner extends StatelessWidget {
     }
 
     // Trial active — iOS has no trial, so skip straight to the paywall message.
-    final daysLeft = trialEndsAt != null
-        ? DateTime.tryParse(trialEndsAt)?.toUtc().difference(now).inDays
-        : null;
-    if (!isIOS && daysLeft != null && daysLeft > 0) {
+    // ceil(), not .inDays: 23h left on a 24h trial is "1 day left", not "0".
+    final trialEnd = trialEndsAt != null ? DateTime.tryParse(trialEndsAt)?.toUtc() : null;
+    final trialDiff = trialEnd?.difference(now);
+    final daysLeft = (trialDiff != null && !trialDiff.isNegative) ? (trialDiff.inHours / 24).ceil() : null;
+    if (!isIOS && daysLeft != null) {
       return _Banner(
         icon: Icons.access_time_outlined,
         message: 'Your free trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}.',
@@ -350,13 +398,11 @@ class _PlanCard extends StatelessWidget {
   final String name;
   final List<String> features;
   final bool highlighted;
-  final String? price;
 
   const _PlanCard({
     required this.name,
     required this.features,
     this.highlighted = false,
-    this.price,
   });
 
   @override
@@ -371,10 +417,6 @@ class _PlanCard extends StatelessWidget {
           children: [
             Row(children: [
               Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-              if (price != null) ...[
-                const Spacer(),
-                Text(price!, style: AppTheme.numberStyle(fontSize: 15)),
-              ],
             ]),
             const SizedBox(height: 14),
             ...features.map((f) => Padding(
@@ -408,15 +450,6 @@ class _PlanCard extends StatelessWidget {
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: Color(0xFF12291B)),
             ),
           ),
-          if (price != null) ...[
-            const SizedBox(height: 14),
-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(price!, style: AppTheme.numberStyle(fontSize: 40, color: AppTheme.onDark, height: 1)),
-            ]),
-            const SizedBox(height: 8),
-            const Text('Flat. No per-member fees. Cancel anytime.',
-              style: TextStyle(fontSize: 12.5, color: AppTheme.onDarkSoft)),
-          ],
           const SizedBox(height: 16),
           Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
           const SizedBox(height: 16),
@@ -783,20 +816,37 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
           'Authorization': 'Bearer ${session.accessToken}',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'plan': widget.plan, 'term': widget.term}),
+        body: jsonEncode({
+          'plan': widget.plan,
+          'term': widget.term,
+          'platform': kIsWeb ? 'web' : 'mobile',
+        }),
       );
 
       if (response.statusCode != 200) {
+        final message = response.statusCode == 422
+            ? ((jsonDecode(response.body) as Map<String, dynamic>)['error'] as String? ??
+                'Could not change plan.')
+            : 'Could not start checkout. Please try again.';
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not start checkout. Please try again.')),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
         }
         return;
       }
 
-      final url = (jsonDecode(response.body) as Map<String, dynamic>)['url'] as String?;
-      if (url == null) return;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final url = data['url'] as String?;
+
+      if (url == null) {
+        // Plan changed on the existing subscription directly — no checkout redirect.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Plan updated.')),
+          );
+        }
+        ref.invalidate(staffProfileProvider);
+        return;
+      }
 
       _checkoutInProgress = true;
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
@@ -820,8 +870,6 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
         (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false);
     final isActive = (plan == 'pro' && planExpiresAt == null) || hasExpiry;
 
-    if (isActive) return const SizedBox.shrink();
-
     return SizedBox(
       height: 52,
       width: double.infinity,
@@ -833,9 +881,9 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
                 width: 20,
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               )
-            : const Text(
-                'Upgrade to Pro',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            : Text(
+                isActive ? 'Change plan' : 'Upgrade to Pro',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
               ),
       ),
     );

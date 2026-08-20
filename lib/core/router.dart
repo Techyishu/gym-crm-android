@@ -11,6 +11,7 @@ import '../features/auth/providers/auth_provider.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/auth/screens/login_screen.dart';
 import '../features/auth/screens/phone_otp_screen.dart';
+import '../features/auth/screens/member_signup_screen.dart';
 import '../features/auth/screens/signup_screen.dart';
 import '../features/auth/screens/forgot_password_screen.dart';
 import '../features/staff/gym_setup/gym_setup_screen.dart';
@@ -194,6 +195,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const PhoneOtpScreen(),
       ),
       GoRoute(
+        path: '/login/member-signup',
+        builder: (_, __) => const MemberSignupScreen(),
+      ),
+      GoRoute(
         path: '/signup',
         builder: (_, __) => const SignupScreen(),
       ),
@@ -267,17 +272,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/staff/subscription',
         builder: (_, __) => const SubscriptionScreen(),
       ),
-      GoRoute(path: '/staff/classes', builder: (_, __) => const ClassesScreen()),
-      GoRoute(path: '/staff/leads', builder: (_, __) => const LeadsScreen()),
-      GoRoute(path: '/staff/expenses', builder: (_, __) => const ExpensesScreen()),
-      GoRoute(path: '/staff/reports', builder: (_, __) => const ReportsScreen()),
-      GoRoute(path: '/staff/settings', builder: (_, __) => const SettingsScreen()),
-      GoRoute(path: '/staff/reminders', builder: (_, __) => const RemindersScreen()),
-      GoRoute(path: '/staff/communications', builder: (_, __) => const CommunicationsScreen()),
-      GoRoute(path: '/staff/staff', builder: (_, __) => const StaffScreen()),
-      GoRoute(path: '/staff/workout-plans', builder: (_, __) => const StaffWorkoutPlansScreen()),
-      GoRoute(path: '/staff/diet-plans', builder: (_, __) => const StaffDietPlansScreen()),
-      GoRoute(path: '/staff/notifications', builder: (_, __) => const NotificationsScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/classes', builder: (_, __) => const ClassesScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/leads', builder: (_, __) => const LeadsScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/expenses', builder: (_, __) => const ExpensesScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/reports', builder: (_, __) => const ReportsScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/settings', builder: (_, __) => const SettingsScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/reminders', builder: (_, __) => const RemindersScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/communications', builder: (_, __) => const CommunicationsScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/staff', builder: (_, __) => const StaffScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/workout-plans', builder: (_, __) => const StaffWorkoutPlansScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/diet-plans', builder: (_, __) => const StaffDietPlansScreen()),
+      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/notifications', builder: (_, __) => const NotificationsScreen()),
 
       // Member shell with bottom nav
       StatefulShellRoute.indexedStack(

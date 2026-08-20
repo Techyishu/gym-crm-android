@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/collect_payment.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -20,6 +22,7 @@ import '../../../shared/models/member.dart';
 import '../../../shared/widgets/member_photo.dart';
 import '../../../shared/widgets/redesign.dart';
 import 'member_plan_viewer.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 // Active membership plans for the current gym (for assign/change actions).
 final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -33,6 +36,8 @@ final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
       .order('price');
   return (data as List).cast<Map<String, dynamic>>();
 });
+
+final _memberDueProvider = FutureProvider.family<double, String>((ref, memberId) => memberDueAmount(memberId));
 
 final _memberDetailProvider = FutureProvider.family<Member?, String>((ref, id) async {
   final gymId = await ref.read(gymIdProvider.future);
@@ -60,7 +65,7 @@ final _memberInvoicesProvider = FutureProvider.family<List<Map<String, dynamic>>
   final gymId = await ref.read(gymIdProvider.future);
   return await Supabase.instance.client
       .from('invoices')
-      .select('id, amount, status, description, due_at, paid_at, created_at')
+      .select('id, amount, status, description, due_at, paid_at, created_at, payments(amount, status)')
       .eq('member_id', id)
       .eq('gym_id', gymId)
       .order('created_at', ascending: false)
@@ -104,6 +109,49 @@ final _memberDietPlansProvider = FutureProvider.family<List<Map<String, dynamic>
   }
 });
 
+void _showFullPhoto(BuildContext context, Member m) {
+  final url = MemberPhotoService.photoUrl(m.avatarUrl);
+  if (url == null) return;
+  showDialog(
+    context: context,
+    barrierColor: Colors.black87,
+    builder: (ctx) => Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(24),
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.topRight,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: InteractiveViewer(
+              child: CachedNetworkImage(
+                imageUrl: url,
+                httpHeaders: MemberPhotoService.authHeaders(),
+                cacheKey: MemberPhotoService.pathFrom(m.avatarUrl),
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+          Positioned(
+            top: -16,
+            right: -16,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
+                child: const Icon(Icons.close, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class MemberDetailScreen extends ConsumerWidget {
   final String memberId;
   const MemberDetailScreen({super.key, required this.memberId});
@@ -131,7 +179,7 @@ class MemberDetailScreen extends ConsumerWidget {
                 children: [
                   _buildHeader(context, ref, m, canPii: canPii, canEdit: canEdit),
                   const SizedBox(height: 16),
-                  _buildMembershipCard(context, m),
+                  _buildMembershipCard(context, ref, m),
                   const SizedBox(height: 12),
                   _buildStatTiles(ref),
                   const SizedBox(height: 12),
@@ -213,7 +261,7 @@ class MemberDetailScreen extends ConsumerWidget {
               if (canEdit)
                 IconButton(
                   icon: const Icon(Icons.more_vert, size: 22, color: AppTheme.onDark),
-                  onPressed: () => showModalBottomSheet(
+                  onPressed: () => showAdaptiveSheet(
                     context: context,
                     builder: (ctx) => SafeArea(
                       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -222,7 +270,7 @@ class MemberDetailScreen extends ConsumerWidget {
                           title: const Text('Edit member'),
                           onTap: () {
                             Navigator.pop(ctx);
-                            showModalBottomSheet(
+                            showAdaptiveSheet(
                               context: context,
                               isScrollControlled: true,
                               useSafeArea: true,
@@ -247,20 +295,23 @@ class MemberDetailScreen extends ConsumerWidget {
           const SizedBox(height: 4),
           Row(
             children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  color: AppTheme.darkCard2,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: MemberPhoto(
-                  stored: m.avatarUrl,
-                  fallback: Center(
-                    child: Text(
-                      initials(m.firstName, m.lastName),
-                      style: const TextStyle(color: AppTheme.mintOnDark, fontWeight: FontWeight.w800, fontSize: 28),
+              GestureDetector(
+                onTap: m.avatarUrl == null ? null : () => _showFullPhoto(context, m),
+                child: Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkCard2,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: MemberPhoto(
+                    stored: m.avatarUrl,
+                    fallback: Center(
+                      child: Text(
+                        initials(m.firstName, m.lastName),
+                        style: const TextStyle(color: AppTheme.mintOnDark, fontWeight: FontWeight.w800, fontSize: 28),
+                      ),
                     ),
                   ),
                 ),
@@ -375,7 +426,7 @@ class MemberDetailScreen extends ConsumerWidget {
     Future<void> openWorkout() async {
       if (workoutPlans.isEmpty) {
         if (!canWorkout) return;
-        final saved = await showModalBottomSheet<bool>(
+        final saved = await showAdaptiveSheet<bool>(
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
@@ -398,7 +449,7 @@ class MemberDetailScreen extends ConsumerWidget {
     Future<void> openDiet() async {
       if (dietPlans.isEmpty) {
         if (!canDiet) return;
-        final saved = await showModalBottomSheet<bool>(
+        final saved = await showAdaptiveSheet<bool>(
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
@@ -454,7 +505,8 @@ class MemberDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildMembershipCard(BuildContext context, Member m) {
+  Widget _buildMembershipCard(BuildContext context, WidgetRef ref, Member m) {
+    final due = ref.watch(_memberDueProvider(m.id)).valueOrNull ?? 0;
     final ms = m.currentMembership;
     final npd = m.nextPaymentDate != null ? DateTime.tryParse(m.nextPaymentDate!) : null;
     final started = ms != null ? DateTime.tryParse(ms.startsAt) : null;
@@ -497,6 +549,18 @@ class MemberDetailScreen extends ConsumerWidget {
                 Text('− ${formatCurrency(ms!.discountAmount)} per invoice',
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.statusActive)),
               ],
+              if (due > 0) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.statusDangerBg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('Due ${formatCurrency(due)}',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.statusDanger)),
+                ),
+              ],
               if (progress != null) ...[
                 const SizedBox(height: 14),
                 ClipRRect(
@@ -509,8 +573,13 @@ class MemberDetailScreen extends ConsumerWidget {
                   ),
                 ),
               ],
-              if (npd != null) ...[
+              if (started != null) ...[
                 const SizedBox(height: 10),
+                Text('Started ${formatDateFromString(ms!.startsAt)}',
+                  style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+              ],
+              if (npd != null) ...[
+                const SizedBox(height: 6),
                 Row(children: [
                   Text('Renews ${formatDateFromString(m.nextPaymentDate)}',
                     style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
@@ -767,7 +836,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       _         => 'Hi ${m.firstName}, ',
     };
 
-    await showModalBottomSheet(
+    await showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -918,6 +987,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   }
 
   Future<void> _managePlan() async {
+    ref.invalidate(_detailPlansProvider);
     final plans = await ref.read(_detailPlansProvider.future);
     if (!mounted) return;
     if (plans.isEmpty) {
@@ -926,7 +996,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     }
     final currentPlanId = m.currentMembership?.plan?.id;
     var picked = currentPlanId ?? (plans.isNotEmpty ? plans.first['id'] as String : null);
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showAdaptiveSheet<String>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -981,7 +1051,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
 
     // Optional recurring discount for this member.
     final discountCtrl = TextEditingController();
-    final discount = await showModalBottomSheet<double>(
+    final discount = await showAdaptiveSheet<double>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
@@ -1005,23 +1075,6 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       // Membership is open-ended — next_payment_date tracks renewal, not ends_at.
       final startsAt = DateTime.tryParse(m.joinedAt) ?? DateTime.now().toUtc();
 
-      // Cancel any existing active membership, then assign the new plan.
-      await _client.from('memberships').update({
-        'status': 'cancelled',
-        'cancelled_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('member_id', m.id).eq('status', 'active');
-      await _client.from('memberships').insert({
-        'member_id': m.id,
-        'plan_id': selected,
-        'status': 'active',
-        'starts_at': startsAt.toIso8601String(),
-        'ends_at': null,
-        'discount_amount': discount ?? 0.0,
-      });
-      // Activate the member if they were expired or cancelled.
-      if (m.status == 'expired' || m.status == 'cancelled') {
-        await _client.from('members').update({'status': 'active'}).eq('id', m.id);
-      }
       // Extend from the member's current next_payment_date when one exists —
       // matches how Collect Payment already advances dates (from the date
       // itself, not from today or from join date). Only members who never
@@ -1031,16 +1084,44 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']] ??
           1;
       final currentNpd = m.nextPaymentDate;
-      final anchor = (currentNpd != null && currentNpd.isNotEmpty)
-          ? currentNpd
-          : startsAt.toIso8601String().split('T').first;
-      final derived = advancePaymentDate(anchor, months: months);
-      if (derived != null) {
-        await _client.from('members').update({
-          'next_payment_date': derived,
-          'billing_interval_months': months,
-        }).eq('id', m.id);
+      final today = DateTime.now().toUtc();
+      final todayStr = today.toIso8601String().split('T').first;
+      final hasRemainingTime = currentNpd != null &&
+          currentNpd.isNotEmpty &&
+          (DateTime.tryParse(currentNpd)?.isAfter(DateTime(today.year, today.month, today.day)) ?? false);
+
+      String anchor;
+      if (hasRemainingTime) {
+        if (!mounted) return;
+        final choice = await showAdaptiveSheet<String>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => _PlanStartChoiceSheet(todayStr: todayStr, currentNpd: currentNpd),
+        );
+        if (choice == null) {
+          setState(() => _busy = false);
+          return;
+        }
+        anchor = choice == 'today' ? todayStr : currentNpd;
+      } else {
+        anchor = (currentNpd != null && currentNpd.isNotEmpty)
+            ? currentNpd
+            : startsAt.toIso8601String().split('T').first;
       }
+      final derived = advancePaymentDate(anchor, months: months) ?? anchor;
+
+      // Cancel old membership + insert new one + update member row, atomically
+      // (single DB transaction via RPC) so a mid-flow interruption can't leave
+      // the member with an old-cancelled-but-no-new-active membership.
+      await _client.rpc('change_member_plan', params: {
+        'p_member_id': m.id,
+        'p_plan_id': selected,
+        'p_starts_at': startsAt.toIso8601String(),
+        'p_discount_amount': discount ?? 0.0,
+        'p_next_payment_date': derived,
+        'p_billing_interval_months': months,
+      });
       ref.invalidate(_memberDetailProvider(m.id));
       _toast('Plan assigned');
     } catch (e) {
@@ -1058,7 +1139,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     final discountCtrl = TextEditingController(
       text: ms.discountAmount > 0 ? ms.discountAmount.toStringAsFixed(0) : '',
     );
-    final newDiscount = await showModalBottomSheet<double>(
+    final newDiscount = await showAdaptiveSheet<double>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
@@ -1177,6 +1258,78 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
 }
 
 // ── Discount bottom sheet ──────────────────────────────────────────────────────
+
+class _PlanStartChoiceSheet extends StatefulWidget {
+  final String todayStr;
+  final String currentNpd;
+  const _PlanStartChoiceSheet({required this.todayStr, required this.currentNpd});
+
+  @override
+  State<_PlanStartChoiceSheet> createState() => _PlanStartChoiceSheetState();
+}
+
+class _PlanStartChoiceSheetState extends State<_PlanStartChoiceSheet> {
+  String _picked = 'today';
+
+  Widget _option({required String value, required String title, required String subtitle}) {
+    final selected = _picked == value;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GestureDetector(
+        onTap: () => setState(() => _picked = value),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.accentSoft : AppTheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+              const SizedBox(height: 3),
+              Text(subtitle, style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SheetHeader(
+            title: 'Start new plan from?',
+            subtitle: 'Their current plan is active till ${formatDateFromString(widget.currentNpd)}.',
+          ),
+          const SizedBox(height: 16),
+          _option(
+            value: 'today',
+            title: 'Today (${formatDateFromString(widget.todayStr)})',
+            subtitle: 'New plan starts now. Remaining days on the old plan are dropped.',
+          ),
+          _option(
+            value: 'end',
+            title: formatDateFromString(widget.currentNpd),
+            subtitle: 'New plan starts after the old one ends. Nothing dropped, no gap.',
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, _picked),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _DiscountSheet extends StatelessWidget {
   final String title;
@@ -1401,7 +1554,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   }
 
   Future<void> _pickAvatar() async {
-    final source = await showModalBottomSheet<ImageSource>(
+    final source = await showAdaptiveSheet<ImageSource>(
       context: context,
       builder: (_) => SafeArea(
         child: Column(
@@ -1824,7 +1977,13 @@ class _PaymentHistoryPage extends ConsumerWidget {
                     final inv = e.value;
                     final status = inv['status'] as String? ?? 'open';
                     final isPaid = status == 'paid';
+                    final isPartial = status == 'partial';
                     final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
+                    final invPayments = (inv['payments'] as List?) ?? const [];
+                    final paidSoFar = invPayments
+                        .where((p) => (p as Map)['status'] == 'succeeded')
+                        .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+                    final balanceDue = (amount - paidSoFar).clamp(0, amount);
                     final dateStr = isPaid
                         ? inv['paid_at'] as String?
                         : inv['due_at'] as String?;
@@ -1851,11 +2010,21 @@ class _PaymentHistoryPage extends ConsumerWidget {
                         ),
                         const SizedBox(width: 8),
                         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                          Text(formatCurrency(amount),
+                          Text(
+                            isPartial
+                                ? '${formatCurrency(balanceDue)} due'
+                                : formatCurrency(amount),
                             style: AppTheme.numberStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+                          if (isPartial) ...[
+                            const SizedBox(height: 2),
+                            Text('${formatCurrency(paidSoFar)} of ${formatCurrency(amount)} paid',
+                              style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft)),
+                          ],
                           const SizedBox(height: 3),
                           if (isPaid)
                             StatusPill.active(label: 'Paid')
+                          else if (isPartial)
+                            StatusPill.warn(label: 'Partial')
                           else
                             StatusPill.warn(label: status[0].toUpperCase() + status.substring(1)),
                         ]),

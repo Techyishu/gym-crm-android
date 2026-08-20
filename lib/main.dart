@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -62,6 +63,10 @@ Future<void> main() async {
     },
     appRunner: () async {
       WidgetsFlutterBinding.ensureInitialized();
+      // Path-based URLs on web (no `#`) — frees up the URL fragment for the
+      // Google-sign-in web handoff (see signUpWithGoogle/app.dart), which
+      // would otherwise collide with go_router's default hash routing.
+      usePathUrlStrategy();
 
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
@@ -87,6 +92,8 @@ Future<void> main() async {
         url: _supabaseUrl,
         anonKey: _supabaseAnonKey,
       );
+
+      if (kIsWeb) await _handleWebGoogleAuthHandoff();
 
       // Initialize RevenueCat before runApp so the customerInfoStream is ready.
       await RevenueCatService.initialize();
@@ -134,4 +141,27 @@ Future<void> main() async {
       });
     },
   );
+}
+
+/// Handles Google sign-in's return trip on web (see auth_provider.dart's
+/// signUpWithGoogle and gym-crm's app/auth/dashboard-callback route): that
+/// server-side callback exchanges the OAuth code and redirects back here
+/// with the session in the URL fragment — never sent to any server, never
+/// logged, since browsers don't transmit fragments in HTTP requests. Read
+/// once at boot; the app's first real navigation overwrites the URL right
+/// after, so there's nothing to manually clear.
+Future<void> _handleWebGoogleAuthHandoff() async {
+  final fragment = Uri.base.fragment;
+  if (fragment.isEmpty) return;
+
+  final params = Uri.splitQueryString(fragment);
+  final accessToken = params['access_token'];
+  final refreshToken = params['refresh_token'];
+  if (accessToken == null || refreshToken == null) return;
+
+  try {
+    await Supabase.instance.client.auth.setSession(refreshToken, accessToken: accessToken);
+  } catch (e, s) {
+    Sentry.captureException(e, stackTrace: s);
+  }
 }

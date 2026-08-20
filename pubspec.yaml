@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter
 
   # Supabase
   supabase_flutter: ^2.8.4
@@ -73,6 +75,7 @@ dependencies:
   onesignal_flutter: ^5.3.3
   firebase_core: ^4.12.1
   firebase_analytics: ^12.4.5
+  flutter_zkteco: ^1.2.0
 
 dev_dependencies:
   flutter_test:

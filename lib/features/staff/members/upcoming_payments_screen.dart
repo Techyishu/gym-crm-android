@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/member_photo.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/access/role_access.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 final _overdueProvider =
     FutureProvider.family<List<Map<String, dynamic>>, String>((ref, gymId) async {
@@ -88,7 +92,7 @@ class _UpcomingPaymentsScreenState
           ],
         ),
       ),
-      body: gymAsync.when(
+      body: ResponsiveContent(child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (gymId) => TabBarView(
@@ -102,7 +106,7 @@ class _UpcomingPaymentsScreenState
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -569,7 +573,7 @@ class _CollectButton extends ConsumerWidget {
       height: 32,
       child: ElevatedButton(
         onPressed: () {
-          showModalBottomSheet(
+          showAdaptiveSheet(
             context: context,
             isScrollControlled: true,
             useSafeArea: true,
@@ -615,6 +619,8 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   bool _loading = false;
   String? _planHint;
   String? _nextPaymentDate;
+  double? _expectedAmount;
+  double? _due;
 
   static const _methods = [
     ('cash', 'Cash', Icons.payments_outlined),
@@ -639,7 +645,8 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
 
   Future<void> _autofill() async {
     try {
-      final data = await Supabase.instance.client
+      final client = Supabase.instance.client;
+      final data = await client
           .from('members')
           .select('next_payment_date, memberships(status, discount_amount, membership_plans(price, name))')
           .eq('id', widget.memberId)
@@ -655,11 +662,13 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       }
       final plan = active?['membership_plans'] as Map?;
       final discount = (active?['discount_amount'] as num?)?.toDouble() ?? 0;
+      double? finalPrice;
       setState(() {
         if (plan != null && plan['price'] != null) {
           final listPrice = (plan['price'] as num).toDouble();
-          final finalPrice = (listPrice - discount).clamp(0, listPrice);
-          _amountCtrl.text = finalPrice.toStringAsFixed(0);
+          finalPrice = (listPrice - discount).clamp(0, listPrice);
+          _expectedAmount = finalPrice;
+          _amountCtrl.text = finalPrice!.toStringAsFixed(0);
           _planHint = discount > 0
               ? '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)} − $currencySymbol${discount.toStringAsFixed(0)} discount'
               : '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)}';
@@ -667,6 +676,30 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;
       });
+
+      // If there's already an open/partial invoice for this member, its
+      // amount (not the plan price) is the real total owed — pre-fill the
+      // remaining balance instead of the full plan price.
+      final existing = await client
+          .from('invoices')
+          .select('id, amount')
+          .eq('member_id', widget.memberId)
+          .inFilter('status', ['open', 'partial'])
+          .order('created_at', ascending: true)
+          .limit(1)
+          .maybeSingle();
+      if (existing != null && mounted) {
+        final invoiceAmount = (existing['amount'] as num).toDouble();
+        final due = await invoiceDue(existing['id'] as String, invoiceAmount);
+        if (!mounted) return;
+        setState(() {
+          _expectedAmount = invoiceAmount;
+          _due = due;
+          _amountCtrl.text = due.toStringAsFixed(0);
+        });
+      } else {
+        _due = finalPrice;
+      }
     } catch (e) {
       debugPrint('[GymCRM] Autofill error: $e');
     }
@@ -686,18 +719,46 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       return;
     }
 
+    final prior = await LocalPaymentGuard.check(widget.memberId);
+    if (prior != null && mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already collected today'),
+          content: Text(
+            '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
+            'from ${widget.memberName} today at '
+            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}.\n\n'
+            'Collect $currencySymbol${amount.toStringAsFixed(0)} again?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Collect anyway')),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
+    if (!mounted) return;
+    final ok = await confirmPartialIfNeeded(context, enteredAmount: amount, dueAmount: _due ?? amount);
+    if (!ok) return;
+
     setState(() => _loading = true);
     try {
       final gymId = await ref.read(gymIdProvider.future);
       final client = Supabase.instance.client;
 
-      // 1. Reuse existing open invoice if one exists, otherwise create a new one.
+      // 1. Reuse existing open/partial invoice if one exists, otherwise create
+      // a new one. The invoice's own amount (the real total owed) is never
+      // overwritten by the amount being collected right now — those are two
+      // different numbers once partial payments are allowed.
       final existingInvoice = await client
           .from('invoices')
           .select('id')
           .eq('member_id', widget.memberId)
           .eq('gym_id', gymId)
-          .eq('status', 'open')
+          .inFilter('status', ['open', 'partial'])
           .order('created_at', ascending: true)
           .limit(1)
           .maybeSingle();
@@ -705,39 +766,33 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       final String invoiceId;
       if (existingInvoice != null) {
         invoiceId = existingInvoice['id'] as String;
-        await client.from('invoices').update({
-          'amount': amount,
-          if (_nextPaymentDate != null) 'due_at': _nextPaymentDate,
-        }).eq('id', invoiceId);
+        if (_nextPaymentDate != null) {
+          await client.from('invoices').update({'due_at': _nextPaymentDate}).eq('id', invoiceId);
+        }
       } else {
         final invoiceResult = await client.from('invoices').insert({
           'member_id': widget.memberId,
           'gym_id': gymId,
-          'amount': amount,
+          'amount': _expectedAmount ?? amount,
           if (_nextPaymentDate != null) 'due_at': _nextPaymentDate,
           'status': 'open',
         }).select('id').single();
         invoiceId = invoiceResult['id'] as String;
       }
 
-      // 2. Record payment
-      await client.from('payments').insert({
-        'invoice_id': invoiceId,
-        'amount': amount,
-        'method': _method,
-        'status': 'succeeded',
-        'reference_no': _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
-        'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        'recorded_by': client.auth.currentUser?.id,
-      });
+      // 2 & 3. Record the payment and set invoice status (paid or partial).
+      final isFullyPaid = await recordInvoicePayment(
+        invoiceId: invoiceId,
+        amount: amount,
+        method: _method,
+        referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        recordedBy: client.auth.currentUser?.id,
+      );
 
-      // 3. Mark invoice paid
-      await client.from('invoices').update({
-        'status': 'paid',
-        'paid_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', invoiceId);
-
-      // 4. Advance next_payment_date + lift freeze
+      // 4. Advance next_payment_date (only once the invoice is fully settled
+      // — a bill paid in installments shouldn't push renewal forward once
+      // per installment) + lift freeze
       final memberRow = await client
           .from('members')
           .select('next_payment_date, status, billing_interval_months')
@@ -746,7 +801,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       if (memberRow != null) {
         final updates = <String, dynamic>{};
         final npd = memberRow['next_payment_date'] as String?;
-        if (npd != null) {
+        if (isFullyPaid && npd != null) {
           final advanced = advancePaymentDate(
             npd,
             months: (memberRow['billing_interval_months'] as int?) ?? 1,
@@ -758,6 +813,8 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
           await client.from('members').update(updates).eq('id', widget.memberId);
         }
       }
+
+      await LocalPaymentGuard.record(widget.memberId, amount);
 
       if (mounted) {
         Navigator.pop(context, true);
@@ -845,6 +902,8 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                 style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
               ),
             ],
+            const SizedBox(height: 4),
+            Text(partialPaymentHint, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
             const SizedBox(height: 16),
             const Text(
               'Payment method',

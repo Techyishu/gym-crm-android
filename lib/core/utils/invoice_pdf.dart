@@ -35,6 +35,12 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> inv) async {
   final description    = ((inv['description'] as String?)?.isNotEmpty == true)
       ? inv['description'] as String
       : 'Membership fee';
+  final payments = (inv['payments'] as List?) ?? const [];
+  final paidSoFar = payments
+      .where((p) => (p as Map)['status'] == 'succeeded')
+      .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+  final balanceDue = (amount - paidSoFar).clamp(0, amount);
+  final isPartial = paidSoFar > 0 && balanceDue > 0;
 
   final invNum   = invoiceNumber(inv['id'] as String, inv['created_at'] as String);
   final issueDate = formatDateFromString(inv['created_at'] as String?);
@@ -179,14 +185,29 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> inv) async {
             pw.Divider(color: PdfColors.grey300),
           ],
 
+          // ── Paid so far row (only when a partial payment was made) ─────
+          if (isPartial) ...[
+            pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(vertical: 8),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('PAID SO FAR', style: pw.TextStyle(font: regular, fontSize: 10, color: PdfColors.green700)),
+                  pw.Text(formatCurrency(paidSoFar), style: pw.TextStyle(font: bold, fontSize: 13, color: PdfColors.green700)),
+                ],
+              ),
+            ),
+            pw.Divider(color: PdfColors.grey300),
+          ],
+
           // ── Total ─────────────────────────────────────────────────────
           pw.Padding(
             padding: const pw.EdgeInsets.symmetric(vertical: 14),
             child: pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('TOTAL DUE', style: pw.TextStyle(font: regular, fontSize: 10, color: PdfColors.grey600)),
-                pw.Text(formatCurrency(amount), style: pw.TextStyle(font: bold, fontSize: 22)),
+                pw.Text(isPartial ? 'BALANCE DUE' : 'TOTAL DUE', style: pw.TextStyle(font: regular, fontSize: 10, color: PdfColors.grey600)),
+                pw.Text(formatCurrency(isPartial ? balanceDue : amount), style: pw.TextStyle(font: bold, fontSize: 22)),
               ],
             ),
           ),
@@ -247,9 +268,10 @@ pw.Widget _dateCell(
     );
 
 (String, PdfColor) _statusInfo(String status) => switch (status) {
-      'paid'   => ('PAID',    PdfColors.green700),
-      'open'   => ('PENDING', PdfColors.orange700),
-      'failed' => ('FAILED',  PdfColors.red700),
+      'paid'    => ('PAID',    PdfColors.green700),
+      'open'    => ('PENDING', PdfColors.orange700),
+      'partial' => ('PARTIAL', PdfColors.orange700),
+      'failed'  => ('FAILED',  PdfColors.red700),
       'void'   => ('VOID',    PdfColors.grey600),
       _        => ('DRAFT',   PdfColors.grey600),
     };

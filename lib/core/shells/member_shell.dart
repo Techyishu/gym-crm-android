@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../shared/widgets/responsive_content.dart';
 import '../theme/app_theme.dart';
 
 class MemberShell extends StatelessWidget {
@@ -9,7 +10,7 @@ class MemberShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: shell,
+      body: ResponsiveContent(child: shell),
       bottomNavigationBar: _MemberBottomNav(shell: shell),
     );
   }
@@ -21,7 +22,7 @@ class _MemberBottomNav extends StatelessWidget {
 
   static const _tabs = [
     _Tab(icon: Icons.home_outlined, activeIcon: Icons.home, label: 'Home', index: 0),
-    _Tab(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today, label: 'Bookings', index: 1),
+    _Tab(icon: Icons.qr_code_outlined, activeIcon: Icons.qr_code_scanner, label: 'Check-in', index: 1, route: '/portal/qr'),
     _Tab(icon: Icons.receipt_outlined, activeIcon: Icons.receipt, label: 'Billing', index: 2),
     _Tab(icon: Icons.fitness_center_outlined, activeIcon: Icons.fitness_center, label: 'Workout', index: 3),
     _Tab(icon: Icons.restaurant_menu_outlined, activeIcon: Icons.restaurant_menu, label: 'Diet', index: 4),
@@ -47,7 +48,9 @@ class _MemberBottomNav extends StatelessWidget {
               activeIcon: tab.activeIcon,
               label: tab.label,
               active: active,
-              onTap: () => shell.goBranch(tab.index, initialLocation: tab.index == shell.currentIndex),
+              onTap: () => tab.route != null
+                  ? context.push(tab.route!)
+                  : shell.goBranch(tab.index, initialLocation: tab.index == shell.currentIndex),
             );
           }).toList(),
         ),
@@ -106,5 +109,9 @@ class _Tab {
   final IconData activeIcon;
   final String label;
   final int index;
-  const _Tab({required this.icon, required this.activeIcon, required this.label, required this.index});
+  /// When set, tapping this tab pushes [route] instead of switching shell
+  /// branches — for action-style tabs (like Check-in) that aren't a page
+  /// you stay on.
+  final String? route;
+  const _Tab({required this.icon, required this.activeIcon, required this.label, required this.index, this.route});
 }

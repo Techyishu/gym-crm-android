@@ -5,7 +5,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import 'workout_plan_sheet.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 // All workout plans in the gym, grouped by member.
 final _gymWorkoutPlansProvider =
@@ -46,7 +48,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
     if (selected == null) {
       final members = await ref.read(_gymMembersProvider.future);
       if (!mounted) return;
-      selected = await showModalBottomSheet<Map<String, dynamic>>(
+      selected = await showAdaptiveSheet<Map<String, dynamic>>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
@@ -58,7 +60,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
     final memberId = selected['id'] as String;
     final memberName = '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
 
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -74,7 +76,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: SafeArea(
+      body: ResponsiveContent(child: SafeArea(
         child: Column(
           children: [
             Padding(
@@ -145,7 +147,7 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -293,7 +295,7 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
   }
 
   Future<void> _edit(BuildContext context) async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

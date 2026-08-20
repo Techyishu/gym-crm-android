@@ -293,8 +293,11 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           ],
 
           // Continue with Google — hidden on iOS (Apple guideline 4.8
-          // would then require Sign in with Apple too). Google signups finish
-          // gym creation on the /gym-setup screen (they never fill this form).
+          // would then require Sign in with Apple too). Shown on web despite
+          // a known Safari-only OAuth bug — Google-only accounts need this
+          // to reach the web dashboard; fix needs a server-side callback.
+          // Google signups finish gym creation on the /gym-setup screen
+          // (they never fill this form).
           if (!isIOS) ...[
             AuthGoogleButton(
               loading: _googleLoading,

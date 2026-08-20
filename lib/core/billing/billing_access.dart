@@ -39,18 +39,25 @@ int? trialDaysRemaining(Map<String, dynamic>? gym) {
   if (trialEndsAt == null) return null;
   final end = DateTime.tryParse(trialEndsAt)?.toUtc();
   if (end == null) return null;
-  final diff = end.difference(DateTime.now().toUtc()).inDays;
-  return diff > 0 ? diff : null;
+  final diff = end.difference(DateTime.now().toUtc());
+  if (diff.isNegative) return null;
+  return (diff.inHours / 24).ceil();
 }
 
 /// Days remaining before `plan_expires_at`/`trial_ends_at` (whichever is set),
-/// or null if there's no expiry to warn about. Can be negative (already expired
-/// but still within some grace window) — callers decide the cutoff.
+/// or null if there's no expiry to warn about. Negative means already expired
+/// (magnitude not meaningful — callers only check the sign).
+///
+/// Uses ceil() rather than plain `.inDays`: a trial with e.g. 23h left is
+/// still "1 day left" to the user, not "0 days" (which reads as "ends today"
+/// the instant any time passes after signup on a 24h trial).
 int? planExpiryDaysRemaining(Map<String, dynamic>? gym) {
   if (gym == null) return null;
   final expiryStr = gym['plan_expires_at'] as String? ?? gym['trial_ends_at'] as String?;
   if (expiryStr == null) return null;
   final expiry = DateTime.tryParse(expiryStr)?.toUtc();
   if (expiry == null) return null;
-  return expiry.difference(DateTime.now().toUtc()).inDays;
+  final diff = expiry.difference(DateTime.now().toUtc());
+  if (diff.isNegative) return -1;
+  return (diff.inHours / 24).ceil();
 }

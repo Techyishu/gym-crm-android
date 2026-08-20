@@ -31,4 +31,5 @@ class RoleAccess {
       role == 'owner' || role == 'manager' || role == 'trainer' || role == 'staff';
   static bool canSeeExpenses(String? role) => _isManagerOrAbove(role);
   static bool canDeleteExpense(String? role) => role == 'owner';
+  static bool canDeleteInvoice(String? role) => role == 'owner';
 }

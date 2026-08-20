@@ -48,3 +48,5 @@ app.*.map.json
 .env
 android/key.properties
 *.jks
+.vercel
+.env*.local

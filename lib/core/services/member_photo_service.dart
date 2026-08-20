@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,10 +15,19 @@ class MemberPhotoService {
 
   /// Builds the Worker URL for a stored avatar value. Accepts plain paths
   /// ('gymId/file.png') and legacy Supabase public/signed URLs.
+  ///
+  /// On web, the token rides as a `?token=` query param instead of (only) an
+  /// Authorization header — CachedNetworkImage renders via a native <img>
+  /// tag on web, which can't carry custom headers at all, so a header-only
+  /// auth request there always 401s. The Worker already accepts either.
   static String? photoUrl(String? stored) {
     final path = pathFrom(stored);
     if (path == null) return null;
-    return '$_workerBase/$path';
+    if (!kIsWeb) return '$_workerBase/$path';
+
+    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    if (token == null) return '$_workerBase/$path';
+    return '$_workerBase/$path?token=${Uri.encodeQueryComponent(token)}';
   }
 
   /// Auth header required by the Worker on every request.

@@ -14,6 +14,70 @@ import '../../core/widgets/plan_expiry_banner.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/staff/notifications/notifications_screen.dart';
 import '../../features/staff/paywall/paywall_screen.dart';
+import '../../shared/widgets/responsive_content.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+
+const _kMoreItems = [
+  _MoreItem(
+    icon: Icons.person_add_outlined,
+    label: 'Leads',
+    route: '/staff/leads',
+  ),
+  _MoreItem(
+    icon: Icons.calendar_today_outlined,
+    label: 'Batches',
+    route: '/staff/classes',
+  ),
+  _MoreItem(
+    icon: Icons.fitness_center_outlined,
+    label: 'Workout plans',
+    route: '/staff/workout-plans',
+  ),
+  _MoreItem(
+    icon: Icons.restaurant_menu_outlined,
+    label: 'Diet plans',
+    route: '/staff/diet-plans',
+  ),
+  _MoreItem(
+    icon: Icons.notifications_outlined,
+    label: 'Reminders',
+    route: '/staff/reminders',
+  ),
+  _MoreItem(
+    icon: Icons.manage_accounts_outlined,
+    label: 'Staff & roles',
+    route: '/staff/staff',
+  ),
+  _MoreItem(
+    icon: Icons.bar_chart_outlined,
+    label: 'Reports',
+    route: '/staff/reports',
+  ),
+  _MoreItem(
+    icon: Icons.receipt_long_outlined,
+    label: 'Expenses',
+    route: '/staff/expenses',
+    newBadgeKey: 'feature_expenses',
+  ),
+  _MoreItem(
+    icon: Icons.settings_outlined,
+    label: 'Settings',
+    route: '/staff/settings',
+  ),
+];
+
+List<_MoreItem> _visibleMoreItemsFor(String? role) => _kMoreItems.where((item) {
+  if (item.route == '/staff/classes') return RoleAccess.canSeeBatches(role);
+  if (item.route == '/staff/leads') return RoleAccess.canSeeLeads(role);
+  if (item.route == '/staff/workout-plans') return RoleAccess.canManageWorkoutPlans(role);
+  if (item.route == '/staff/diet-plans') return RoleAccess.canManageDietPlans(role);
+  if (item.route == '/staff/reminders') return RoleAccess.canSeeCommunications(role);
+  if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(role);
+  if (item.route == '/staff/reports') return RoleAccess.canSeeReports(role);
+  if (item.route == '/staff/expenses') return RoleAccess.canSeeExpenses(role);
+  if (item.route == '/staff/settings') return RoleAccess.canSeeSettings(role);
+  return true;
+}).toList();
 
 class StaffShell extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
@@ -84,17 +148,176 @@ class _StaffShellState extends ConsumerState<StaffShell> with WidgetsBindingObse
     void onSignOut() => ref.read(authNotifierProvider.notifier).signOut();
 
     return ShowCaseWidget(
-      builder: (context) => Scaffold(
-        body: Column(
+      builder: (context) {
+        final isWide = ResponsiveContent.isWide(context);
+        final content = Column(
           children: [
             if (gym != null) PlanExpiryBanner(gym: gym),
-            Expanded(child: shell),
+            Expanded(child: ResponsiveContent(child: shell)),
+          ],
+        );
+
+        return Scaffold(
+          body: isWide
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _StaffSideNav(shell: shell, profile: profile, onSignOut: onSignOut),
+                    Expanded(child: content),
+                  ],
+                )
+              : content,
+          bottomNavigationBar: isWide
+              ? null
+              : _StaffBottomNav(shell: shell, profile: profile, onSignOut: onSignOut),
+        );
+      },
+    );
+  }
+}
+
+// ── Side nav (web, wide viewport) ───────────────────────────────────────────
+
+class _StaffSideNav extends StatelessWidget {
+  final StatefulNavigationShell shell;
+  final Map<String, dynamic>? profile;
+  final VoidCallback onSignOut;
+  const _StaffSideNav({required this.shell, required this.profile, required this.onSignOut});
+
+  String? get role => profile?['role'] as String?;
+  bool get _showMoney => RoleAccess.canSeeBilling(role);
+  bool get _showCheckIn => RoleAccess.canCheckIn(role);
+
+  @override
+  Widget build(BuildContext context) {
+    final gym = profile?['gyms'] as Map<String, dynamic>?;
+    final gymName = (gym?['name'] as String?) ?? 'Gym';
+    final moreItems = _visibleMoreItemsFor(role);
+    final moreActive = moreItems.any((m) => GoRouterState.of(context).matchedLocation.startsWith(m.route));
+
+    return Container(
+      width: 240,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(right: BorderSide(color: AppTheme.border)),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text(
+                gymName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _SideNavItem(
+                    icon: Icons.home_outlined,
+                    activeIcon: Icons.home,
+                    label: 'Home',
+                    active: shell.currentIndex == 0 && !moreActive,
+                    onTap: () => shell.goBranch(0, initialLocation: shell.currentIndex == 0),
+                  ),
+                  _SideNavItem(
+                    icon: Icons.people_outline,
+                    activeIcon: Icons.people,
+                    label: 'Members',
+                    active: shell.currentIndex == 1 && !moreActive,
+                    onTap: () => shell.goBranch(1, initialLocation: shell.currentIndex == 1),
+                  ),
+                  if (_showCheckIn)
+                    _SideNavItem(
+                      icon: Icons.qr_code_scanner,
+                      activeIcon: Icons.qr_code_scanner,
+                      label: 'Check-in',
+                      active: shell.currentIndex == 3 && !moreActive,
+                      onTap: () => shell.goBranch(3, initialLocation: shell.currentIndex == 3),
+                    ),
+                  if (_showMoney)
+                    _SideNavItem(
+                      icon: Icons.credit_card_outlined,
+                      activeIcon: Icons.credit_card,
+                      label: 'Billing',
+                      active: shell.currentIndex == 2 && !moreActive,
+                      onTap: () => shell.goBranch(2, initialLocation: shell.currentIndex == 2),
+                    ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 12, 20, 8),
+                    child: Divider(height: 1, color: AppTheme.border),
+                  ),
+                  for (final item in moreItems)
+                    _SideNavItem(
+                      icon: item.icon,
+                      activeIcon: item.icon,
+                      label: item.label,
+                      active: GoRouterState.of(context).matchedLocation.startsWith(item.route),
+                      onTap: () => context.push(item.route),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: _SideNavItem(
+                icon: Icons.logout,
+                activeIcon: Icons.logout,
+                label: 'Sign out',
+                active: false,
+                onTap: onSignOut,
+              ),
+            ),
           ],
         ),
-        bottomNavigationBar: _StaffBottomNav(
-          shell: shell,
-          profile: profile,
-          onSignOut: onSignOut,
+      ),
+    );
+  }
+}
+
+class _SideNavItem extends StatelessWidget {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  const _SideNavItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: active ? AppTheme.accentSoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(active ? activeIcon : icon, size: 19, color: active ? AppTheme.accent : AppTheme.inkSoft),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                color: active ? AppTheme.accent : AppTheme.ink,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -149,79 +372,10 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
   );
   static const int _checkInIndex = 3;
 
-  static const _allMoreItems = [
-    _MoreItem(
-      icon: Icons.person_add_outlined,
-      label: 'Leads',
-      route: '/staff/leads',
-    ),
-    _MoreItem(
-      icon: Icons.calendar_today_outlined,
-      label: 'Batches',
-      route: '/staff/classes',
-    ),
-    _MoreItem(
-      icon: Icons.fitness_center_outlined,
-      label: 'Workout plans',
-      route: '/staff/workout-plans',
-    ),
-    _MoreItem(
-      icon: Icons.restaurant_menu_outlined,
-      label: 'Diet plans',
-      route: '/staff/diet-plans',
-    ),
-    _MoreItem(
-      icon: Icons.notifications_outlined,
-      label: 'Reminders',
-      route: '/staff/reminders',
-    ),
-    _MoreItem(
-      icon: Icons.manage_accounts_outlined,
-      label: 'Staff & roles',
-      route: '/staff/staff',
-    ),
-    _MoreItem(
-      icon: Icons.bar_chart_outlined,
-      label: 'Reports',
-      route: '/staff/reports',
-    ),
-    _MoreItem(
-      icon: Icons.receipt_long_outlined,
-      label: 'Expenses',
-      route: '/staff/expenses',
-      newBadgeKey: 'feature_expenses',
-    ),
-    _MoreItem(
-      icon: Icons.settings_outlined,
-      label: 'Settings',
-      route: '/staff/settings',
-    ),
-  ];
-
   bool get _showMoney => RoleAccess.canSeeBilling(widget.role);
   bool get _showCheckIn => RoleAccess.canCheckIn(widget.role);
 
-  List<_MoreItem> get _visibleMoreItems => _allMoreItems.where((item) {
-    if (item.route == '/staff/classes')
-      return RoleAccess.canSeeBatches(widget.role);
-    if (item.route == '/staff/leads')
-      return RoleAccess.canSeeLeads(widget.role);
-    if (item.route == '/staff/workout-plans')
-      return RoleAccess.canManageWorkoutPlans(widget.role);
-    if (item.route == '/staff/diet-plans')
-      return RoleAccess.canManageDietPlans(widget.role);
-    if (item.route == '/staff/reminders')
-      return RoleAccess.canSeeCommunications(widget.role);
-    if (item.route == '/staff/staff')
-      return RoleAccess.canSeeStaff(widget.role);
-    if (item.route == '/staff/reports')
-      return RoleAccess.canSeeReports(widget.role);
-    if (item.route == '/staff/expenses')
-      return RoleAccess.canSeeExpenses(widget.role);
-    if (item.route == '/staff/settings')
-      return RoleAccess.canSeeSettings(widget.role);
-    return true;
-  }).toList();
+  List<_MoreItem> get _visibleMoreItems => _visibleMoreItemsFor(widget.role);
 
   // Shows the 3-step spotlight tour once per user, the first time this nav
   // bar builds after the coach-mark data has loaded. Marks steps as seen
@@ -294,7 +448,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
   void _openMoreSheet(BuildContext context) {
     final currentRoute = GoRouterState.of(context).matchedLocation;
     final items = _visibleMoreItems;
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,

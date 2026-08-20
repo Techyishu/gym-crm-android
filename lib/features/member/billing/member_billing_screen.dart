@@ -14,7 +14,7 @@ final _memberInvoicesProvider = FutureProvider<List<Map<String, dynamic>>>((ref)
 
   return await client
       .from('invoices')
-      .select()
+      .select('*, payments(amount, status)')
       .eq('member_id', member['id'])
       .order('created_at', ascending: false);
 });
@@ -66,7 +66,14 @@ class MemberBillingScreen extends ConsumerWidget {
 
   Widget _buildSummary(List<Map<String, dynamic>> invoices) {
     final totalPaid = invoices.where((i) => i['status'] == 'paid').fold<double>(0, (s, i) => s + (i['amount'] as num).toDouble());
-    final totalDue = invoices.where((i) => i['status'] == 'open').fold<double>(0, (s, i) => s + (i['amount'] as num).toDouble());
+    final totalDue = invoices.where((i) => i['status'] == 'open' || i['status'] == 'partial').fold<double>(0, (s, i) {
+      final amount = (i['amount'] as num).toDouble();
+      final payments = (i['payments'] as List?) ?? [];
+      final paid = payments
+          .where((p) => (p as Map)['status'] == 'succeeded')
+          .fold<double>(0, (sum, p) => sum + ((p as Map)['amount'] as num).toDouble());
+      return s + (amount - paid).clamp(0, amount);
+    });
 
     return Container(
       color: AppTheme.surface,
@@ -119,6 +126,7 @@ class _InvoiceItem extends StatelessWidget {
     final status = invoice['status'] as String;
     final statusColors = {
       'open': (const Color(0xFFF4E8CD), AppTheme.warning),
+      'partial': (const Color(0xFFF4E8CD), AppTheme.warning),
       'paid': (AppTheme.primaryLight, AppTheme.primary),
       'failed': (const Color(0xFFF8DFD7), AppTheme.error),
       'void': (const Color(0xFFE9E6DD), AppTheme.textSecondary),

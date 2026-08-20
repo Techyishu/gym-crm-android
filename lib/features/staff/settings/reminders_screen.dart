@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/coachmark_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // pack key → (Dodo checkout key [Android], App Store product ID [iOS]).
@@ -64,7 +65,13 @@ const _kWhatsAppTemplates = [
   ),
 ];
 
-int _planQuota(String? plan) => plan == 'pro' ? 100 : 0;
+int _planQuota(Map<String, dynamic> gym) {
+  if (gym['legacy_pricing'] == true) return 100;
+  final plan = gym['plan'] as String?;
+  if (plan == 'pro') return 300;
+  if (plan == 'elite') return 1500;
+  return 0;
+}
 
 final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>(
   (ref) async {
@@ -97,7 +104,7 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
         title: const Text('Reminders'),
         leading: const BackButton(),
       ),
-      body: gymAsync.when(
+      body: ResponsiveContent(child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (gym) {
@@ -179,7 +186,7 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
             ],
           );
         },
-      ),
+      )),
     );
   }
 }
@@ -788,7 +795,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
   Widget build(BuildContext context) {
     final enabled = widget.gym['whatsapp_reminder_enabled'] as bool? ?? false;
     final days = _currentDays();
-    final quota = _planQuota(widget.gym['plan'] as String?);
+    final quota = _planQuota(widget.gym);
     final quotaUsed = widget.gym['whatsapp_monthly_quota_used'] as int? ?? 0;
     final credits = widget.gym['whatsapp_credits'] as int? ?? 0;
     final templateId = _currentTemplate();

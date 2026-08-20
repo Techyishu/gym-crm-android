@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 
 // ─── Screen ────────────────────────────────────────────────────────────────────
 class CommunicationsScreen extends StatelessWidget {
@@ -14,10 +15,10 @@ class CommunicationsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('Messages'), leading: const BackButton()),
-      body: const SingleChildScrollView(
+      body: ResponsiveContent(child: const SingleChildScrollView(
         padding: EdgeInsets.all(16),
         child: _WaDueRemindersCard(),
-      ),
+      )),
     );
   }
 }

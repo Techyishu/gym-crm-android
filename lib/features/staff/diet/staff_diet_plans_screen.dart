@@ -5,7 +5,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import 'diet_plan_sheet.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 final _gymDietPlansProvider =
     FutureProvider<List<Map<String, dynamic>>>((ref) async {
@@ -45,7 +47,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
     if (selected == null) {
       final members = await ref.read(_gymMembersForDietProvider.future);
       if (!mounted) return;
-      selected = await showModalBottomSheet<Map<String, dynamic>>(
+      selected = await showAdaptiveSheet<Map<String, dynamic>>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
@@ -57,7 +59,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
     final memberId = selected['id'] as String;
     final memberName = '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
 
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -73,7 +75,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: SafeArea(
+      body: ResponsiveContent(child: SafeArea(
         child: Column(
           children: [
             Padding(
@@ -144,7 +146,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -305,7 +307,7 @@ class _StaffDietPlanCardState extends State<_StaffDietPlanCard> {
   }
 
   Future<void> _edit(BuildContext context) async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

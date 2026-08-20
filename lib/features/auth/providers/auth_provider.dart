@@ -1,11 +1,28 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/services/activity_log_service.dart';
 import '../../../core/utils/formatters.dart';
 
 final supabaseProvider = Provider<SupabaseClient>((ref) => Supabase.instance.client);
+
+// --dart-define=WEB_APP_BASE_URL=http://localhost:3000 to test Google
+// sign-in against a local gym-crm dev server instead of production.
+const _webAppBaseUrl = String.fromEnvironment(
+  'WEB_APP_BASE_URL',
+  defaultValue: 'https://gymcrm.in',
+);
+
+/// Canonical synthetic identity for phone-only members — must match the
+/// `verify-phone-otp` edge function's member-signup path, or login won't
+/// resolve to the account created there.
+String memberSyntheticEmail(String phone) {
+  final digits = phone.replaceAll(RegExp(r'\D'), '');
+  final last10 = digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+  return '$last10@member.gymcrm.internal';
+}
 
 /// True only while [AuthNotifier.signUp]'s create → sign-out → send-OTP handshake
 /// is in flight. Email confirmation is OFF, so `auth.signUp()` instantly creates
@@ -55,7 +72,7 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
       .from('profiles')
       .select(
         'id, role, gym_id, first_name, last_name, phone, '
-        'gyms(id, name, slug, plan, settings, razorpay_key_id, '
+        'gyms(id, name, slug, member_code, plan, settings, razorpay_key_id, '
         'registration_enabled, registration_token, '
         'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing)',
       )
@@ -201,6 +218,23 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
   bool get hasSession => _client.auth.currentSession != null;
 
   Future<String?> signUpWithGoogle() async {
+    if (kIsWeb) {
+      // Flutter web can't safely do the OAuth code exchange itself — Safari's
+      // Intelligent Tracking Prevention breaks it after the cross-site
+      // Google → Supabase → app redirect chain. Hand the whole flow to
+      // gym-crm's server instead: /auth/dashboard-login starts it, exchanges
+      // the code server-side in /auth/dashboard-callback, and redirects back
+      // here with the session (see main.dart's _handleWebGoogleAuthHandoff).
+      try {
+        await launchUrl(
+          Uri.parse('$_webAppBaseUrl/auth/dashboard-login'),
+          webOnlyWindowName: '_self',
+        );
+        return null;
+      } catch (e) {
+        return 'Could not start Google sign-in. Please try again.';
+      }
+    }
     try {
       await _client.auth.signInWithOAuth(
         OAuthProvider.google,
@@ -289,15 +323,22 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
   /// Supabase auth user, and returns a magiclink token — which we redeem here
   /// via the same verifyOTP() call the email flow already uses, so this ends
   /// up creating a real session exactly like `verifyEmailOtp` does.
+  /// [gymId], when passed, switches the edge function to member self-serve
+  /// signup: phone must match an existing `members` row for that gym.
   Future<String?> verifyPhoneOtpToken({
     required String phone,
     required String msg91AccessToken,
+    String? gymId,
   }) async {
     state = const AsyncValue.loading();
     try {
       final res = await _client.functions.invoke(
         'verify-phone-otp',
-        body: {'accessToken': msg91AccessToken, 'phone': phone},
+        body: {
+          'accessToken': msg91AccessToken,
+          'phone': phone,
+          if (gymId != null) 'gymId': gymId,
+        },
       );
       final data = res.data as Map<String, dynamic>?;
       final email = data?['email'] as String?;
@@ -350,6 +391,21 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     } catch (e) {
       debugPrint('[GymCRM] resetPassword error: $e');
       return 'Could not send reset email. Please try again.';
+    }
+  }
+
+  /// Sets a password on the current session. Used right after member
+  /// self-serve OTP signup — the account is created with no password, so
+  /// this is required before the member can log in again without OTP.
+  Future<String?> setPassword(String password) async {
+    try {
+      await _client.auth.updateUser(UserAttributes(password: password));
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      debugPrint('[GymCRM] setPassword error: $e');
+      return 'Could not set password. Please try again.';
     }
   }
 

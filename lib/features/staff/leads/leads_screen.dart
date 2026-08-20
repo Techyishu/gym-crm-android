@@ -7,6 +7,8 @@ import '../../../core/utils/formatters.dart';
 import '../../../shared/models/lead.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../shared/widgets/responsive_content.dart';
 
 Future<void> _dialPhone(String phone) async {
   final uri = Uri.parse('tel:$phone');
@@ -92,7 +94,7 @@ class LeadsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: leads.when(
+      body: ResponsiveContent(child: leads.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (list) {
@@ -169,12 +171,12 @@ class LeadsScreen extends ConsumerWidget {
             ],
           );
         },
-      ),
+      )),
     );
   }
 
   void _showAddSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -445,7 +447,7 @@ class _LeadCard extends StatelessWidget {
   }
 
   void _showStatusPicker(BuildContext context) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

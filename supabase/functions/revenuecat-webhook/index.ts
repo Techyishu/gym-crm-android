@@ -137,6 +137,9 @@ Deno.serve(async (req: Request) => {
         plan: 'pro',
         plan_expires_at: expiresAt,
         apple_subscription_id: app_user_id, // ties this gym to the RC user
+        // Otherwise planExpiryDaysRemaining() falls back to this stale date
+        // and shows a "trial ending" nag to an already-paying gym.
+        trial_ends_at: null,
       })
       .eq('id', gymId)
 

@@ -16,7 +16,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart' as platform_info;
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 /// Public base URL for member self-registration links (matches the web app).
 const _registrationBaseUrl = 'https://gymcrm.in';
@@ -55,7 +57,7 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('Settings'),
         leading: const BackButton(),
       ),
-      body: SingleChildScrollView(
+      body: ResponsiveContent(child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -80,7 +82,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.person_outline,
                 label: 'Edit Profile',
-                onTap: () => showModalBottomSheet(
+                onTap: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -93,7 +95,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.lock_outline,
                 label: 'Change Password',
-                onTap: () => showModalBottomSheet(
+                onTap: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -110,7 +112,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.business_outlined,
                 label: 'Gym Details',
-                onTap: () => showModalBottomSheet(
+                onTap: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -127,7 +129,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.link,
                 label: 'Registration Link',
-                onTap: () => showModalBottomSheet(
+                onTap: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -138,7 +140,7 @@ class SettingsScreen extends ConsumerWidget {
               // _SettingsRow(
               //   icon: Icons.payments_outlined,
               //   label: 'Payments (Razorpay)',
-              //   onTap: () => showModalBottomSheet(
+              //   onTap: () => showAdaptiveSheet(
               //     context: context,
               //     isScrollControlled: true,
               //     useSafeArea: true,
@@ -149,7 +151,7 @@ class SettingsScreen extends ConsumerWidget {
               // _SettingsRow(
               //   icon: Icons.fingerprint,
               //   label: 'Biometric Device',
-              //   onTap: () => showModalBottomSheet(
+              //   onTap: () => showAdaptiveSheet(
               //     context: context,
               //     isScrollControlled: true,
               //     useSafeArea: true,
@@ -183,7 +185,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsRow(
                 icon: Icons.info_outline,
                 label: 'Help & Support',
-                onTap: () => showModalBottomSheet(
+                onTap: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -267,7 +269,7 @@ class SettingsScreen extends ConsumerWidget {
             const SizedBox(height: 40),
           ],
         ),
-      ),
+      )),
     );
   }
 
@@ -1297,7 +1299,7 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: () => showModalBottomSheet(
+                    onPressed: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,

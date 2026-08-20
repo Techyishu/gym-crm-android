@@ -5,14 +5,19 @@ import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/access/role_access.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/invoice_pdf.dart';
 import '../../../shared/models/invoice.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../members/upcoming_payments_screen.dart' show QuickCollectSheet;
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
@@ -74,9 +79,9 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
         .order('created_at', ascending: false),
     client
         .from('invoices')
-        .select('id, amount, due_at, member_id, members(first_name, last_name, email, phone)')
+        .select('id, amount, due_at, member_id, members(first_name, last_name, email, phone), payments(amount, status)')
         .eq('gym_id', gymId)
-        .eq('status', 'open')
+        .inFilter('status', ['open', 'partial'])
         .order('due_at'),
     // Wider-range, lightweight payments for the today/week/month sums.
     client
@@ -98,6 +103,9 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
   ]);
 
   final payments = (results[0] as List).cast<Map<String, dynamic>>();
+  // Each due row still carries its true invoice 'amount' (needed intact when
+  // Collect opens _RecordPaymentSheet) plus the joined 'payments' rows —
+  // _TxnItem.due() computes the remaining balance for display separately.
   final dues = (results[1] as List).cast<Map<String, dynamic>>();
   final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
   final renewingMembers = (results[3] as List).cast<Map<String, dynamic>>();
@@ -127,7 +135,7 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     for (final m in projected) _TxnItem.projected(m),
   ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
 
-  final invoicedTotal = dues.fold<double>(0, (s, d) => s + ((d['amount'] as num?)?.toDouble() ?? 0));
+  final invoicedTotal = dues.fold<double>(0, (s, d) => s + _remainingDue(d));
   final projectedTotal = projected.fold<double>(0, (s, m) => s + _activePlanPrice(m));
   final overdueCount = dues.where((d) {
         final due = DateTime.tryParse(d['due_at'] as String? ?? '');
@@ -156,6 +164,17 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     items: items,
   );
 });
+
+// Remaining balance on an invoice row (as fetched with a joined 'payments'
+// list) — invoice amount minus whatever's already been collected against it.
+double _remainingDue(Map<String, dynamic> invoice) {
+  final amount = (invoice['amount'] as num?)?.toDouble() ?? 0;
+  final invPayments = (invoice['payments'] as List?) ?? const [];
+  final paid = invPayments
+      .where((p) => (p as Map)['status'] == 'succeeded')
+      .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+  return (amount - paid).clamp(0, amount);
+}
 
 // Active plan price minus any per-member discount — same rule QuickCollectSheet
 // uses to autofill the amount when it creates the invoice on Collect.
@@ -254,7 +273,7 @@ class _TxnItem {
       invoiceId: inv['id'] as String? ?? '',
       memberId: inv['member_id'] as String?,
       name: member != null ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim() : 'Unknown',
-      amount: (inv['amount'] as num?)?.toDouble() ?? 0,
+      amount: _remainingDue(inv),
       subtitle: s.subtitle,
       color: s.color,
       sortKey: due ?? DateTime.now(),
@@ -294,121 +313,214 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   @override
   Widget build(BuildContext context) {
     final feed = ref.watch(_billingFeedProvider);
+    final isWide = ResponsiveContent.isWide(context);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: RefreshIndicator(
-          color: AppTheme.accent,
-          onRefresh: () async => ref.invalidate(_billingFeedProvider),
-          child: CustomScrollView(
-            slivers: [
-              const SliverPadding(
-                padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
-                sliver: SliverToBoxAdapter(
-                  child: Text('Billing',
-                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                sliver: SliverToBoxAdapter(
-                  child: feed.when(
-                    loading: () => const _BalanceCardSkeleton(),
-                    error: (_, __) => const _BalanceCardSkeleton(),
-                    data: (data) => _BalanceCard(
-                      dueTotal: data.dueTotal,
-                      dueMembers: data.dueMembers,
-                      overdueCount: data.overdueCount,
-                      collectedMonth: data.collected[BillingPeriod.month] ?? 0,
-                      growthPct: data.growthPct[BillingPeriod.month],
-                      dueCount: data.dueCount,
-                      onRecord: () => setState(() => _filter = 'due'),
-                      onInvoice: () => _showCreateInvoiceSheet(context),
-                      onNewPlan: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const _PlansTab()),
-                      ),
-                      onDue: () => setState(() => _filter = 'due'),
-                    ),
-                  ),
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('All transactions',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          PillChip(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
-                          const SizedBox(width: 8),
-                          PillChip(label: 'Due', selected: _filter == 'due', onTap: () => setState(() => _filter = 'due')),
-                          const SizedBox(width: 8),
-                          PillChip(label: 'Collected', selected: _filter == 'collected', onTap: () => setState(() => _filter = 'collected')),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              feed.when(
-                loading: () => SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  sliver: SliverList.builder(
-                    itemCount: 6,
-                    itemBuilder: (_, __) => Shimmer.fromColors(
-                      baseColor: const Color(0xFFE8E8E8),
-                      highlightColor: const Color(0xFFF5F5F5),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        height: 68,
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                  ),
-                ),
-                error: (_, __) => const SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(child: Text('Could not load transactions. Pull to retry.', style: TextStyle(color: AppTheme.inkSoft))),
-                  ),
-                ),
-                data: (data) {
-                  final items = data.items.where((t) {
-                    if (_filter == 'due') return t.isDue;
-                    if (_filter == 'collected') return !t.isDue;
-                    return true;
-                  }).toList();
-                  if (items.isEmpty) {
-                    return const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 40),
-                        child: Center(child: Text('No transactions', style: TextStyle(color: AppTheme.inkHint, fontSize: 14))),
-                      ),
-                    );
-                  }
-                  return SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    sliver: SliverList.builder(
-                      itemCount: items.length,
-                      itemBuilder: (_, i) => _TxnCard(
-                        item: items[i],
-                        onTap: () => _openInvoice(context, items[i]),
-                        onCollect: () => _collect(context, items[i]),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
+        child: isWide ? _buildWide(context, feed) : _buildNarrow(context, feed),
       ),
     );
+  }
+
+  // Wide screens: balance card + filters pinned on the left, transaction
+  // list scrolls independently on the right — two columns instead of one
+  // long vertical stack.
+  Widget _buildWide(BuildContext context, AsyncValue<_BillingFeed> feed) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 340,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Billing',
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+                const SizedBox(height: 12),
+                feed.when(
+                  loading: () => const _BalanceCardSkeleton(),
+                  error: (_, __) => const _BalanceCardSkeleton(),
+                  data: (data) => _BalanceCard(
+                    dueTotal: data.dueTotal,
+                    dueMembers: data.dueMembers,
+                    overdueCount: data.overdueCount,
+                    collectedMonth: data.collected[BillingPeriod.month] ?? 0,
+                    growthPct: data.growthPct[BillingPeriod.month],
+                    dueCount: data.dueCount,
+                    onRecord: () => setState(() => _filter = 'due'),
+                    onInvoice: () => _showCreateInvoiceSheet(context),
+                    onNewPlan: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const _PlansTab()),
+                    ),
+                    onDue: () => setState(() => _filter = 'due'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            color: AppTheme.accent,
+            onRefresh: () async => ref.invalidate(_billingFeedProvider),
+            child: CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(0, 10, 16, 4),
+                  sliver: SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('All transactions',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            PillChip(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+                            const SizedBox(width: 8),
+                            PillChip(label: 'Due', selected: _filter == 'due', onTap: () => setState(() => _filter = 'due')),
+                            const SizedBox(width: 8),
+                            PillChip(label: 'Collected', selected: _filter == 'collected', onTap: () => setState(() => _filter = 'collected')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                ..._transactionSlivers(context, feed, leftPad: 0),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNarrow(BuildContext context, AsyncValue<_BillingFeed> feed) {
+    return RefreshIndicator(
+      color: AppTheme.accent,
+      onRefresh: () async => ref.invalidate(_billingFeedProvider),
+      child: CustomScrollView(
+        slivers: [
+          const SliverPadding(
+            padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
+            sliver: SliverToBoxAdapter(
+              child: Text('Billing',
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            sliver: SliverToBoxAdapter(
+              child: feed.when(
+                loading: () => const _BalanceCardSkeleton(),
+                error: (_, __) => const _BalanceCardSkeleton(),
+                data: (data) => _BalanceCard(
+                  dueTotal: data.dueTotal,
+                  dueMembers: data.dueMembers,
+                  overdueCount: data.overdueCount,
+                  collectedMonth: data.collected[BillingPeriod.month] ?? 0,
+                  growthPct: data.growthPct[BillingPeriod.month],
+                  dueCount: data.dueCount,
+                  onRecord: () => setState(() => _filter = 'due'),
+                  onInvoice: () => _showCreateInvoiceSheet(context),
+                  onNewPlan: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const _PlansTab()),
+                  ),
+                  onDue: () => setState(() => _filter = 'due'),
+                ),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('All transactions',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      PillChip(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+                      const SizedBox(width: 8),
+                      PillChip(label: 'Due', selected: _filter == 'due', onTap: () => setState(() => _filter = 'due')),
+                      const SizedBox(width: 8),
+                      PillChip(label: 'Collected', selected: _filter == 'collected', onTap: () => setState(() => _filter = 'collected')),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          ..._transactionSlivers(context, feed, leftPad: 16),
+        ],
+      ),
+    );
+  }
+
+  // Shared between narrow (single CustomScrollView) and wide (right column's
+  // own CustomScrollView) layouts — same data, same _TxnCard rendering.
+  List<Widget> _transactionSlivers(BuildContext context, AsyncValue<_BillingFeed> feed, {required double leftPad}) {
+    return [
+      feed.when(
+        loading: () => SliverPadding(
+          padding: EdgeInsets.fromLTRB(leftPad, 4, 16, 24),
+          sliver: SliverList.builder(
+            itemCount: 6,
+            itemBuilder: (_, __) => Shimmer.fromColors(
+              baseColor: const Color(0xFFE8E8E8),
+              highlightColor: const Color(0xFFF5F5F5),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                height: 68,
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+              ),
+            ),
+          ),
+        ),
+        error: (_, __) => const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 40),
+            child: Center(child: Text('Could not load transactions. Pull to retry.', style: TextStyle(color: AppTheme.inkSoft))),
+          ),
+        ),
+        data: (data) {
+          final items = data.items.where((t) {
+            if (_filter == 'due') return t.isDue;
+            if (_filter == 'collected') return !t.isDue;
+            return true;
+          }).toList();
+          if (items.isEmpty) {
+            return const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Center(child: Text('No transactions', style: TextStyle(color: AppTheme.inkHint, fontSize: 14))),
+              ),
+            );
+          }
+          final canDelete = RoleAccess.canDeleteInvoice(ref.watch(staffRoleProvider).valueOrNull);
+          return SliverPadding(
+            padding: EdgeInsets.fromLTRB(leftPad, 4, 16, 24),
+            sliver: SliverList.builder(
+              itemCount: items.length,
+              itemBuilder: (_, i) => _TxnCard(
+                item: items[i],
+                onTap: () => _openInvoice(context, items[i]),
+                onCollect: () => _collect(context, items[i]),
+                onDelete: canDelete && items[i].invoiceId.isNotEmpty
+                    ? () => _deleteInvoice(context, items[i])
+                    : null,
+              ),
+            ),
+          );
+        },
+      ),
+    ];
   }
 
   void _openInvoice(BuildContext context, _TxnItem item) {
@@ -416,11 +528,24 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     context.push('/invoice/${item.invoiceId}');
   }
 
+  Future<void> _deleteInvoice(BuildContext context, _TxnItem item) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Delete invoice?',
+      body: 'This invoice and its payment records will be permanently deleted. This cannot be undone.',
+      confirmLabel: 'Delete',
+      icon: Icons.delete_outline,
+    );
+    if (ok != true) return;
+    await Supabase.instance.client.from('invoices').delete().eq('id', item.invoiceId);
+    ref.invalidate(_billingFeedProvider);
+  }
+
   void _collect(BuildContext context, _TxnItem item) {
     if (item.needsInvoice) {
       // No invoice exists yet for this renewal — QuickCollectSheet creates
       // one and records the payment in a single step.
-      showModalBottomSheet(
+      showAdaptiveSheet(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
@@ -429,7 +554,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
       return;
     }
     final invoice = Invoice.fromJson(item.raw);
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -438,7 +563,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   }
 
   void _showCreateInvoiceSheet(BuildContext context) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -580,12 +705,14 @@ class _TxnCard extends StatelessWidget {
   final _TxnItem item;
   final VoidCallback onTap;
   final VoidCallback onCollect;
-  const _TxnCard({required this.item, required this.onTap, required this.onCollect});
+  final VoidCallback? onDelete;
+  const _TxnCard({required this.item, required this.onTap, required this.onCollect, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onDelete,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -642,10 +769,12 @@ class _RecordPaymentSheet extends ConsumerStatefulWidget {
 }
 
 class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
+  final _amountCtrl = TextEditingController();
   final _refCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   String _method = 'cash';
   bool _loading = false;
+  double? _due;
 
   static const _methods = [
     ('cash', 'Cash', Icons.payments_outlined),
@@ -655,13 +784,61 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadDue();
+  }
+
+  Future<void> _loadDue() async {
+    final due = await invoiceDue(widget.invoice.id, widget.invoice.amount);
+    if (!mounted) return;
+    setState(() {
+      _due = due;
+      _amountCtrl.text = due.toStringAsFixed(0);
+    });
+  }
+
+  @override
   void dispose() {
+    _amountCtrl.dispose();
     _refCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
+    final inv = widget.invoice;
+    final amount = double.tryParse(_amountCtrl.text.trim());
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      return;
+    }
+
+    final prior = await LocalPaymentGuard.check(inv.memberId);
+    if (prior != null && mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already collected today'),
+          content: Text(
+            '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
+            'from this member today at '
+            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}.\n\n'
+            'Record $currencySymbol${amount.toStringAsFixed(0)} again?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Record anyway')),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
+    if (!mounted) return;
+    final ok = await confirmPartialIfNeeded(context, enteredAmount: amount, dueAmount: _due ?? inv.amount);
+    if (!ok) return;
+
     setState(() => _loading = true);
     try {
       final client = Supabase.instance.client;
@@ -677,26 +854,20 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
         }
         return;
       }
-      final inv = widget.invoice;
 
-      // 1. Record the payment in the ledger (matches the web flow).
-      await client.from('payments').insert({
-        'invoice_id': inv.id,
-        'amount': inv.amount,
-        'method': _method,
-        'status': 'succeeded',
-        'reference_no': _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
-        'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        'recorded_by': userId,
-      });
+      // 1 & 2. Record the payment and set invoice status (paid or partial).
+      final isFullyPaid = await recordInvoicePayment(
+        invoiceId: inv.id,
+        amount: amount,
+        method: _method,
+        referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        recordedBy: userId,
+      );
 
-      // 2. Mark the invoice paid.
-      await client.from('invoices').update({
-        'status': 'paid',
-        'paid_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', inv.id);
-
-      // 3. Advance the member's next payment date and lift any freeze.
+      // 3. Lift any freeze, and advance the member's next payment date —
+      // only once the invoice is fully settled, so a bill paid in
+      // installments doesn't push renewal forward once per installment.
       final memberRow = await client
           .from('members')
           .select('next_payment_date, status, billing_interval_months')
@@ -705,7 +876,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       if (memberRow != null) {
         final updates = <String, dynamic>{};
         final npd = memberRow['next_payment_date'] as String?;
-        if (npd != null) {
+        if (isFullyPaid && npd != null) {
           final advanced = advancePaymentDate(
             npd,
             months: (memberRow['billing_interval_months'] as int?) ?? 1,
@@ -717,6 +888,8 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
           await client.from('members').update(updates).eq('id', inv.memberId);
         }
       }
+
+      await LocalPaymentGuard.record(inv.memberId, amount);
 
       if (mounted) {
         Navigator.pop(context);
@@ -752,13 +925,14 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
             ),
             const SizedBox(height: 18),
             const FieldLabel('Amount'),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: AppTheme.cardDecoration(),
-              child: Text(formatCurrency(widget.invoice.amount),
-                  style: AppTheme.numberStyle(fontSize: 22)),
+            TextFormField(
+              controller: _amountCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(prefixText: '$currencySymbol '),
+              style: AppTheme.numberStyle(fontSize: 22),
             ),
+            const SizedBox(height: 4),
+            Text(partialPaymentHint, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
             const SizedBox(height: 16),
             const FieldLabel('Method'),
             SizedBox(
@@ -789,7 +963,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
               onPressed: _loading ? null : _save,
               child: _loading
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Text('Record ${formatCurrency(widget.invoice.amount)}'),
+                  : const Text('Record payment'),
             ),
           ],
         ),
@@ -1161,7 +1335,7 @@ class _PlansTab extends ConsumerWidget {
                 CardList(
                   children: list.map((plan) => _PlanCard(
                     plan: plan,
-                    onEdit: () => showModalBottomSheet(
+                    onEdit: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
@@ -1171,7 +1345,7 @@ class _PlansTab extends ConsumerWidget {
                 ),
               const SizedBox(height: 12),
               GestureDetector(
-                onTap: () => showModalBottomSheet(
+                onTap: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -1362,6 +1536,35 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
     }
   }
 
+  Future<void> _delete() async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Delete plan?',
+      body: "This permanently deletes '${_nameCtrl.text.trim()}'. This can't be undone.",
+      cancelLabel: 'Cancel',
+      confirmLabel: 'Delete',
+    );
+    if (ok != true) return;
+    setState(() => _loading = true);
+    try {
+      await Supabase.instance.client.from('membership_plans').delete().eq('id', widget.plan!['id']);
+      if (mounted) Navigator.pop(context);
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        final msg = e.code == '23503'
+            ? 'This plan has members assigned — deactivate it instead of deleting.'
+            : 'Error: ${e.message}';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        setState(() => _loading = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        setState(() => _loading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1481,6 +1684,13 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                     : const Text('Save plan'),
               ),
+              if (_isEdit) ...[
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: _loading ? null : _delete,
+                  child: const Text('Delete plan', style: TextStyle(color: AppTheme.statusDanger)),
+                ),
+              ],
             ],
           ),
         ),

@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/billing/billing_access.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/whats_new.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../notifications/notifications_screen.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -37,14 +44,18 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
       client.from('members').select('id').eq('gym_id', gymId).count(CountOption.exact),
     ]),
     Future.wait<List<Map<String, dynamic>>>([
-      client.from('invoices').select('amount, paid_at').eq('gym_id', gymId).eq('status', 'paid').gte('paid_at', startOfDay),
-      client.from('invoices').select('amount').eq('gym_id', gymId).inFilter('status', ['pending', 'open', 'overdue']),
-      client.from('invoices').select('amount').eq('gym_id', gymId).eq('status', 'paid').gte('paid_at', startOfMonth),
-      client.from('invoices').select('amount, paid_at').eq('gym_id', gymId).eq('status', 'paid').gte('paid_at', lastMonthStart).lt('paid_at', startOfMonth),
+      // Cash actually collected — read from `payments`, not `invoices.status
+      // = 'paid'`, so a partial payment counts the moment it's collected
+      // rather than only once its invoice is later fully settled.
+      client.from('payments').select('amount, created_at, invoices!inner(gym_id)').eq('invoices.gym_id', gymId).eq('status', 'succeeded').gte('created_at', startOfDay),
+      client.from('invoices').select('amount, payments(amount, status)').eq('gym_id', gymId).inFilter('status', ['open', 'partial']),
+      client.from('payments').select('amount, created_at, invoices!inner(gym_id)').eq('invoices.gym_id', gymId).eq('status', 'succeeded').gte('created_at', startOfMonth),
+      client.from('payments').select('amount, created_at, invoices!inner(gym_id)').eq('invoices.gym_id', gymId).eq('status', 'succeeded').gte('created_at', lastMonthStart).lt('created_at', startOfMonth),
       // Renewals due within 7 days (includes today — "Payment due today" splits those out client-side).
       client.from('members').select('id, first_name, last_name, phone, next_payment_date, avatar_url').eq('gym_id', gymId).eq('status', 'active').gte('next_payment_date', todayDate).lte('next_payment_date', in7Days).order('next_payment_date'),
-      // Recent paid invoices for the "Recent payments" section.
-      client.from('invoices').select('amount, paid_at, members(first_name, last_name, avatar_url)').eq('gym_id', gymId).eq('status', 'paid').order('paid_at', ascending: false).limit(4),
+      // Recent payments feed — individual payment transactions (so a partial
+      // collection shows up immediately, not just once its invoice is fully paid).
+      client.from('payments').select('amount, created_at, invoices!inner(gym_id, members(first_name, last_name, avatar_url))').eq('invoices.gym_id', gymId).eq('status', 'succeeded').order('created_at', ascending: false).limit(4),
       // Today's check-in feed.
       client.from('check_ins').select('id, checked_in_at, members(first_name, last_name, avatar_url)').eq('gym_id', gymId).gte('checked_in_at', startOfDay).order('checked_in_at', ascending: false).limit(5),
       // Latest leads.
@@ -58,20 +69,44 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
   final rows   = results[1] as List<List<Map<String, dynamic>>>;
 
   final todayPaid     = rows[0];
-  final openInvoices  = rows[1];
+  final dueInvoices   = rows[1];
   final monthPaid     = rows[2];
   final lastMonthPaid = rows[3];
 
   double sum(List<Map<String, dynamic>> l) =>
       l.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0));
 
+  // Remaining balance per invoice — full amount minus whatever's already
+  // been paid — not the raw invoice amount, which would overstate dues on
+  // any invoice that's partially paid.
+  double remainingDue(Map<String, dynamic> inv) {
+    final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
+    final invPayments = (inv['payments'] as List?) ?? const [];
+    final paid = invPayments
+        .where((p) => (p as Map)['status'] == 'succeeded')
+        .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+    return (amount - paid).clamp(0, amount);
+  }
+
   final collectedToday  = sum(todayPaid);
-  final pendingRevenue  = sum(openInvoices);
+  final pendingRevenue  = dueInvoices.fold<double>(0, (s, inv) => s + remainingDue(inv));
   final monthRevenue    = sum(monthPaid);
   final lastMonthRevenue = sum(lastMonthPaid);
   final growthPct = lastMonthRevenue > 0
       ? ((monthRevenue - lastMonthRevenue) / lastMonthRevenue * 100).round()
       : null;
+
+  // Recent payments feed comes from `payments` (flattened back to the shape
+  // the UI expects: amount/paid_at/members) so partial collections show up
+  // immediately, not only once their invoice is fully settled.
+  final recentPaid = rows[5].map((p) {
+    final invoice = p['invoices'] as Map<String, dynamic>?;
+    return {
+      'amount': p['amount'],
+      'paid_at': p['created_at'],
+      'members': invoice?['members'],
+    };
+  }).toList();
 
   return {
     'activeMembers':    counts[0].count ?? 0,
@@ -87,7 +122,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async 
     'monthRevenue':     monthRevenue,
     'growthPct':        growthPct,
     'renewals':         rows[4],
-    'recentPaid':       rows[5],
+    'recentPaid':       recentPaid,
     'todayCheckinsList': rows[6],
     'recentLeads':      rows[7],
     'monthExpenses':    sum(rows[8]),
@@ -199,58 +234,87 @@ class _DashboardBody extends ConsumerWidget {
     final allTimeCheckins = (data['allTimeCheckins'] as int?) ?? 0;
     final showChecklist   = memberCount < 3 || planCount == 0 || allTimeCheckins == 0;
 
+    final header = [
+      _Header(gymName: gymName, ownerName: ownerName),
+      const SizedBox(height: 12),
+      if (canBilling) ...[
+        _SubscriptionBanner(gym: gym),
+        const SizedBox(height: 12),
+      ],
+      _MemberCodeCard(gymName: gymName, memberCode: gym?['member_code'] as String?),
+      const SizedBox(height: 12),
+      if (showChecklist) ...[
+        _SetupChecklist(memberCount: memberCount, planCount: planCount, allTimeCheckins: allTimeCheckins),
+        const SizedBox(height: 12),
+      ],
+    ];
+
+    final leftColumn = [
+      if (canBilling) ...[
+        _CollectedHero(data: data, canExpenses: canExpenses),
+        const SizedBox(height: 10),
+      ],
+      _StatRow(
+        active: (data['activeMembers'] as int?) ?? 0,
+        checkins: (data['todayCheckins'] as int?) ?? 0,
+        renewals: renewals.length,
+      ),
+      const SizedBox(height: 10),
+      _QuickActions(canCollect: canCollect, canLeads: canLeads),
+    ];
+
+    final rightColumn = [
+      _PaymentDueToday(data: data, canCollect: canCollect),
+      const SizedBox(height: 16),
+      _UpcomingPayments(data: data, canCollect: canCollect),
+      const SizedBox(height: 16),
+      _TodayCheckins(
+        checkins: (data['todayCheckinsList'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+        todayCount: (data['todayCheckins'] as int?) ?? 0,
+      ),
+      if (canBilling) ...[
+        const SizedBox(height: 16),
+        _RecentPayments(
+          invoices: (data['recentPaid'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+        ),
+      ],
+      if (canLeads) ...[
+        const SizedBox(height: 16),
+        _NewLeads(
+          leads: (data['recentLeads'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+          leadsThisWeek: (data['leadsThisWeek'] as int?) ?? 0,
+        ),
+      ],
+    ];
+
+    final isWide = ResponsiveContent.isWide(context);
+
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Header(gymName: gymName, ownerName: ownerName),
-          const SizedBox(height: 12),
-          if (canBilling) ...[
-            _SubscriptionBanner(gym: gym),
-            const SizedBox(height: 12),
-          ],
-          if (showChecklist) ...[
-            _SetupChecklist(memberCount: memberCount, planCount: planCount, allTimeCheckins: allTimeCheckins),
-            const SizedBox(height: 12),
-          ],
-          if (canBilling) ...[
-            _CollectedHero(data: data),
-            const SizedBox(height: 10),
-          ],
-          if (canExpenses) ...[
-            _ProfitStrip(data: data),
-            const SizedBox(height: 10),
-          ],
-          _StatRow(
-            active: (data['activeMembers'] as int?) ?? 0,
-            checkins: (data['todayCheckins'] as int?) ?? 0,
-            renewals: renewals.length,
-          ),
-          const SizedBox(height: 10),
-          _QuickActions(canCollect: canCollect, canLeads: canLeads),
-          const SizedBox(height: 16),
-          _PaymentDueToday(data: data, canCollect: canCollect),
-          const SizedBox(height: 16),
-          _UpcomingPayments(data: data, canCollect: canCollect),
-          const SizedBox(height: 16),
-          _TodayCheckins(
-            checkins: (data['todayCheckinsList'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
-            todayCount: (data['todayCheckins'] as int?) ?? 0,
-          ),
-          if (canBilling) ...[
+          ...header,
+          if (isWide)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: leftColumn),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  flex: 5,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rightColumn),
+                ),
+              ],
+            )
+          else ...[
+            ...leftColumn,
             const SizedBox(height: 16),
-            _RecentPayments(
-              invoices: (data['recentPaid'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
-            ),
-          ],
-          if (canLeads) ...[
-            const SizedBox(height: 16),
-            _NewLeads(
-              leads: (data['recentLeads'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
-              leadsThisWeek: (data['leadsThisWeek'] as int?) ?? 0,
-            ),
+            ...rightColumn,
           ],
         ],
       ),
@@ -638,6 +702,15 @@ class _Header extends ConsumerWidget {
           ]),
         ),
         GestureDetector(
+          onTap: () => showWhatsNewSheet(context),
+          child: Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
+            child: const Icon(Icons.campaign_outlined, size: 19, color: AppTheme.ink),
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
           onTap: () => context.push('/staff/notifications'),
           child: Stack(
             clipBehavior: Clip.none,
@@ -680,6 +753,68 @@ class _Header extends ConsumerWidget {
   }
 }
 
+// ─── Member self-serve signup code ─────────────────────────────────────────────
+
+class _MemberCodeCard extends StatelessWidget {
+  final String gymName;
+  final String? memberCode;
+  const _MemberCodeCard({required this.gymName, required this.memberCode});
+
+  @override
+  Widget build(BuildContext context) {
+    final code = memberCode;
+    if (code == null || code.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.person_add_outlined, size: 18, color: AppTheme.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: code));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Gym code copied')),
+                );
+              },
+              child: RichText(
+                text: TextSpan(
+                  style: const TextStyle(fontSize: 13, color: AppTheme.ink),
+                  children: [
+                    const TextSpan(text: 'Gym code for member signup: '),
+                    TextSpan(
+                      text: code,
+                      style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.share_outlined, size: 18, color: AppTheme.inkHint),
+            onPressed: () {
+              final box = context.findRenderObject() as RenderBox?;
+              Share.share(
+                'Set up your $gymName member portal — open the GymCRM app, '
+                'tap Member, "Create your account", and enter gym code $code with your phone number.',
+                sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Subscription status banner ────────────────────────────────────────────────
 
 class _SubscriptionBanner extends StatelessWidget {
@@ -690,13 +825,23 @@ class _SubscriptionBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final plan = gym?['plan'] as String?;
     final daysLeft = planExpiryDaysRemaining(gym);
-    final planName = plan != null && plan.isNotEmpty
-        ? plan[0].toUpperCase() + plan.substring(1)
-        : 'Free';
+    final isTrial = gym?['trial_ends_at'] != null && gym?['plan_expires_at'] == null;
 
-    final label = daysLeft != null
-        ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
-        : '$planName plan';
+    final String label;
+    if (isTrial) {
+      label = daysLeft != null
+          ? (daysLeft <= 0
+              ? 'Trial ends today'
+              : 'Trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}')
+          : 'Trial active';
+    } else {
+      final planName = plan != null && plan.isNotEmpty
+          ? plan[0].toUpperCase() + plan.substring(1)
+          : 'Free';
+      label = daysLeft != null
+          ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
+          : '$planName plan';
+    }
 
     return GestureDetector(
       onTap: () => context.push('/staff/subscription'),
@@ -709,7 +854,7 @@ class _SubscriptionBanner extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.workspace_premium_outlined, size: 18, color: AppTheme.accent),
+            const Icon(Icons.sell_outlined, size: 18, color: AppTheme.accent),
             const SizedBox(width: 10),
             Expanded(
               child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink)),
@@ -742,16 +887,17 @@ String _rupees(double v) {
 
 class _CollectedHero extends StatelessWidget {
   final Map<String, dynamic> data;
-  const _CollectedHero({required this.data});
+  final bool canExpenses;
+  const _CollectedHero({required this.data, required this.canExpenses});
 
   @override
   Widget build(BuildContext context) {
     final collected = (data['collectedToday'] as double?) ?? 0;
-    final payments  = (data['todayPayments'] as int?) ?? 0;
-    final pending   = (data['pendingRevenue'] as double?) ?? 0;
     final month     = (data['monthRevenue'] as double?) ?? 0;
     final newMembers = (data['newMembersMonth'] as int?) ?? 0;
     final growth    = data['growthPct'] as int?;
+    final expenses  = (data['monthExpenses'] as double?) ?? 0;
+    final profit    = (data['profit'] as double?) ?? 0;
 
     return GestureDetector(
       onTap: () => context.push('/staff/billing'),
@@ -759,14 +905,14 @@ class _CollectedHero extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         decoration: AppTheme.darkCardDecoration(),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Collected today',
+          const Text('This month',
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
           const SizedBox(height: 6),
           Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Flexible(
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(_rupees(collected),
+                child: Text(_rupees(month),
                   style: AppTheme.numberStyle(fontSize: 32, color: AppTheme.onDark, height: 1.0)),
               ),
             ),
@@ -785,20 +931,15 @@ class _CollectedHero extends StatelessWidget {
               ),
             ],
           ]),
-          const SizedBox(height: 6),
-          Text(
-            '$payments payment${payments == 1 ? '' : 's'} · ${_rupees(pending)} still pending',
-            style: const TextStyle(fontSize: 12.5, color: AppTheme.onDarkSoft),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('This month', style: TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
+                const Text('Collected today', style: TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
                 const SizedBox(height: 4),
-                FittedBox(fit: BoxFit.scaleDown, child: Text(_rupees(month), style: AppTheme.numberStyle(fontSize: 18, color: AppTheme.onDark))),
+                FittedBox(fit: BoxFit.scaleDown, child: Text(_rupees(collected), style: AppTheme.numberStyle(fontSize: 18, color: AppTheme.onDark))),
               ]),
             ),
             Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.08)),
@@ -811,54 +952,36 @@ class _CollectedHero extends StatelessWidget {
               ]),
             ),
           ]),
-        ]),
-      ),
-    );
-  }
-}
-
-// ─── Profit strip (revenue − expenses this month) ─────────────────────────────
-
-class _ProfitStrip extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _ProfitStrip({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final expenses = (data['monthExpenses'] as double?) ?? 0;
-    final profit   = (data['profit'] as double?) ?? 0;
-
-    return GestureDetector(
-      onTap: () => context.push('/staff/expenses'),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: AppTheme.cardDecoration(),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Expenses this month', style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                const SizedBox(height: 2),
-                Text(formatCurrency(expenses),
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-              ]),
-            ),
-            Container(width: 1, height: 32, color: AppTheme.border),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Profit', style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                const SizedBox(height: 2),
-                Text(formatCurrency(profit),
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: profit >= 0 ? AppTheme.statusActive : AppTheme.statusDanger,
-                  )),
+          if (canExpenses) ...[
+            const SizedBox(height: 12),
+            Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () => context.push('/staff/expenses'),
+              behavior: HitTestBehavior.opaque,
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Expenses this month', style: TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
+                    const SizedBox(height: 4),
+                    Text(formatCurrency(expenses), style: AppTheme.numberStyle(fontSize: 16, color: AppTheme.onDark)),
+                  ]),
+                ),
+                Container(width: 1, height: 32, color: Colors.white.withValues(alpha: 0.08)),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Profit', style: TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
+                    const SizedBox(height: 4),
+                    Text(formatCurrency(profit),
+                      style: AppTheme.numberStyle(fontSize: 16,
+                        color: profit >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger)),
+                  ]),
+                ),
               ]),
             ),
           ],
-        ),
+        ]),
       ),
     );
   }
@@ -893,7 +1016,7 @@ class _PaymentDueToday extends ConsumerWidget {
   const _PaymentDueToday({required this.data, required this.canCollect});
 
   Future<void> _showCollect(BuildContext ctx, WidgetRef ref, Map<String, dynamic> member) async {
-    await showModalBottomSheet(
+    await showAdaptiveSheet(
       context: ctx,
       isScrollControlled: true,
       useSafeArea: true,
@@ -968,7 +1091,7 @@ class _UpcomingPayments extends ConsumerWidget {
   const _UpcomingPayments({required this.data, required this.canCollect});
 
   Future<void> _showCollect(BuildContext ctx, WidgetRef ref, Map<String, dynamic> member) async {
-    await showModalBottomSheet(
+    await showAdaptiveSheet(
       context: ctx,
       isScrollControlled: true,
       useSafeArea: true,
@@ -1081,6 +1204,8 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
   bool    _loading  = false;
   String? _planHint;
   String? _nextPaymentDate;
+  double? _expectedAmount;
+  double? _due;
 
   static const _methods = [
     ('cash',          'Cash',          Icons.payments_outlined),
@@ -1099,7 +1224,8 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     final memberId = widget.member['id'] as String?;
     if (memberId == null) return;
     try {
-      final data = await Supabase.instance.client
+      final client = Supabase.instance.client;
+      final data = await client
           .from('members')
           .select('next_payment_date, memberships(status, discount_amount, membership_plans(price, name))')
           .eq('id', memberId)
@@ -1112,11 +1238,13 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
       }
       final plan = active?['membership_plans'] as Map?;
       final discount = (active?['discount_amount'] as num?)?.toDouble() ?? 0;
+      double? finalPrice;
       setState(() {
         if (plan != null && plan['price'] != null) {
           final listPrice = (plan['price'] as num).toDouble();
-          final finalPrice = (listPrice - discount).clamp(0, listPrice);
-          _amountCtrl.text = finalPrice.toStringAsFixed(0);
+          finalPrice = (listPrice - discount).clamp(0, listPrice);
+          _expectedAmount = finalPrice;
+          _amountCtrl.text = finalPrice!.toStringAsFixed(0);
           _planHint = discount > 0
               ? '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)} − $currencySymbol${discount.toStringAsFixed(0)} discount'
               : '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)}';
@@ -1124,6 +1252,30 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;
       });
+
+      // If there's already an open/partial invoice for this member, its
+      // amount (not the plan price) is the real total owed — pre-fill the
+      // remaining balance instead of the full plan price.
+      final existing = await client
+          .from('invoices')
+          .select('id, amount')
+          .eq('member_id', memberId)
+          .inFilter('status', ['open', 'partial'])
+          .order('created_at', ascending: true)
+          .limit(1)
+          .maybeSingle();
+      if (existing != null && mounted) {
+        final invoiceAmount = (existing['amount'] as num).toDouble();
+        final due = await invoiceDue(existing['id'] as String, invoiceAmount);
+        if (!mounted) return;
+        setState(() {
+          _expectedAmount = invoiceAmount;
+          _due = due;
+          _amountCtrl.text = due.toStringAsFixed(0);
+        });
+      } else {
+        _due = finalPrice;
+      }
     } catch (e) { debugPrint('[GymCRM] autofill error: $e'); }
   }
 
@@ -1136,43 +1288,84 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount'))); return;
     }
+
+    final memberIdForCheck = widget.member['id'] as String;
+    final prior = await LocalPaymentGuard.check(memberIdForCheck);
+    if (prior != null && mounted) {
+      final firstName = widget.member['first_name'] as String? ?? '';
+      final lastName  = widget.member['last_name']  as String? ?? '';
+      final name      = '$firstName $lastName'.trim();
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already collected today'),
+          content: Text(
+            '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
+            'from $name today at '
+            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}.\n\n'
+            'Collect $currencySymbol${amount.toStringAsFixed(0)} again?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Collect anyway')),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
+    if (!mounted) return;
+    final ok = await confirmPartialIfNeeded(context, enteredAmount: amount, dueAmount: _due ?? amount);
+    if (!ok) return;
+
     setState(() => _loading = true);
     try {
       final gymId    = await ref.read(gymIdProvider.future);
       final client   = Supabase.instance.client;
       final memberId = widget.member['id'] as String;
 
-      final existing = await client.from('invoices').select('id').eq('member_id', memberId).eq('gym_id', gymId).eq('status', 'open').order('created_at', ascending: true).limit(1).maybeSingle();
+      // Reuse existing open/partial invoice if one exists; its own amount
+      // (the real total owed) is never overwritten by the amount being
+      // collected right now — those are two different numbers once partial
+      // payments are allowed.
+      final existing = await client.from('invoices').select('id').eq('member_id', memberId).eq('gym_id', gymId).inFilter('status', ['open', 'partial']).order('created_at', ascending: true).limit(1).maybeSingle();
 
       final String invoiceId;
       if (existing != null) {
         invoiceId = existing['id'] as String;
-        await client.from('invoices').update({'amount': amount, if (_nextPaymentDate != null) 'due_at': _nextPaymentDate}).eq('id', invoiceId);
+        if (_nextPaymentDate != null) {
+          await client.from('invoices').update({'due_at': _nextPaymentDate}).eq('id', invoiceId);
+        }
       } else {
-        final res = await client.from('invoices').insert({'member_id': memberId, 'gym_id': gymId, 'amount': amount, if (_nextPaymentDate != null) 'due_at': _nextPaymentDate, 'status': 'open'}).select('id').single();
+        final res = await client.from('invoices').insert({'member_id': memberId, 'gym_id': gymId, 'amount': _expectedAmount ?? amount, if (_nextPaymentDate != null) 'due_at': _nextPaymentDate, 'status': 'open'}).select('id').single();
         invoiceId = res['id'] as String;
       }
 
-      await client.from('payments').insert({
-        'invoice_id':   invoiceId, 'amount': amount, 'method': _method, 'status': 'succeeded',
-        'reference_no': _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
-        'notes':        _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        'recorded_by':  client.auth.currentUser?.id,
-      });
+      final isFullyPaid = await recordInvoicePayment(
+        invoiceId: invoiceId,
+        amount: amount,
+        method: _method,
+        referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        recordedBy: client.auth.currentUser?.id,
+      );
 
-      await client.from('invoices').update({'status': 'paid', 'paid_at': DateTime.now().toUtc().toIso8601String()}).eq('id', invoiceId);
-
+      // Advance next_payment_date only once the invoice is fully settled —
+      // a bill paid in installments shouldn't push renewal forward once per
+      // installment.
       final memberRow = await client.from('members').select('next_payment_date, status, billing_interval_months').eq('id', memberId).maybeSingle();
       if (memberRow != null) {
         final updates = <String, dynamic>{};
         final npd = memberRow['next_payment_date'] as String?;
-        if (npd != null) {
+        if (isFullyPaid && npd != null) {
           final adv = advancePaymentDate(npd, months: (memberRow['billing_interval_months'] as int?) ?? 1);
           if (adv != null) updates['next_payment_date'] = adv;
         }
         if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';
         if (updates.isNotEmpty) await client.from('members').update(updates).eq('id', memberId);
       }
+
+      await LocalPaymentGuard.record(memberId, amount);
 
       if (mounted) {
         Navigator.pop(context);
@@ -1222,6 +1415,8 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
             const SizedBox(height: 4),
             Text('Auto-filled: $_planHint', style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft)),
           ],
+          const SizedBox(height: 4),
+          Text(partialPaymentHint, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
           const SizedBox(height: 16),
           const Text('Payment method', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
           const SizedBox(height: 10),

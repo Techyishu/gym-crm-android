@@ -6,6 +6,8 @@ import '../../../core/utils/formatters.dart';
 import '../../../shared/models/gym_class.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../shared/widgets/responsive_content.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -134,7 +136,7 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
     final sessionsAsync = ref.watch(_upcomingSessionsProvider);
 
     void openAddSheet() =>
-        showModalBottomSheet(
+        showAdaptiveSheet(
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
@@ -166,7 +168,7 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
           ),
         ],
       ),
-      body: classesAsync.when(
+      body: ResponsiveContent(child: classesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
         data: (classes) {
@@ -207,7 +209,7 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                 gymClass: classes[i],
                 sessions: sessionMap[classes[i].id] ?? [],
                 onEdit: () =>
-                    showModalBottomSheet(
+                    showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
@@ -229,13 +231,13 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                       ref.invalidate(_classesProvider);
                       ref.invalidate(_upcomingSessionsProvider);
                     }),
-                onAddSession: () => showModalBottomSheet(
+                onAddSession: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
                   builder: (_) => _AddSessionSheet(gymClass: classes[i]),
                 ).then((_) => ref.invalidate(_upcomingSessionsProvider)),
-                onEnroll: () => showModalBottomSheet(
+                onEnroll: () => showAdaptiveSheet(
                   context: context,
                   isScrollControlled: true,
                   useSafeArea: true,
@@ -271,7 +273,7 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
             ),
           );
         },
-      ),
+      )),
     );
   }
 }

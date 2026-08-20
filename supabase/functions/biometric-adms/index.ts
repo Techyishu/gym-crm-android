@@ -174,11 +174,14 @@ Deno.serve(async (req: Request) => {
 
       if (existing) continue
 
+      // Device sends local IST wall-clock time with no TZ marker — convert to real UTC.
+      const checkedInAtUtc = new Date(new Date(rec.datetime + 'Z').getTime() - 5.5 * 60 * 60 * 1000)
+
       const { error: insErr } = await supabase.from('check_ins').insert({
         member_id:     member.id,
         gym_id:        device.gym_id,
         method:        'biometric',
-        checked_in_at: new Date(rec.datetime).toISOString(),
+        checked_in_at: checkedInAtUtc.toISOString(),
       })
 
       if (!insErr) inserted++

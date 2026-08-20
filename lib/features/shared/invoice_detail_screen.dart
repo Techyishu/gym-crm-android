@@ -4,18 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../core/access/role_access.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/invoice_pdf.dart';
 import '../../core/utils/platform_info.dart' as platform_info;
 import '../../shared/widgets/redesign.dart';
+import '../../shared/widgets/responsive_content.dart';
+import '../auth/providers/auth_provider.dart';
 
 final _invoiceDetailProvider =
     FutureProvider.family<Map<String, dynamic>, String>((ref, id) async {
   final data = await Supabase.instance.client
       .from('invoices')
-      .select('*, members(first_name, last_name, email), gyms(name, settings), payments(method, status)')
+      .select('*, members(first_name, last_name, email), gyms(name, settings), payments(amount, method, status)')
       .eq('id', id)
       .single();
   return data;
@@ -28,6 +32,7 @@ class InvoiceDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(_invoiceDetailProvider(invoiceId));
+    final canDelete = RoleAccess.canDeleteInvoice(ref.watch(staffRoleProvider).valueOrNull);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -53,15 +58,34 @@ class InvoiceDetailScreen extends ConsumerWidget {
               onPressed: () => _sharePdf(async.value!),
               tooltip: 'Share as PDF',
             ),
+            if (canDelete)
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: AppTheme.statusDanger),
+                onPressed: () => _delete(context, ref),
+                tooltip: 'Delete invoice',
+              ),
           ],
         ],
       ),
-      body: async.when(
+      body: ResponsiveContent(child: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e', style: const TextStyle(color: AppTheme.inkSoft))),
         data: (inv) => _InvoiceBody(invoice: inv),
-      ),
+      )),
     );
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Delete invoice?',
+      body: 'This invoice and its payment records will be permanently deleted. This cannot be undone.',
+      confirmLabel: 'Delete',
+      icon: Icons.delete_outline,
+    );
+    if (ok != true) return;
+    await Supabase.instance.client.from('invoices').delete().eq('id', invoiceId);
+    if (context.mounted) context.pop();
   }
 
   Future<void> _sharePdf(Map<String, dynamic> inv) async {
@@ -470,6 +494,12 @@ class _Total extends StatelessWidget {
     final amount = invoice['amount'] as num;
     final discountAmount = (invoice['discount_amount'] as num?) ?? 0;
     final hasDiscount = discountAmount > 0;
+    final payments = (invoice['payments'] as List?) ?? const [];
+    final paidSoFar = payments
+        .where((p) => (p as Map)['status'] == 'succeeded')
+        .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+    final balanceDue = (amount - paidSoFar).clamp(0, amount);
+    final isPartial = paidSoFar > 0 && balanceDue > 0;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
@@ -497,12 +527,30 @@ class _Total extends StatelessWidget {
             const Divider(height: 1, color: AppTheme.border),
             const SizedBox(height: 10),
           ],
+          if (isPartial) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'PAID SO FAR',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                ),
+                Text(
+                  formatCurrency(paidSoFar),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: AppTheme.border),
+            const SizedBox(height: 10),
+          ],
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'TOTAL DUE',
-                style: TextStyle(
+              Text(
+                isPartial ? 'BALANCE DUE' : 'TOTAL DUE',
+                style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1,
@@ -510,7 +558,7 @@ class _Total extends StatelessWidget {
                 ),
               ),
               Text(
-                formatCurrency(amount),
+                formatCurrency(isPartial ? balanceDue : amount),
                 style: AppTheme.numberStyle(fontSize: 22, fontWeight: FontWeight.w800),
               ),
             ],
@@ -553,9 +601,10 @@ class _Footer extends StatelessWidget {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 Widget _statusPill(String status) => switch (status) {
-      'paid'   => StatusPill.active(label: 'PAID'),
-      'open'   => StatusPill.warn(label: 'PENDING'),
-      'failed' => StatusPill.danger(label: 'FAILED'),
+      'paid'    => StatusPill.active(label: 'PAID'),
+      'open'    => StatusPill.warn(label: 'PENDING'),
+      'partial' => StatusPill.warn(label: 'PARTIAL'),
+      'failed'  => StatusPill.danger(label: 'FAILED'),
       'void'   => StatusPill.neutral(label: 'VOID'),
       _        => StatusPill.neutral(label: 'DRAFT'),
     };

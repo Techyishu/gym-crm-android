@@ -14,8 +14,10 @@ import '../../../core/utils/validators.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../shared/models/member.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../shared/widgets/responsive_content.dart';
 import '../billing/billing_screen.dart' show PlanFormSheet;
 import 'import_csv_screen.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 final _membersProvider = FutureProvider<List<Member>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
@@ -27,6 +29,30 @@ final _membersProvider = FutureProvider<List<Member>>((ref) async {
       .eq('gym_id', gymId)
       .order('created_at', ascending: false);
   return (data as List).map((e) => Member.fromJson(e as Map<String, dynamic>)).toList();
+});
+
+// Outstanding due per member, gym-wide, fetched in one batched query so the
+// list can show a "Due" badge without an N+1 query per row.
+final _membersDueProvider = FutureProvider<Map<String, double>>((ref) async {
+  final gymId = await ref.watch(gymIdProvider.future);
+  final invoices = await Supabase.instance.client
+      .from('invoices')
+      .select('member_id, amount, payments(amount, status)')
+      .eq('gym_id', gymId)
+      .inFilter('status', ['open', 'partial']);
+
+  final due = <String, double>{};
+  for (final inv in (invoices as List)) {
+    final memberId = (inv as Map)['member_id'] as String?;
+    if (memberId == null) continue;
+    final amount = (inv['amount'] as num).toDouble();
+    final payments = (inv['payments'] as List?) ?? const [];
+    final paid = payments
+        .where((p) => (p as Map)['status'] == 'succeeded')
+        .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+    due[memberId] = (due[memberId] ?? 0) + (amount - paid).clamp(0, amount);
+  }
+  return due;
 });
 
 // Active membership plans for the current gym — used to assign a plan when
@@ -203,7 +229,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   };
 
   void _pickLapsingWindow() {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -261,6 +287,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   @override
   Widget build(BuildContext context) {
     final members = ref.watch(_membersProvider);
+    final dueMap = ref.watch(_membersDueProvider).valueOrNull ?? const {};
     final role = ref.watch(staffRoleProvider).valueOrNull;
     final canPii = RoleAccess.canSeeMemberPii(role);
     final canEdit = RoleAccess.canEditMembers(role);
@@ -299,6 +326,11 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                         canPii: canPii,
                         isFirst: i == 0,
                         isLast: i == filtered.length - 1,
+                        due: dueMap[filtered[i].id] ?? 0,
+                        onReturn: () {
+                          ref.invalidate(_membersProvider);
+                          ref.invalidate(_membersDueProvider);
+                        },
                       ),
                     ),
                   );
@@ -348,7 +380,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   }
 
   void _showActionsMenu(BuildContext context) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -383,60 +415,76 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
       ('expired', 'Expired', null, null),
     ];
 
+    final search = TextField(
+      controller: _searchCtrl,
+      decoration: const InputDecoration(
+        hintText: 'Search members',
+        prefixIcon: Icon(Icons.search, color: AppTheme.inkHint, size: 20),
+        isDense: true,
+      ),
+      onChanged: (v) => setState(() => _search = v),
+    );
+
+    final filterRow = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: filters.map((f) {
+          final (key, label, tintBg, tintFg) = f;
+          if (key == 'lapsing') {
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _LapsingChip(
+                label: label,
+                count: '${counts[key] ?? 0}',
+                selected: _filter == key,
+                tintBg: tintBg,
+                tintFg: tintFg,
+                onTap: () => setState(() => _filter = key),
+                onPickWindow: _pickLapsingWindow,
+              ),
+            );
+          }
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _FilterPill(
+              label: label,
+              count: '${counts[key] ?? 0}',
+              selected: _filter == key,
+              tintBg: tintBg,
+              tintFg: tintFg,
+              onTap: () => setState(() => _filter = key),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+
+    // Wide screens have room for search and filters side by side; phones
+    // keep search on its own line above the horizontally-scrolling filters.
+    final isWide = ResponsiveContent.isWide(context);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: Column(
-        children: [
-          TextField(
-            controller: _searchCtrl,
-            decoration: const InputDecoration(
-              hintText: 'Search members',
-              prefixIcon: Icon(Icons.search, color: AppTheme.inkHint, size: 20),
-              isDense: true,
+      child: isWide
+          ? Row(
+              children: [
+                SizedBox(width: 280, child: search),
+                const SizedBox(width: 16),
+                Expanded(child: filterRow),
+              ],
+            )
+          : Column(
+              children: [
+                search,
+                const SizedBox(height: 12),
+                filterRow,
+              ],
             ),
-            onChanged: (v) => setState(() => _search = v),
-          ),
-          const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: filters.map((f) {
-                final (key, label, tintBg, tintFg) = f;
-                if (key == 'lapsing') {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _LapsingChip(
-                      label: label,
-                      count: '${counts[key] ?? 0}',
-                      selected: _filter == key,
-                      tintBg: tintBg,
-                      tintFg: tintFg,
-                      onTap: () => setState(() => _filter = key),
-                      onPickWindow: _pickLapsingWindow,
-                    ),
-                  );
-                }
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _FilterPill(
-                    label: label,
-                    count: '${counts[key] ?? 0}',
-                    selected: _filter == key,
-                    tintBg: tintBg,
-                    tintFg: tintFg,
-                    onTap: () => setState(() => _filter = key),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
   void _showAddMemberSheet(BuildContext context) {
-    showModalBottomSheet(
+    showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -459,7 +507,9 @@ class _MemberRow extends StatelessWidget {
   final Member member;
   final bool canPii;
   final bool isFirst, isLast;
-  const _MemberRow({required this.member, required this.canPii, required this.isFirst, required this.isLast});
+  final double due;
+  final VoidCallback onReturn;
+  const _MemberRow({required this.member, required this.canPii, required this.isFirst, required this.isLast, this.due = 0, required this.onReturn});
 
   bool get _lapsing {
     if (member.status != 'active') return false;
@@ -514,7 +564,7 @@ class _MemberRow extends StatelessWidget {
         color: Colors.transparent,
         borderRadius: radius,
         child: InkWell(
-          onTap: () => context.push('/staff/members/${member.id}'),
+          onTap: () => context.push('/staff/members/${member.id}').then((_) => onReturn()),
           borderRadius: radius,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
@@ -543,7 +593,17 @@ class _MemberRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                _pill,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _pill,
+                    if (due > 0) ...[
+                      const SizedBox(height: 4),
+                      Text('Due ${formatCurrency(due)}',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.statusDanger)),
+                    ],
+                  ],
+                ),
               ],
             ),
           ),
@@ -695,7 +755,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   // Gym has no plans yet — let staff make one without losing the half-filled
   // member form. Reuses the Billing screen's sheet, which pops the new row.
   Future<void> _createPlan() async {
-    final created = await showModalBottomSheet<Map<String, dynamic>>(
+    final created = await showAdaptiveSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -706,7 +766,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   }
 
   Future<void> _pickAvatar() async {
-    final source = await showModalBottomSheet<ImageSource>(
+    final source = await showAdaptiveSheet<ImageSource>(
       context: context,
       builder: (_) => SafeArea(
         child: Column(

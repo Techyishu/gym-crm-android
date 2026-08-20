@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../diet/diet_plan_sheet.dart';
 import '../workout/workout_plan_sheet.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
 /// Staff-facing plan viewers, matching the redesign spec:
 /// dark header (back · member name · edit), day chips / macro bars,
@@ -33,7 +34,7 @@ class _WorkoutPlanViewerPageState extends State<WorkoutPlanViewerPage> {
   bool _changed = false;
 
   Future<void> _edit() async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -265,7 +266,7 @@ class _DietPlanViewerPageState extends State<DietPlanViewerPage> {
   bool _changed = false;
 
   Future<void> _edit() async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
