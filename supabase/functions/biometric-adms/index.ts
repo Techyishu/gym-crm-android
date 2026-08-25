@@ -1,20 +1,24 @@
 /**
  * ZKTeco / eSSL ADMS push receiver.
  *
- * Device config (in device web UI or LCD menu):
- *   Server address : <project>.supabase.co
- *   Port           : 443
- *   Server path    : /functions/v1/biometric-adms/<GYM_TOKEN>
+ * Device config (device menu → Comm → Cloud Server):
+ *   Server Mode    : ADMS
+ *   Server Address : bio.gymcrm.in
+ *   Port           : 58594
+ *   HTTPS          : OFF
+ *   Server Path    : (leave blank / default)
  *
- * The device appends /iclock/cdata and /iclock/getrequest to that path,
- * so full URLs are:
- *   GET  /functions/v1/biometric-adms/<TOKEN>/iclock/cdata   — handshake
- *   POST /functions/v1/biometric-adms/<TOKEN>/iclock/cdata?table=ATTLOG
- *   POST /functions/v1/biometric-adms/<TOKEN>/iclock/cdata?table=OPERLOG
- *   POST /functions/v1/biometric-adms/<TOKEN>/iclock/getrequest
+ * Gym identity is resolved from the device's own hardware serial number
+ * (sent automatically as ?SN=... on every ADMS request — not something the
+ * gym configures). Staff pairs a device once in-app by typing that serial
+ * number in (Settings → Biometric Device → Connect a Device), which
+ * upserts a row into biometric_devices(gym_id, device_sn).
  *
- * Fallback (older devices without path config):
- *   Append ?key=<GYM_TOKEN> to the base URL — token extracted from query string.
+ * Full request shapes (device appends these itself):
+ *   GET  /iclock/cdata?SN=...                      — handshake
+ *   POST /iclock/cdata?SN=...&table=ATTLOG          — attendance push
+ *   POST /iclock/cdata?SN=...&table=OPERLOG         — enroll/op log (acked, ignored)
+ *   POST /iclock/getrequest?SN=...                  — command poll
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -23,6 +27,21 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
+
+// Writes into the same error_logs table the app itself uses, so a failed
+// punch is visible without digging through function logs. Awaited (not
+// fire-and-forget) — the edge runtime can terminate right after the
+// response returns, which would silently drop an un-awaited insert.
+async function logError(message: string, gymId: string | null, deviceInfo?: Record<string, unknown>) {
+  const { error } = await supabase.from('error_logs').insert({
+    gym_id: gymId,
+    source: 'biometric-adms',
+    message,
+    page: 'biometric-checkin',
+    device_info: deviceInfo ?? null,
+  })
+  if (error) console.error('[biometric-adms] failed to write error_logs:', error.message)
+}
 
 // ── ADMS handshake response ────────────────────────────────────────────────────
 // Exact format ZKTeco/eSSL expects. Fields control push interval and behaviour.
@@ -56,15 +75,23 @@ interface AttRecord {
   verifyMode: string
 }
 
+// Devices vary in whether they zero-pad employee IDs ("001" vs "1") — strip
+// leading zeros so a punch always matches however staff typed the ID in-app.
+function normalizeEmployeeId(id: string): string {
+  return id.replace(/^0+(?=\d)/, '')
+}
+
 function parseAttlog(body: string): AttRecord[] {
+  // Some real devices delimit records with commas instead of newlines
+  // (confirmed against hardware-tested implementations) — split on either.
   return body
-    .split(/\r?\n/)
+    .split(/\r\n|\r|,|\n/)
     .map(l => l.trim())
     .filter(Boolean)
     .map(line => {
       const parts = line.split('\t')
       return {
-        employeeId: parts[0]?.trim() ?? '',
+        employeeId: normalizeEmployeeId(parts[0]?.trim() ?? ''),
         datetime:   parts[1]?.trim() ?? '',
         verifyMode: parts[2]?.trim() === '4' ? 'face' : 'fingerprint',
       }
@@ -76,43 +103,35 @@ function parseAttlog(body: string): AttRecord[] {
 Deno.serve(async (req: Request) => {
   const url    = new URL(req.url)
   const params = url.searchParams
-  const sn     = params.get('SN') ?? ''
+  // Uppercase so a case mismatch between the device's SN and what staff
+  // typed while pairing can never silently break the match.
+  const sn     = (params.get('SN') ?? '').trim().toUpperCase()
 
-  // ── Token extraction ─────────────────────────────────────────────────────────
-  // Primary: token is a path segment after "biometric-adms"
-  //   e.g. /functions/v1/biometric-adms/abc123/iclock/cdata
-  // Fallback: ?key=<token>
-  const parts    = url.pathname.split('/')
-  const funcIdx  = parts.indexOf('biometric-adms')
-  const pathToken = funcIdx >= 0 ? (parts[funcIdx + 1] ?? '') : ''
-  const token    = pathToken || (params.get('key') ?? '')
-  // Sub-path after token: "iclock/cdata" or "iclock/getrequest"
-  const subPath  = parts.slice(funcIdx + 2).join('/')
-
-  if (!token) {
-    return new Response('Missing token — configure Server Path in device settings', { status: 400 })
+  if (!sn) {
+    return new Response('Missing SN — device did not send a serial number', { status: 400 })
   }
 
-  // ── Device lookup ─────────────────────────────────────────────────────────────
+  // ── Device lookup by serial number ────────────────────────────────────
   const { data: device, error } = await supabase
     .from('biometric_devices')
     .select('id, gym_id')
-    .eq('token', token)
+    .eq('device_sn', sn)
     .maybeSingle()
 
   if (error || !device) {
-    return new Response('Invalid token', { status: 401 })
+    await logError(`Unknown device SN=${sn} — not paired to any gym`, null, { sn })
+    return new Response(
+      `Unknown device SN=${sn} — pair it first in-app (Settings → Biometric Device → Connect a Device)`,
+      { status: 401 },
+    )
   }
 
-  // Update last ping + capture device SN on first connect
-  const pingUpdate: Record<string, unknown> = { last_ping_at: new Date().toISOString() }
-  if (sn) pingUpdate.device_sn = sn
-  await supabase.from('biometric_devices').update(pingUpdate).eq('id', device.id)
+  await supabase.from('biometric_devices').update({ last_ping_at: new Date().toISOString() }).eq('id', device.id)
 
   // ── Route by path + method ────────────────────────────────────────────────────
 
   // Command poll — device asks "any jobs for me?"
-  if (subPath === 'iclock/getrequest') {
+  if (url.pathname.endsWith('/getrequest')) {
     return new Response('OK', { status: 200 })
   }
 
@@ -144,25 +163,42 @@ Deno.serve(async (req: Request) => {
       // Look up member by (gym_id, biometric_id)
       const { data: member } = await supabase
         .from('members')
-        .select('id, status')
+        .select('id, first_name, last_name, status')
         .eq('gym_id', device.gym_id)
         .eq('biometric_id', rec.employeeId)
         .maybeSingle()
 
       if (!member) {
-        // Unknown employee ID — skip silently
-        // Gym staff can assign biometric_id in the member edit sheet
-        console.warn(`[biometric-adms] Unknown employee_id=${rec.employeeId} gym=${device.gym_id}`)
+        // Unknown employee ID — gym staff can assign biometric_id in the member edit sheet
+        await logError(`Unknown employee_id=${rec.employeeId} — no member has this Biometric ID`, device.gym_id, { sn, employeeId: rec.employeeId })
         continue
       }
 
-      if (member.status !== 'active') continue
+      if (member.status !== 'active') {
+        // Device authenticates locally — it already let them in. We can't
+        // block that, only alert the owner it happened.
+        const name = `${member.first_name} ${member.last_name ?? ''}`.trim()
+        await supabase.rpc('notify_owner_expired_checkin', {
+          p_gym_id: device.gym_id,
+          p_member_name: name,
+          p_member_status: member.status,
+          p_method: 'biometric',
+        })
+        continue
+      }
 
-      // Duplicate check: one punch per member per calendar day (IST = UTC+5:30)
-      const ist = new Date(rec.datetime + 'Z')
-      ist.setHours(ist.getHours() + 5, ist.getMinutes() + 30)
-      const dayStartIst = new Date(ist.getFullYear(), ist.getMonth(), ist.getDate())
-      const dayStartUtc = new Date(dayStartIst.getTime() - 5.5 * 60 * 60 * 1000)
+      // Device sends local IST wall-clock time with no TZ marker — convert to real UTC.
+      const checkedInAtUtc = new Date(new Date(rec.datetime + 'Z').getTime() - 5.5 * 60 * 60 * 1000)
+
+      // Duplicate check: one punch per member per calendar day (IST).
+      // Derive the IST calendar date from the already-correct UTC instant above —
+      // using UTC-only getters/setters avoids the day-overflow bug that broke this
+      // for any punch after ~18:30 IST when it used local setHours()/getFullYear().
+      const istView = new Date(checkedInAtUtc.getTime() + 5.5 * 60 * 60 * 1000)
+      const dayStartUtc = new Date(
+        Date.UTC(istView.getUTCFullYear(), istView.getUTCMonth(), istView.getUTCDate())
+        - 5.5 * 60 * 60 * 1000,
+      )
 
       const { data: existing } = await supabase
         .from('check_ins')
@@ -174,9 +210,6 @@ Deno.serve(async (req: Request) => {
 
       if (existing) continue
 
-      // Device sends local IST wall-clock time with no TZ marker — convert to real UTC.
-      const checkedInAtUtc = new Date(new Date(rec.datetime + 'Z').getTime() - 5.5 * 60 * 60 * 1000)
-
       const { error: insErr } = await supabase.from('check_ins').insert({
         member_id:     member.id,
         gym_id:        device.gym_id,
@@ -184,7 +217,11 @@ Deno.serve(async (req: Request) => {
         checked_in_at: checkedInAtUtc.toISOString(),
       })
 
-      if (!insErr) inserted++
+      if (!insErr) {
+        inserted++
+      } else {
+        await logError(`Failed to insert check-in: ${insErr.message}`, device.gym_id, { sn, employeeId: rec.employeeId })
+      }
     }
 
     return new Response(`OK: ${inserted}`, { status: 200 })

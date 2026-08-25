@@ -14,6 +14,26 @@ class WhatsNewEntry {
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
     version: '1.0.2+46',
+    date: '23 Aug 2026',
+    title: 'Multiple gym branches',
+    bullets: [
+      'Owners can now add more than one gym branch to a single account and switch between them — each branch keeps its own members, billing, check-ins, staff and reports.',
+      'Switch or add a branch from More → Gym Branches.',
+      'WhatsApp, Razorpay and biometric devices are set up per branch — a new branch starts with these disconnected until you configure them for it.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.2+46',
+    date: '22 Aug 2026',
+    title: 'Biometric attendance (beta)',
+    bullets: [
+      'Connect an eSSL/ZKTeco fingerprint device so members check in automatically — no manual entry, no shared QR code.',
+      'Set up from More → Biometric Device — pair your device by serial number, then add each member\'s Biometric ID from their profile.',
+      'Beta: works end-to-end in testing, still being validated against real hardware. Contact us if your device behaves differently.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.2+46',
     date: '20 Aug 2026',
     title: 'Delete invoices (owner)',
     bullets: [

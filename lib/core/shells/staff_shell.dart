@@ -14,9 +14,15 @@ import '../../core/widgets/plan_expiry_banner.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/staff/notifications/notifications_screen.dart';
 import '../../features/staff/paywall/paywall_screen.dart';
+import '../../features/staff/settings/gym_branches_sheet.dart';
+import '../../features/staff/settings/gym_code_sheet.dart';
+import '../../features/staff/settings/settings_screen.dart';
 import '../../shared/widgets/responsive_content.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
+// Sheet-opening items use a non-route key (never matches a real
+// GoRouterState.matchedLocation) so they're never highlighted as "active"
+// and never intercepted by the route-based visibility switch below.
 const _kMoreItems = [
   _MoreItem(
     icon: Icons.person_add_outlined,
@@ -49,6 +55,24 @@ const _kMoreItems = [
     route: '/staff/staff',
   ),
   _MoreItem(
+    icon: Icons.business_outlined,
+    label: 'Gym Branches',
+    route: '#gym-branches',
+    sheetBuilder: _buildGymBranchesSheet,
+  ),
+  _MoreItem(
+    icon: Icons.fingerprint,
+    label: 'Biometric Device',
+    route: '#biometric-device',
+    sheetBuilder: _buildBiometricDeviceSheet,
+  ),
+  _MoreItem(
+    icon: Icons.qr_code_2_outlined,
+    label: 'Member Signup Code',
+    route: '#gym-code',
+    sheetBuilder: _buildGymCodeSheet,
+  ),
+  _MoreItem(
     icon: Icons.bar_chart_outlined,
     label: 'Reports',
     route: '/staff/reports',
@@ -66,6 +90,10 @@ const _kMoreItems = [
   ),
 ];
 
+Widget _buildGymBranchesSheet(BuildContext context) => const GymBranchesSheet();
+Widget _buildBiometricDeviceSheet(BuildContext context) => const BiometricDeviceSheet();
+Widget _buildGymCodeSheet(BuildContext context) => const GymCodeSheet();
+
 List<_MoreItem> _visibleMoreItemsFor(String? role) => _kMoreItems.where((item) {
   if (item.route == '/staff/classes') return RoleAccess.canSeeBatches(role);
   if (item.route == '/staff/leads') return RoleAccess.canSeeLeads(role);
@@ -73,6 +101,8 @@ List<_MoreItem> _visibleMoreItemsFor(String? role) => _kMoreItems.where((item) {
   if (item.route == '/staff/diet-plans') return RoleAccess.canManageDietPlans(role);
   if (item.route == '/staff/reminders') return RoleAccess.canSeeCommunications(role);
   if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(role);
+  if (item.route == '#gym-branches') return RoleAccess.canSeeSettings(role);
+  if (item.route == '#biometric-device') return RoleAccess.canSeeSettings(role);
   if (item.route == '/staff/reports') return RoleAccess.canSeeReports(role);
   if (item.route == '/staff/expenses') return RoleAccess.canSeeExpenses(role);
   if (item.route == '/staff/settings') return RoleAccess.canSeeSettings(role);
@@ -257,8 +287,20 @@ class _StaffSideNav extends StatelessWidget {
                       icon: item.icon,
                       activeIcon: item.icon,
                       label: item.label,
-                      active: GoRouterState.of(context).matchedLocation.startsWith(item.route),
-                      onTap: () => context.push(item.route),
+                      active: item.sheetBuilder == null &&
+                          GoRouterState.of(context).matchedLocation.startsWith(item.route),
+                      onTap: () {
+                        if (item.sheetBuilder != null) {
+                          showAdaptiveSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            useSafeArea: true,
+                            builder: item.sheetBuilder!,
+                          );
+                        } else {
+                          context.push(item.route);
+                        }
+                      },
                     ),
                 ],
               ),
@@ -456,9 +498,18 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
         items: items,
         currentRoute: currentRoute,
         profile: widget.profile,
-        onTap: (route) {
+        onTap: (item) {
           Navigator.of(context).pop();
-          context.push(route);
+          if (item.sheetBuilder != null) {
+            showAdaptiveSheet(
+              context: context,
+              isScrollControlled: true,
+              useSafeArea: true,
+              builder: item.sheetBuilder!,
+            );
+          } else {
+            context.push(item.route);
+          }
         },
         onSignOut: () {
           Navigator.of(context).pop();
@@ -654,7 +705,7 @@ class _MoreSheet extends StatelessWidget {
   final List<_MoreItem> items;
   final String currentRoute;
   final Map<String, dynamic>? profile;
-  final void Function(String route) onTap;
+  final void Function(_MoreItem item) onTap;
   final VoidCallback onSignOut;
 
   const _MoreSheet({
@@ -777,7 +828,7 @@ class _MoreSheet extends StatelessWidget {
                 children: [
                   for (final item in items) ...[
                     const Divider(height: 1, color: AppTheme.border),
-                    _MoreRow(item: item, onTap: () => onTap(item.route)),
+                    _MoreRow(item: item, onTap: () => onTap(item)),
                   ],
                 ],
               ),
@@ -868,7 +919,15 @@ class _Tab {
 class _MoreItem {
   final IconData icon;
   final String label;
+  /// A real go_router route for pushed items, or a non-route `#key` for
+  /// items that open a bottom sheet instead (see [sheetBuilder]) — a `#`
+  /// prefix never matches GoRouterState.matchedLocation, so it's never
+  /// highlighted as active and never intercepted by go_router.
   final String route;
+
+  /// When set, tapping this item opens this builder in a bottom sheet
+  /// instead of pushing [route].
+  final WidgetBuilder? sheetBuilder;
 
   /// Coachmark key gating a "NEW" badge — reuses the same per-user "seen"
   /// tracking as the tour tooltips. Null = no badge for this item.
@@ -877,6 +936,7 @@ class _MoreItem {
     required this.icon,
     required this.label,
     required this.route,
+    this.sheetBuilder,
     this.newBadgeKey,
   });
 }

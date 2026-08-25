@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:country_picker/country_picker.dart';
 import 'package:currency_picker/currency_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../../core/widgets/auth_blob_background.dart';
@@ -27,7 +28,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _gymNameCtrl = TextEditingController();
   final _firstCtrl = TextEditingController();
-  final _lastCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
@@ -78,7 +78,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   void dispose() {
     _gymNameCtrl.dispose();
     _firstCtrl.dispose();
-    _lastCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     _passwordCtrl.dispose();
@@ -131,6 +130,11 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
 
+    // Session now exists — account creation is genuinely done here, distinct
+    // from gym setup below (a signed-up user with a setup failure should
+    // still count as a registration).
+    unawaited(AppEvents.signUpCompleted());
+
     // Session now exists — create the gym + owner profile inline (was the
     // separate /gym-setup screen).
     final phoneDigits = _phoneCtrl.text.trim();
@@ -156,13 +160,18 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
 
+    unawaited(AppEvents.gymSetupCompleted());
+
     final prefs = await SharedPreferences.getInstance();
+    // home_route stays the real destination for future cold starts — the
+    // first-setup screen below is a one-time interstitial, not where a
+    // returning session should land.
     await prefs.setString('home_route', '/staff/dashboard');
     ref.invalidate(userTypeProvider);
     ref.invalidate(staffProfileProvider);
     signupHandshakeInProgress.value = false;
     if (!mounted) return;
-    context.go('/staff/dashboard');
+    context.go('/staff/first-setup');
   }
 
   Future<void> _resendOtp() async {
@@ -219,7 +228,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     final phoneDigits = _phoneCtrl.text.trim();
     final error = await notifier.signUp(
       firstName: _firstCtrl.text.trim(),
-      lastName: _lastCtrl.text.trim(),
+      lastName: '',
       email: _emailCtrl.text.trim(),
       phone: phoneDigits.isEmpty ? '' : '+${_country.phoneCode}$phoneDigits',
       password: _passwordCtrl.text,
@@ -280,11 +289,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   color: AppTheme.textPrimary,
                   letterSpacing: -0.4,
                 ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '1 day full access. No credit card required.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 28),
           if (_error != null) ...[
@@ -354,44 +358,19 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           ),
           const SizedBox(height: 16),
 
-          // First + last name
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const AuthFieldLabel('First name'),
-                    const SizedBox(height: 6),
-                    AuthPillField(
-                      controller: _firstCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      hint: 'Rahul',
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'First name is required' : null,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const AuthFieldLabel('Last name'),
-                    const SizedBox(height: 6),
-                    AuthPillField(
-                      controller: _lastCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      hint: 'Sharma',
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Last name is required' : null,
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          // Labelled "Name" (not "First name") — last name isn't collected
+          // here, so calling this "first" would promise a field that doesn't
+          // exist. Still wired to the same firstName param/column; asked
+          // later in Settings if the owner wants a last name filled in, and
+          // setup_gym already tolerates it being blank.
+          const AuthFieldLabel('Name'),
+          const SizedBox(height: 6),
+          AuthPillField(
+            controller: _firstCtrl,
+            textCapitalization: TextCapitalization.words,
+            hint: 'Rahul',
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Name is required' : null,
           ),
           const SizedBox(height: 16),
 

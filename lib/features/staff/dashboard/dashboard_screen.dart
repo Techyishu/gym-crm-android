@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/advance_payment_date.dart';
@@ -16,6 +14,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../members/members_screen.dart' show showAddMemberSheet;
 import '../notifications/notifications_screen.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
@@ -235,16 +234,21 @@ class _DashboardBody extends ConsumerWidget {
     final showChecklist   = memberCount < 3 || planCount == 0 || allTimeCheckins == 0;
 
     final header = [
-      _Header(gymName: gymName, ownerName: ownerName),
-      const SizedBox(height: 12),
-      if (canBilling) ...[
-        _SubscriptionBanner(gym: gym),
-        const SizedBox(height: 12),
-      ],
-      _MemberCodeCard(gymName: gymName, memberCode: gym?['member_code'] as String?),
+      // Trial/plan status moved into the header itself as a small pill under
+      // the gym name (see _Header) — it used to be a full-width card here,
+      // competing with the checklist for the most valuable spot on a new
+      // gym's dashboard. The member-signup code moved to the Members screen,
+      // where it's contextually relevant (inviting members) instead of
+      // permanently occupying the home screen.
+      _Header(gymName: gymName, ownerName: ownerName, gym: gym, showBilling: canBilling),
       const SizedBox(height: 12),
       if (showChecklist) ...[
-        _SetupChecklist(memberCount: memberCount, planCount: planCount, allTimeCheckins: allTimeCheckins),
+        _SetupChecklist(
+          gym: gym,
+          memberCount: memberCount,
+          planCount: planCount,
+          allTimeCheckins: allTimeCheckins,
+        ),
         const SizedBox(height: 12),
       ],
     ];
@@ -324,16 +328,46 @@ class _DashboardBody extends ConsumerWidget {
 
 // ─── Setup checklist (getting started) ────────────────────────────────────────
 
-class _SetupChecklist extends StatelessWidget {
+class _SetupChecklist extends ConsumerWidget {
+  final Map<String, dynamic>? gym;
   final int memberCount, planCount, allTimeCheckins;
-  const _SetupChecklist({required this.memberCount, required this.planCount, required this.allTimeCheckins});
+  const _SetupChecklist({
+    required this.gym,
+    required this.memberCount,
+    required this.planCount,
+    required this.allTimeCheckins,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final whatsappOn = gym?['whatsapp_reminder_enabled'] == true;
+
+    // Labels name the outcome, not the mechanic — "Add 3 members" tells you
+    // what to do, "see your dashboard come alive" tells you why it's worth
+    // doing. "Add members" opens the sheet directly instead of routing to the
+    // members list first — one less stop between intent and the first value.
     final steps = [
-      (label: 'Add members',    done: memberCount >= 3,    route: '/staff/members'),
-      (label: 'Create plan',    done: planCount > 0,       route: '/staff/billing'),
-      (label: 'First check-in', done: allTimeCheckins > 0, route: '/staff/check-in'),
+      (
+        label: 'Add 3 members — see your dashboard come alive',
+        done: memberCount >= 3,
+        onTap: () => showAddMemberSheet(context)
+            .then((_) => ref.invalidate(_dashboardDataProvider)),
+      ),
+      (
+        label: 'Set your monthly fee',
+        done: planCount > 0,
+        onTap: () => context.push('/staff/billing'),
+      ),
+      (
+        label: 'Try a check-in',
+        done: allTimeCheckins > 0,
+        onTap: () => context.push('/staff/check-in'),
+      ),
+      (
+        label: 'Turn on WhatsApp reminders',
+        done: whatsappOn,
+        onTap: () => context.push('/staff/reminders'),
+      ),
     ];
     final doneCount = steps.where((s) => s.done).length;
 
@@ -345,13 +379,13 @@ class _SetupChecklist extends StatelessWidget {
           const Text('Getting started',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
           const Spacer(),
-          Text('$doneCount / 3', style: AppTheme.numberStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.inkSoft)),
+          Text('$doneCount / ${steps.length}', style: AppTheme.numberStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.inkSoft)),
         ]),
         const SizedBox(height: 10),
         ClipRRect(
           borderRadius: BorderRadius.circular(99),
           child: LinearProgressIndicator(
-            value: doneCount / 3,
+            value: doneCount / steps.length,
             minHeight: 5,
             backgroundColor: AppTheme.surface2,
             valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accent),
@@ -361,7 +395,7 @@ class _SetupChecklist extends StatelessWidget {
         ...steps.map((s) => Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: GestureDetector(
-            onTap: () => context.push(s.route),
+            onTap: s.onTap,
             behavior: HitTestBehavior.opaque,
             child: Row(children: [
               Container(
@@ -375,14 +409,15 @@ class _SetupChecklist extends StatelessWidget {
                     : null,
               ),
               const SizedBox(width: 10),
-              Text(s.label,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  color: s.done ? AppTheme.inkSoft : AppTheme.ink,
-                  decoration: s.done ? TextDecoration.lineThrough : null,
-                )),
-              const Spacer(),
+              Expanded(
+                child: Text(s.label,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: s.done ? AppTheme.inkSoft : AppTheme.ink,
+                    decoration: s.done ? TextDecoration.lineThrough : null,
+                  )),
+              ),
               if (!s.done) const Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
             ]),
           ),
@@ -394,20 +429,28 @@ class _SetupChecklist extends StatelessWidget {
 
 // ─── Quick actions ────────────────────────────────────────────────────────────
 
-class _QuickActions extends StatelessWidget {
+class _QuickActions extends ConsumerWidget {
   final bool canCollect;
   final bool canLeads;
   const _QuickActions({required this.canCollect, required this.canLeads});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final items = [
-      (icon: Icons.person_add_outlined,   label: 'Add member', route: '/staff/members',  accent: true),
+      // Opens the add-member sheet directly instead of routing to the
+      // members list first — same shortcut the dashboard checklist uses.
+      (
+        icon: Icons.person_add_outlined, label: 'Add member', accent: true,
+        onTap: () => showAddMemberSheet(context).then((_) => ref.invalidate(_dashboardDataProvider)),
+      ),
       if (canCollect)
-        (icon: Icons.payments_outlined,   label: 'Collect',    route: '/staff/billing',  accent: false),
+        (icon: Icons.payments_outlined, label: 'Collect', accent: false,
+          onTap: () => context.push('/staff/billing')),
       if (canLeads)
-        (icon: Icons.person_outline,      label: 'Enquiry',    route: '/staff/leads',    accent: false),
-      (icon: Icons.qr_code_scanner,       label: 'Scan QR',    route: '/staff/check-in', accent: false),
+        (icon: Icons.person_outline, label: 'Enquiry', accent: false,
+          onTap: () => context.push('/staff/leads')),
+      (icon: Icons.qr_code_scanner, label: 'Scan QR', accent: false,
+        onTap: () => context.push('/staff/check-in')),
     ];
 
     return Container(
@@ -416,7 +459,7 @@ class _QuickActions extends StatelessWidget {
       child: Row(
         children: items.map((item) => Expanded(
           child: GestureDetector(
-            onTap: () => context.push(item.route),
+            onTap: item.onTap,
             behavior: HitTestBehavior.opaque,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Container(
@@ -679,11 +722,33 @@ class _NewLeads extends StatelessWidget {
 class _Header extends ConsumerWidget {
   final String gymName;
   final String ownerName;
-  const _Header({required this.gymName, required this.ownerName});
+  final Map<String, dynamic>? gym;
+  final bool showBilling;
+  const _Header({required this.gymName, required this.ownerName, this.gym, this.showBilling = false});
 
   static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   static const _months = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
+
+  // Same label logic the old full-width _SubscriptionBanner card used —
+  // just rendered as a compact pill under the gym name instead of a
+  // separate card, so it stays visible every time the dashboard opens
+  // without competing with the checklist for space.
+  static String _planLabel(Map<String, dynamic>? gym) {
+    final plan = gym?['plan'] as String?;
+    final daysLeft = planExpiryDaysRemaining(gym);
+    final isTrial = gym?['trial_ends_at'] != null && gym?['plan_expires_at'] == null;
+
+    if (isTrial) {
+      return daysLeft != null
+          ? (daysLeft <= 0 ? 'Trial ends today' : 'Trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}')
+          : 'Trial active';
+    }
+    final planName = plan != null && plan.isNotEmpty ? plan[0].toUpperCase() + plan.substring(1) : 'Free';
+    return daysLeft != null
+        ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
+        : '$planName plan';
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -692,6 +757,7 @@ class _Header extends ConsumerWidget {
     final unreadCount = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -699,6 +765,25 @@ class _Header extends ConsumerWidget {
             const SizedBox(height: 2),
             Text(gymName, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.4)),
+            if (showBilling && gym != null) ...[
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: () => context.push('/staff/subscription'),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.sell_outlined, size: 13, color: AppTheme.accent),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(_planLabel(gym),
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                    ),
+                    const Icon(Icons.chevron_right, size: 14, color: AppTheme.accent),
+                  ],
+                ),
+              ),
+            ],
           ]),
         ),
         GestureDetector(
@@ -749,120 +834,6 @@ class _Header extends ConsumerWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-// ─── Member self-serve signup code ─────────────────────────────────────────────
-
-class _MemberCodeCard extends StatelessWidget {
-  final String gymName;
-  final String? memberCode;
-  const _MemberCodeCard({required this.gymName, required this.memberCode});
-
-  @override
-  Widget build(BuildContext context) {
-    final code = memberCode;
-    if (code == null || code.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.person_add_outlined, size: 18, color: AppTheme.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: code));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Gym code copied')),
-                );
-              },
-              child: RichText(
-                text: TextSpan(
-                  style: const TextStyle(fontSize: 13, color: AppTheme.ink),
-                  children: [
-                    const TextSpan(text: 'Gym code for member signup: '),
-                    TextSpan(
-                      text: code,
-                      style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.share_outlined, size: 18, color: AppTheme.inkHint),
-            onPressed: () {
-              final box = context.findRenderObject() as RenderBox?;
-              Share.share(
-                'Set up your $gymName member portal — open the GymCRM app, '
-                'tap Member, "Create your account", and enter gym code $code with your phone number.',
-                sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Subscription status banner ────────────────────────────────────────────────
-
-class _SubscriptionBanner extends StatelessWidget {
-  final Map<String, dynamic>? gym;
-  const _SubscriptionBanner({required this.gym});
-
-  @override
-  Widget build(BuildContext context) {
-    final plan = gym?['plan'] as String?;
-    final daysLeft = planExpiryDaysRemaining(gym);
-    final isTrial = gym?['trial_ends_at'] != null && gym?['plan_expires_at'] == null;
-
-    final String label;
-    if (isTrial) {
-      label = daysLeft != null
-          ? (daysLeft <= 0
-              ? 'Trial ends today'
-              : 'Trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}')
-          : 'Trial active';
-    } else {
-      final planName = plan != null && plan.isNotEmpty
-          ? plan[0].toUpperCase() + plan.substring(1)
-          : 'Free';
-      label = daysLeft != null
-          ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
-          : '$planName plan';
-    }
-
-    return GestureDetector(
-      onTap: () => context.push('/staff/subscription'),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.sell_outlined, size: 18, color: AppTheme.accent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-            ),
-            const Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
-          ],
-        ),
-      ),
     );
   }
 }

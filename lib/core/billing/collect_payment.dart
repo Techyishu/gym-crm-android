@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/app_events.dart';
 import '../utils/formatters.dart';
 
-const partialPaymentHint = 'Partial payment available — you can collect less than the full amount due.';
+const partialPaymentHint =
+    'Partial payment available — you can collect less than the full amount due.';
 
 /// If [enteredAmount] is less than [dueAmount], confirms the remaining
 /// balance with the user before proceeding. Returns false if they cancel.
@@ -24,8 +27,14 @@ Future<bool> confirmPartialIfNeeded(
         '$currencySymbol${remaining.toStringAsFixed(0)} will remain due.',
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('OK, collect')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('OK, collect'),
+        ),
       ],
     ),
   );
@@ -39,7 +48,10 @@ Future<double> paidSoFar(String invoiceId) async {
       .select('amount')
       .eq('invoice_id', invoiceId)
       .eq('status', 'succeeded');
-  return (rows as List).fold<double>(0, (sum, p) => sum + ((p as Map)['amount'] as num).toDouble());
+  return (rows as List).fold<double>(
+    0,
+    (sum, p) => sum + ((p as Map)['amount'] as num).toDouble(),
+  );
 }
 
 /// Remaining balance on an invoice, given its total amount.
@@ -69,27 +81,27 @@ Future<bool> recordInvoicePayment({
 }) async {
   final client = Supabase.instance.client;
 
-  await client.from('payments').insert({
-    'invoice_id': invoiceId,
-    'amount': amount,
-    'method': method,
-    'status': 'succeeded',
-    'reference_no': referenceNo,
-    'notes': notes,
-    'recorded_by': recordedBy,
-  });
-
-  final invoice = await client.from('invoices').select('amount').eq('id', invoiceId).single();
-  final invoiceAmount = (invoice['amount'] as num).toDouble();
-  final totalPaid = await paidSoFar(invoiceId);
-  final isFullyPaid = totalPaid >= invoiceAmount;
-
-  await client.from('invoices').update({
-    'status': isFullyPaid ? 'paid' : 'partial',
-    if (isFullyPaid) 'paid_at': DateTime.now().toUtc().toIso8601String(),
-  }).eq('id', invoiceId);
-
-  return isFullyPaid;
+  // The database locks the invoice and calculates the remaining balance in one
+  // transaction. Never trust a client-side total for a financial write.
+  final result =
+      await client.rpc(
+            'record_invoice_payment_atomic',
+            params: {
+              'p_invoice_id': invoiceId,
+              'p_amount': amount,
+              'p_method': method,
+              'p_reference_no': referenceNo,
+              'p_notes': notes,
+            },
+          )
+          as Map;
+  if (result['ok'] != true) {
+    throw StateError(
+      (result['error'] as String?) ?? 'Could not record payment.',
+    );
+  }
+  unawaited(AppEvents.paymentRecorded());
+  return result['is_fully_paid'] == true;
 }
 
 /// Total outstanding balance across a member's unpaid/partially-paid invoices.
@@ -106,7 +118,10 @@ Future<double> memberDueAmount(String memberId) async {
     final payments = (inv['payments'] as List?) ?? [];
     final paid = payments
         .where((p) => (p as Map)['status'] == 'succeeded')
-        .fold<double>(0, (sum, p) => sum + ((p as Map)['amount'] as num).toDouble());
+        .fold<double>(
+          0,
+          (sum, p) => sum + ((p as Map)['amount'] as num).toDouble(),
+        );
     due += (amount - paid).clamp(0, amount);
   }
   return due;

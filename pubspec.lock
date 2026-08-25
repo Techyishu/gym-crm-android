@@ -177,14 +177,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.2"
-  copy_with_extension:
-    dependency: transitive
-    description:
-      name: copy_with_extension
-      sha256: "0447e5ea09845b275fbeaa7605bc85e74da759788678760b2a6c4e06ca622410"
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.0.1"
   country_picker:
     dependency: "direct main"
     description:
@@ -456,14 +448,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  flutter_zkteco:
-    dependency: "direct main"
-    description:
-      name: flutter_zkteco
-      sha256: acb3ad712773f2d8903dfe91174479bdcdc8092ad327588c9ff10b900c1be93d
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.2.0"
   functions_client:
     dependency: transitive
     description:

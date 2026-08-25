@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:country_picker/country_picker.dart';
 import 'package:currency_picker/currency_picker.dart';
+import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../../shared/widgets/redesign.dart';
@@ -132,15 +134,25 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
       _submitted = true;
       _setupStepIndex = _setupSteps.length - 1;
     });
+
+    // This screen only renders for a brand-new account (the router only
+    // sends users here when no profile exists yet), so both registration
+    // and gym setup are genuinely completing here for the first time.
+    unawaited(AppEvents.signUpCompleted());
+    unawaited(AppEvents.gymSetupCompleted());
+
     await Future.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
 
     final prefs = await SharedPreferences.getInstance();
+    // home_route stays the real destination for future cold starts — the
+    // first-setup screen below is a one-time interstitial, not where a
+    // returning session should land.
     await prefs.setString('home_route', '/staff/dashboard');
     if (!mounted) return;
     ref.invalidate(userTypeProvider);
     ref.invalidate(staffProfileProvider);
-    context.go('/staff/dashboard');
+    context.go('/staff/first-setup');
   }
 
   Future<void> _cancelSetup() async {

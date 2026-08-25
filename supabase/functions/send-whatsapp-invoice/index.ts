@@ -223,6 +223,14 @@ async function buildInvoicePdf(inv: Record<string, unknown>): Promise<Uint8Array
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
+  // This endpoint is invoked only by the database triggers. The shared cron
+  // secret is already used by the project's scheduled database calls.
+  const auth = req.headers.get('Authorization') ?? ''
+  const cronSecret = Deno.env.get('CRON_SECRET')
+  if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
+    return new Response('Unauthorized', { status: 401 })
+  }
+
   const { invoice_id: invoiceId, event } = await req.json().catch(() => ({}))
   if (!invoiceId) return new Response('invoice_id required', { status: 400 })
   const invoiceEvent: InvoiceEvent = event === 'paid' ? 'paid' : 'generated'
@@ -230,7 +238,7 @@ Deno.serve(async (req: Request) => {
   const { data: inv, error: invErr } = await supabase
     .from('invoices')
     .select(
-      '*, members(first_name, last_name, phone, email), gyms(id, name, plan, legacy_pricing, whatsapp_credits, whatsapp_monthly_quota_used, settings)',
+      '*, members(first_name, last_name, phone, email), gyms(id, name, plan, legacy_pricing, whatsapp_credits, whatsapp_monthly_quota_used, whatsapp_invoice_enabled, settings)',
     )
     .eq('id', invoiceId)
     .single()
@@ -244,6 +252,12 @@ Deno.serve(async (req: Request) => {
   const gym = inv.gyms as Record<string, unknown> | null
   const phone = member?.phone as string | null
   if (!phone || !gym) return new Response('No phone or gym on invoice', { status: 200 })
+  if (gym.whatsapp_invoice_enabled !== true) {
+    return new Response('Invoice WhatsApp is disabled', { status: 200 })
+  }
+  if (invoiceEvent === 'paid' && inv.status !== 'paid') {
+    return new Response('Invoice is not paid', { status: 409 })
+  }
 
   const quota = planQuota(gym as { plan: string; legacy_pricing?: boolean })
   const quotaUsed = (gym.whatsapp_monthly_quota_used as number) ?? 0

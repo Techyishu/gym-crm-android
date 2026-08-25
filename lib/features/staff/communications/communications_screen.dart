@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
+import '../../auth/providers/auth_provider.dart';
 
 // ─── Screen ────────────────────────────────────────────────────────────────────
 class CommunicationsScreen extends StatelessWidget {
@@ -24,13 +26,13 @@ class CommunicationsScreen extends StatelessWidget {
 }
 
 // ─── WhatsApp Due Reminders card ───────────────────────────────────────────────
-class _WaDueRemindersCard extends StatefulWidget {
+class _WaDueRemindersCard extends ConsumerStatefulWidget {
   const _WaDueRemindersCard();
   @override
-  State<_WaDueRemindersCard> createState() => _WaDueRemindersCardState();
+  ConsumerState<_WaDueRemindersCard> createState() => _WaDueRemindersCardState();
 }
 
-class _WaDueRemindersCardState extends State<_WaDueRemindersCard> {
+class _WaDueRemindersCardState extends ConsumerState<_WaDueRemindersCard> {
   int  _daysFilter = 3;
   List<Map<String, dynamic>> _members = [];
   bool _loading = true;
@@ -50,13 +52,7 @@ class _WaDueRemindersCardState extends State<_WaDueRemindersCard> {
         setState(() => _loading = false);
         return;
       }
-      final profile = await client.from('profiles')
-          .select('gym_id').eq('id', userId).maybeSingle();
-      final gymId = profile?['gym_id'] as String?;
-      if (gymId == null || gymId.isEmpty) {
-        setState(() => _loading = false);
-        return;
-      }
+      final gymId = await ref.read(gymIdProvider.future);
       final todayStr = DateTime.now().toIso8601String().split('T')[0];
 
       dynamic raw;

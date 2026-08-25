@@ -109,6 +109,14 @@ final _memberDietPlansProvider = FutureProvider.family<List<Map<String, dynamic>
   }
 });
 
+// Devices vary in whether they zero-pad employee IDs ("001" vs "1") — normalize
+// on save so it always matches however the device formats it in an ATTLOG push.
+String? _normalizeBiometricId(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+  return trimmed.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+}
+
 void _showFullPhoto(BuildContext context, Member m) {
   final url = MemberPhotoService.photoUrl(m.avatarUrl);
   if (url == null) return;
@@ -172,7 +180,10 @@ class MemberDetailScreen extends ConsumerWidget {
           if (m == null) return const Center(child: Text('Member not found'));
           return RefreshIndicator(
             color: AppTheme.accent,
-            onRefresh: () async => ref.invalidate(_memberDetailProvider(memberId)),
+            onRefresh: () async {
+              ref.invalidate(_memberDetailProvider(memberId));
+              ref.invalidate(_memberCheckInsProvider(memberId));
+            },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
@@ -187,7 +198,7 @@ class MemberDetailScreen extends ConsumerWidget {
                   const SizedBox(height: 12),
                   _MemberQuickActions(member: m, canPii: canPii),
                   const SizedBox(height: 12),
-                  if (canPii) _buildContactInfo(context, m),
+                  if (canPii) _buildContactInfo(context, ref, m, canEdit: canEdit),
                   const SizedBox(height: 12),
                   _buildBatches(ref),
                   const SizedBox(height: 12),
@@ -602,7 +613,7 @@ class MemberDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildContactInfo(BuildContext context, Member m) {
+  Widget _buildContactInfo(BuildContext context, WidgetRef ref, Member m, {required bool canEdit}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -620,11 +631,54 @@ class MemberDetailScreen extends ConsumerWidget {
               _InfoRow(label: 'Phone', value: m.phone ?? '-'),
               if (m.notes != null && m.notes!.isNotEmpty)
                 _InfoRow(label: 'Notes', value: m.notes!),
+              _BiometricIdRow(
+                member: m,
+                canEdit: canEdit,
+                onTap: canEdit ? () => _showEditBiometricIdDialog(context, ref, m) : null,
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _showEditBiometricIdDialog(BuildContext context, WidgetRef ref, Member m) async {
+    final ctrl = TextEditingController(text: m.biometricId ?? '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Biometric Device ID'),
+        content: TextFormField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 20,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            hintText: 'e.g. 001',
+            helperText: 'Employee number enrolled on fingerprint machine',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (saved != true) return;
+
+    try {
+      await Supabase.instance.client
+          .from('members')
+          .update({'biometric_id': _normalizeBiometricId(ctrl.text)})
+          .eq('id', m.id);
+      ref.invalidate(_memberDetailProvider(m.id));
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+      }
+    }
   }
 
   Widget _buildBatches(WidgetRef ref) {
@@ -1498,6 +1552,45 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
+class _BiometricIdRow extends StatelessWidget {
+  final Member member;
+  final bool canEdit;
+  final VoidCallback? onTap;
+  const _BiometricIdRow({required this.member, required this.canEdit, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final value = member.biometricId;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(
+            width: 100,
+            child: Text('Biometric ID', style: TextStyle(color: AppTheme.inkSoft, fontSize: 13, fontWeight: FontWeight.w500)),
+          ),
+          Expanded(
+            child: Text(
+              (value == null || value.isEmpty) ? 'Not set' : value,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: (value == null || value.isEmpty) ? AppTheme.inkHint : AppTheme.ink,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          if (canEdit)
+            GestureDetector(
+              onTap: onTap,
+              child: const Icon(Icons.edit_outlined, size: 16, color: AppTheme.inkHint),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Edit Member Sheet ─────────────────────────────────────────────────────────
 
 class _EditMemberSheet extends StatefulWidget {
@@ -1629,7 +1722,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
         'email': _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
         if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim() else 'phone': null,
         'custom_id': _customIdCtrl.text.trim().isEmpty ? null : _customIdCtrl.text.trim(),
-        'biometric_id': _biometricIdCtrl.text.trim().isEmpty ? null : _biometricIdCtrl.text.trim(),
+        'biometric_id': _normalizeBiometricId(_biometricIdCtrl.text),
         'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
         'status': _status,
         if (_joinedAt != null) 'joined_at': _joinedAt,
@@ -1745,20 +1838,19 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             const SizedBox(height: 14),
             const FieldLabel('Member ID (optional)'),
             TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(hintText: 'e.g. GYM-001', counterText: '')),
-            // BIOMETRIC HIDDEN — re-enable when ready to launch
-            // const SizedBox(height: 12),
-            // TextFormField(
-            //   controller: _biometricIdCtrl,
-            //   maxLength: 20,
-            //   keyboardType: TextInputType.number,
-            //   decoration: const InputDecoration(
-            //     labelText: 'Biometric Device ID (optional)',
-            //     hintText: 'e.g. 001',
-            //     counterText: '',
-            //     prefixIcon: Icon(Icons.fingerprint_outlined),
-            //     helperText: 'Employee number enrolled on fingerprint machine',
-            //   ),
-            // ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _biometricIdCtrl,
+              maxLength: 20,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Biometric Device ID (optional)',
+                hintText: 'e.g. 001',
+                counterText: '',
+                prefixIcon: Icon(Icons.qr_code_outlined),
+                helperText: 'Employee number enrolled on fingerprint machine',
+              ),
+            ),
             const SizedBox(height: 14),
             Row(
               children: [

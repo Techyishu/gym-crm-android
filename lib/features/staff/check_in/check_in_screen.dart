@@ -14,6 +14,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/activity_log_service.dart';
+import '../../../core/services/app_events.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
 import '../../../core/services/review_prompt.dart';
@@ -225,6 +226,12 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       final avatarUrl = member['avatar_url'] as String?;
 
       if ((member['status'] as String) != 'active') {
+        unawaited(client.rpc('notify_owner_expired_checkin', params: {
+          'p_gym_id': gymId,
+          'p_member_name': label,
+          'p_member_status': member['status'],
+          'p_method': method,
+        }));
         return _CheckResult(
           success: false,
           title: label,
@@ -259,6 +266,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       );
       ref.invalidate(_recentCheckInsProvider);
       unawaited(ReviewPrompt.recordSuccess());
+      unawaited(AppEvents.checkinCompleted());
 
       return _CheckResult(
         success: true,
@@ -1469,14 +1477,22 @@ class _RecentCheckInRow extends StatelessWidget {
                     color: isOpen ? AppTheme.statusActiveBg : AppTheme.statusNeutralBg,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    isOpen ? 'On floor' : _formatDuration(checkedAt!, checkedOut),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: isOpen ? AppTheme.statusActive : AppTheme.statusNeutral,
-                    ),
-                  ),
+                  child: isOpen
+                      ? const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.logout, size: 12, color: AppTheme.statusActive),
+                            SizedBox(width: 4),
+                            Text(
+                              'Check out',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.statusActive),
+                            ),
+                          ],
+                        )
+                      : Text(
+                          _formatDuration(checkedAt!, checkedOut),
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.statusNeutral),
+                        ),
                 ),
               ),
             ],

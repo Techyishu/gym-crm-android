@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'router_refresh.dart';
+import 'access/role_access.dart';
 import '../features/auth/providers/auth_provider.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/auth/screens/login_screen.dart';
@@ -15,6 +16,7 @@ import '../features/auth/screens/member_signup_screen.dart';
 import '../features/auth/screens/signup_screen.dart';
 import '../features/auth/screens/forgot_password_screen.dart';
 import '../features/staff/gym_setup/gym_setup_screen.dart';
+import '../features/staff/onboarding/first_setup_screen.dart';
 import '../features/staff/dashboard/dashboard_screen.dart';
 import '../features/staff/members/members_screen.dart';
 import '../features/staff/members/member_detail_screen.dart';
@@ -75,7 +77,10 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/onboarding',
     // Also refresh when the signup handshake guard flips, so the redirect is
     // re-evaluated the moment it releases.
-    refreshListenable: Listenable.merge([refreshStream, signupHandshakeInProgress]),
+    refreshListenable: Listenable.merge([
+      refreshStream,
+      signupHandshakeInProgress,
+    ]),
     redirect: (context, state) async {
       // signUp() is mid create→sign-out→send-OTP handshake: ignore the transient
       // auth events it emits and keep the user on the signup screen so the OTP
@@ -118,27 +123,41 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       final loc = state.matchedLocation;
-      final isAuthRoute = loc.startsWith('/login') ||
+      final isAuthRoute =
+          loc.startsWith('/login') ||
           loc.startsWith('/signup') ||
           loc.startsWith('/forgot-password') ||
           loc == '/onboarding' ||
           loc.startsWith('/legal/');
+      final isStaffRoute = loc.startsWith('/staff/');
+      final isMemberRoute = loc.startsWith('/portal/');
 
       if (user == null) {
         // Stale cache from a previous account must not survive sign-out.
         if (prefs.containsKey('home_route')) await prefs.remove('home_route');
         _gymSetupResolvedFor = null;
-        _sharedPrefs = null; // Force re-init next time so the cleared key is visible
+        _sharedPrefs =
+            null; // Force re-init next time so the cleared key is visible
         return isAuthRoute ? null : '/login';
       }
 
       // Resolve where this user belongs only when it matters (leaving an auth
       // route, or guarding /gym-setup) so we don't hit the DB on every nav.
-      if ((isAuthRoute && !loc.startsWith('/legal/')) || loc == '/gym-setup') {
+      if ((isAuthRoute && !loc.startsWith('/legal/')) ||
+          loc == '/gym-setup' ||
+          isStaffRoute ||
+          isMemberRoute) {
         // Cold-start fast path: the destination was resolved on a previous
         // launch — skip the network round trips that made startup slow.
         final cached = prefs.getString('home_route');
-        if (cached != null) return cached;
+        // A cached home is enough to leave auth, but route authorization still
+        // needs a fresh role lookup for a directly opened portal URL.
+        if (cached != null &&
+            !isStaffRoute &&
+            !isMemberRoute &&
+            loc != '/gym-setup') {
+          return cached;
+        }
 
         // We just resolved this user to /gym-setup; this is GoRouter re-running
         // redirect for that destination. Don't repeat the lookup.
@@ -150,8 +169,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         List<dynamic> results;
         try {
           results = await Future.wait([
-            client.from('profiles').select('id').eq('id', user.id).maybeSingle(),
-            client.from('members').select('id').eq('user_id', user.id).maybeSingle(),
+            client
+                .from('profiles')
+                .select('id, role')
+                .eq('id', user.id)
+                .maybeSingle(),
+            client
+                .from('members')
+                .select('id')
+                .eq('user_id', user.id)
+                .maybeSingle(),
           ]);
         } catch (e) {
           debugPrint('[GymCRM] router redirect lookup failed: $e');
@@ -160,12 +187,38 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
 
         if (results[0] != null) {
+          final role = (results[0] as Map<String, dynamic>)['role'] as String?;
           await prefs.setString('home_route', '/staff/dashboard');
-          return '/staff/dashboard';
+          // Navigation is a convenience layer, not the security boundary (RLS
+          // remains authoritative), but never render a portal or hidden screen
+          // merely because someone guessed its URL.
+          if (isMemberRoute || loc == '/gym-setup' || isAuthRoute) {
+            return '/staff/dashboard';
+          }
+          if ((loc.startsWith('/staff/leads') &&
+                  !RoleAccess.canSeeLeads(role)) ||
+              (loc.startsWith('/staff/reports') &&
+                  !RoleAccess.canSeeReports(role)) ||
+              (loc.startsWith('/staff/settings') &&
+                  !RoleAccess.canSeeSettings(role)) ||
+              (loc.startsWith('/staff/reminders') &&
+                  !RoleAccess.canSeeCommunications(role)) ||
+              (loc.startsWith('/staff/communications') &&
+                  !RoleAccess.canSeeCommunications(role)) ||
+              (loc.startsWith('/staff/staff') &&
+                  !RoleAccess.canSeeStaff(role)) ||
+              (loc.startsWith('/staff/expenses') &&
+                  !RoleAccess.canSeeExpenses(role))) {
+            return '/staff/dashboard';
+          }
+          return null;
         }
         if (results[1] != null) {
           await prefs.setString('home_route', '/portal/home');
-          return '/portal/home';
+          if (isStaffRoute || loc == '/gym-setup' || isAuthRoute) {
+            return '/portal/home';
+          }
+          return null;
         }
 
         // Brand-new owner who signed up but hasn't created a gym yet —
@@ -186,10 +239,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/consent',
         builder: (_, __) => const ConsentScreen(),
       ),
-      GoRoute(
-        path: '/login',
-        builder: (_, __) => const LoginScreen(),
-      ),
+      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(
         path: '/login/phone-otp',
         builder: (_, __) => const PhoneOtpScreen(),
@@ -198,18 +248,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/login/member-signup',
         builder: (_, __) => const MemberSignupScreen(),
       ),
-      GoRoute(
-        path: '/signup',
-        builder: (_, __) => const SignupScreen(),
-      ),
+      GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
       GoRoute(
         path: '/forgot-password',
         builder: (_, __) => const ForgotPasswordScreen(),
       ),
-      GoRoute(
-        path: '/gym-setup',
-        builder: (_, __) => const GymSetupScreen(),
-      ),
+      GoRoute(path: '/gym-setup', builder: (_, __) => const GymSetupScreen()),
 
       // Staff shell — 4 branches: Home, Members, Billing, Check-in
       StatefulShellRoute.indexedStack(
@@ -234,7 +278,9 @@ final routerProvider = Provider<GoRouter>((ref) {
                 routes: [
                   GoRoute(
                     path: ':id',
-                    builder: (_, state) => MemberDetailScreen(memberId: state.pathParameters['id']!),
+                    builder: (_, state) => MemberDetailScreen(
+                      memberId: state.pathParameters['id']!,
+                    ),
                   ),
                 ],
               ),
@@ -264,6 +310,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Non-shell staff routes (full screen)
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/first-setup',
+        builder: (_, __) => const FirstSetupScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
         path: '/staff/upcoming-payments',
         builder: (_, __) => const UpcomingPaymentsScreen(),
       ),
@@ -272,17 +323,61 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/staff/subscription',
         builder: (_, __) => const SubscriptionScreen(),
       ),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/classes', builder: (_, __) => const ClassesScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/leads', builder: (_, __) => const LeadsScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/expenses', builder: (_, __) => const ExpensesScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/reports', builder: (_, __) => const ReportsScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/settings', builder: (_, __) => const SettingsScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/reminders', builder: (_, __) => const RemindersScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/communications', builder: (_, __) => const CommunicationsScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/staff', builder: (_, __) => const StaffScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/workout-plans', builder: (_, __) => const StaffWorkoutPlansScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/diet-plans', builder: (_, __) => const StaffDietPlansScreen()),
-      GoRoute(parentNavigatorKey: rootNavigatorKey, path: '/staff/notifications', builder: (_, __) => const NotificationsScreen()),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/classes',
+        builder: (_, __) => const ClassesScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/leads',
+        builder: (_, __) => const LeadsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/expenses',
+        builder: (_, __) => const ExpensesScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/reports',
+        builder: (_, __) => const ReportsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/settings',
+        builder: (_, __) => const SettingsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/reminders',
+        builder: (_, __) => const RemindersScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/communications',
+        builder: (_, __) => const CommunicationsScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/staff',
+        builder: (_, __) => const StaffScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/workout-plans',
+        builder: (_, __) => const StaffWorkoutPlansScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/diet-plans',
+        builder: (_, __) => const StaffDietPlansScreen(),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/notifications',
+        builder: (_, __) => const NotificationsScreen(),
+      ),
 
       // Member shell with bottom nav
       StatefulShellRoute.indexedStack(
@@ -332,10 +427,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
-      GoRoute(
-        path: '/portal/qr',
-        builder: (_, __) => const MemberQrScreen(),
-      ),
+      GoRoute(path: '/portal/qr', builder: (_, __) => const MemberQrScreen()),
       GoRoute(
         path: '/portal/heatmap',
         builder: (_, __) => const AttendanceHeatmapScreen(),
@@ -345,7 +437,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/invoice/:id',
-        builder: (_, state) => InvoiceDetailScreen(invoiceId: state.pathParameters['id']!),
+        builder: (_, state) =>
+            InvoiceDetailScreen(invoiceId: state.pathParameters['id']!),
       ),
 
       // Legal routes — accessible from signup + settings (no auth required)
@@ -377,4 +470,3 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   return router;
 });
-

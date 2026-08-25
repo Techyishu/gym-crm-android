@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart';
@@ -211,6 +213,24 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       final gymId = await ref.read(gymIdProvider.future);
       final client = Supabase.instance.client;
 
+      // Real (non-demo) member count before this import, so a bulk import
+      // that jumps straight past 1 or 3 members doesn't skip both
+      // activation milestones — checkMemberMilestones needs the crossing.
+      // Own try/catch: this only supports analytics — a transient failure
+      // here must never block the actual import.
+      int? countBefore;
+      try {
+        final res = await client
+            .from('members')
+            .select('id')
+            .eq('gym_id', gymId)
+            .eq('is_demo_data', false)
+            .count(CountOption.exact);
+        countBefore = res.count;
+      } catch (_) {
+        countBefore = null;
+      }
+
       // Dedupe against existing gym emails (same as the server import).
       final existing = await client.from('members').select('email').eq('gym_id', gymId);
       final existingEmails = {
@@ -292,6 +312,10 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
         } catch (e) {
           debugPrint('[GymCRM] CSV plan assignment error: $e');
         }
+      }
+
+      if (countBefore != null) {
+        unawaited(AppEvents.checkMemberMilestones(before: countBefore, after: countBefore + imported));
       }
 
       setState(() {

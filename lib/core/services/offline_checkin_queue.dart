@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'activity_log_service.dart';
+import 'app_events.dart';
 
 /// Stores QR check-ins that failed due to no connectivity.
 /// Uses shared_preferences (already a dep) and dart:io for connectivity tests.
@@ -109,6 +111,7 @@ class OfflineCheckInQueue {
           action: 'check_in',
           metadata: {'member_id': data['member_id'], 'via': 'android_offline_sync'},
         );
+        unawaited(AppEvents.checkinCompleted());
       } catch (e) {
         debugPrint('[GymCRM] Flush checkin error: $e');
         remaining.add(item);

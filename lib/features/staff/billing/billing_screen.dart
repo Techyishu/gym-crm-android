@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/services/app_events.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -1527,6 +1529,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
             .single();
       }
 
+      if (created != null) unawaited(AppEvents.planCreated());
       if (mounted) Navigator.pop(context, created);
     } catch (e) {
       if (mounted) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/services/app_events.dart';
 import '../../../core/services/coachmark_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
@@ -749,8 +751,8 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
 
   Future<void> _save({bool? enabled, Set<int>? days, String? template}) async {
     final gymId = widget.gym['id'] as String;
-    final nextEnabled =
-        enabled ?? (widget.gym['whatsapp_reminder_enabled'] as bool? ?? false);
+    final wasEnabled = widget.gym['whatsapp_reminder_enabled'] as bool? ?? false;
+    final nextEnabled = enabled ?? wasEnabled;
     final nextDays = days ?? _currentDays();
     setState(() => _saving = true);
     try {
@@ -762,6 +764,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
             'whatsapp_template': template ?? _currentTemplate(),
           })
           .eq('id', gymId);
+      if (nextEnabled && !wasEnabled) unawaited(AppEvents.whatsappRemindersEnabled());
       widget.onChanged();
     } finally {
       if (mounted) setState(() => _saving = false);

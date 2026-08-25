@@ -194,12 +194,13 @@ Deno.serve(async (req: Request) => {
     const { data: userData, error: userError } = await supabase.auth.getUser(jwt)
     if (userError || !userData.user) return new Response('Unauthorized', { status: 401 })
 
-    const { data: profile } = await supabase
-      .from('profiles')
+    const { data: access } = await supabase
+      .from('staff_gym_access')
       .select('gym_id')
-      .eq('id', userData.user.id)
-      .single()
-    if (profile?.gym_id !== filterGymId) return new Response('Forbidden', { status: 403 })
+      .eq('profile_id', userData.user.id)
+      .eq('gym_id', filterGymId)
+      .maybeSingle()
+    if (!access) return new Response('Forbidden', { status: 403 })
   }
 
   let gymsQuery = supabase

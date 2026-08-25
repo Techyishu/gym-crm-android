@@ -37,8 +37,10 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
       setState(() {
         _monthly = current?.monthly;
         _annual = current?.annual;
-        // Default selection: annual (best value)
-        _selected = _annual ?? _monthly;
+        // Default selection: monthly. Annual used to be pre-selected, which
+        // asks for a year up front at the moment the owner is least convinced.
+        // It stays on screen above as the better-value upsell.
+        _selected = _monthly ?? _annual;
         _loadingOfferings = false;
       });
     } catch (e) {
@@ -122,6 +124,16 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
   }
 }
 
+// Benefit-first, distinct icon per line — matches the Android paywall's hero.
+const _kIosFeatures = [
+  (icon: Icons.chat_bubble_outline, text: 'We remind your members before their fees are due — automatically'),
+  (icon: Icons.account_balance_wallet_outlined, text: 'Know exactly who owes you money, today'),
+  (icon: Icons.show_chart_rounded, text: 'See what you collected this month without opening a register'),
+  (icon: Icons.qr_code_2_rounded, text: 'Members check in by QR — works even when your internet doesn\'t'),
+  (icon: Icons.all_inclusive_rounded, text: 'Unlimited members, check-ins and staff logins'),
+  (icon: Icons.support_agent_outlined, text: 'Priority support'),
+];
+
 // ── Paywall body ──────────────────────────────────────────────────────────────
 
 class _PaywallBody extends StatelessWidget {
@@ -155,90 +167,24 @@ class _PaywallBody extends StatelessWidget {
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Header ──────────────────────────────────────────────────
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: AppTheme.darkCardDecoration(radius: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppTheme.accent,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'GymCRM Pro',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.accentFg,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'Run your gym\nwithout limits.',
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.onDark,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ..._features.map((f) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.check, size: 16, color: AppTheme.mintOnDark),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    f,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: AppTheme.onDarkSoft,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )),
-                    ],
-                  ),
+                // ── Hero: badge + headline + benefits, one continuous surface ──
+                const _IosHero(features: _kIosFeatures),
+
+                const SizedBox(height: 24),
+
+                // ── Duration selector + price panel ─────────────────────────
+                _IosDurationSegmented(
+                  monthly: monthly,
+                  annual: annual,
+                  selected: selected,
+                  onSelect: onSelect,
                 ),
-
-                const SizedBox(height: 20),
-
-                // ── Plan cards ───────────────────────────────────────────────
-                if (annual != null)
-                  _PlanCard(
-                    package: annual!,
-                    isSelected: selected == annual,
-                    badge: 'Best Value',
-                    onTap: () => onSelect(annual!),
-                  ),
-                if (annual != null && monthly != null)
-                  const SizedBox(height: 12),
-                if (monthly != null)
-                  _PlanCard(
-                    package: monthly!,
-                    isSelected: selected == monthly,
-                    onTap: () => onSelect(monthly!),
-                  ),
+                if (monthly != null && annual != null) const SizedBox(height: 14),
+                if (selected != null) _IosPricePanel(package: selected!),
 
                 // ── Error ────────────────────────────────────────────────────
                 if (errorMessage != null) ...[
@@ -316,6 +262,11 @@ class _PaywallBody extends StatelessWidget {
 
                 const SizedBox(height: 8),
 
+                // ── Trust ─────────────────────────────────────────────────────
+                const _TrustFooterRow(),
+
+                const SizedBox(height: 12),
+
                 // ── Legal ─────────────────────────────────────────────────────
                 const _LegalLinks(),
               ],
@@ -330,46 +281,148 @@ class _PaywallBody extends StatelessWidget {
     if (pkg == null) return 'Select a plan';
     return 'Subscribe · ${pkg.storeProduct.priceString}';
   }
-
-  static const _features = [
-    'Unlimited members & check-ins',
-    'Unlimited staff logins & roles',
-    'WhatsApp due reminders',
-    'Class scheduling & bookings',
-    'Advanced reports & analytics',
-    'Member portal & QR check-in',
-    'Priority support',
-  ];
 }
 
-// ── Plan card ─────────────────────────────────────────────────────────────────
+// ── Hero: badge + headline + benefits, one continuous dark surface ───────────
 
-class _PlanCard extends StatelessWidget {
-  final Package package;
-  final bool isSelected;
-  final String? badge;
-  final VoidCallback onTap;
+class _IosHero extends StatelessWidget {
+  final List<({IconData icon, String text})> features;
+  const _IosHero({required this.features});
 
-  const _PlanCard({
-    required this.package,
-    required this.isSelected,
-    required this.onTap,
-    this.badge,
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: AppTheme.darkCardDecoration(radius: 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.accent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'GymCRM Pro',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.accentFg),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Everything your gym needs,\nin one app.',
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.onDark,
+              height: 1.18,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 22),
+          Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
+          const SizedBox(height: 18),
+          ...features.map((f) => Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(f.icon, size: 17, color: AppTheme.mintOnDark),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        f.text,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          color: AppTheme.onDark,
+                          fontWeight: FontWeight.w500,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Duration selector ─────────────────────────────────────────────────────────
+
+/// Same pill-toggle idiom as the Android paywall (and the app's own
+/// Staff/Member login switch) instead of two stacked bordered radio cards.
+/// Falls back to nothing when only one package is on offer — the price panel
+/// alone covers that case, same as the old single-card fallback did.
+class _IosDurationSegmented extends StatelessWidget {
+  final Package? monthly;
+  final Package? annual;
+  final Package? selected;
+  final ValueChanged<Package> onSelect;
+  const _IosDurationSegmented({
+    required this.monthly,
+    required this.annual,
+    required this.selected,
+    required this.onSelect,
   });
 
-  String get _title {
-    switch (package.packageType) {
-      case PackageType.annual:
-        return 'Yearly';
-      case PackageType.monthly:
-        return 'Monthly';
-      default:
-        return package.storeProduct.title;
-    }
+  @override
+  Widget build(BuildContext context) {
+    final segments = <(String, Package)>[
+      if (monthly != null) ('Monthly', monthly!),
+      if (annual != null) ('Yearly', annual!),
+    ];
+    if (segments.length < 2) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppTheme.surface2,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: segments.map((s) {
+          final (label, pkg) = s;
+          final isSelected = selected == pkg;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onSelect(pkg),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: isSelected ? AppTheme.accentFg : AppTheme.ink,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
+}
+
+// ── Price panel ────────────────────────────────────────────────────────────────
+
+class _IosPricePanel extends StatelessWidget {
+  final Package package;
+  const _IosPricePanel({required this.package});
+
+  bool get _isAnnual => package.packageType == PackageType.annual;
 
   String? get _perMonthPrice {
-    if (package.packageType != PackageType.annual) return null;
+    if (!_isAnnual) return null;
     final annual = package.storeProduct.price;
     final perMonth = annual / 12;
     final currency = package.storeProduct.currencyCode;
@@ -378,100 +431,96 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.accentSoft : AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? AppTheme.accent : AppTheme.border,
-            width: isSelected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            // Radio indicator
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isSelected ? AppTheme.accent : Colors.transparent,
-                border: Border.all(
-                  color: isSelected ? AppTheme.accent : AppTheme.inkHint,
-                  width: isSelected ? 6 : 2,
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                package.storeProduct.priceString,
+                style: AppTheme.numberStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppTheme.ink),
+              ),
+              const SizedBox(width: 6),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  _isAnnual ? '/ year' : '/ month',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
                 ),
               ),
-            ),
-            const SizedBox(width: 14),
-
-            // Title + subtitle
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _title,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: isSelected ? AppTheme.ink : AppTheme.inkSoft,
-                        ),
-                      ),
-                      if (badge != null) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppTheme.accent,
-                            borderRadius: BorderRadius.circular(5),
-                          ),
-                          child: Text(
-                            badge!,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.accentFg,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+              if (_isAnnual) ...[
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentSoft,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  if (_perMonthPrice != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      '$_perMonthPrice — billed annually',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.inkSoft,
-                        fontWeight: FontWeight.w500,
+                  child: const Text(
+                    'Best value',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.accent),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _isAnnual
+                ? '$_perMonthPrice — billed annually'
+                : 'Cancel anytime from your Apple ID settings.',
+            style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Trust row (footer, unboxed) ───────────────────────────────────────────────
+
+class _TrustFooterRow extends StatelessWidget {
+  const _TrustFooterRow();
+
+  @override
+  Widget build(BuildContext context) {
+    const items = [
+      (icon: Icons.close_rounded, text: 'Cancel anytime from your Apple ID settings'),
+      (icon: Icons.lock_outline, text: 'Your member data is never deleted, even if you cancel'),
+    ];
+
+    return Column(
+      children: items
+          .map((i) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(i.icon, size: 15, color: AppTheme.statusActive),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        i.text,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: AppTheme.inkSoft,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ],
-                ],
-              ),
-            ),
-
-            // Price
-            Text(
-              package.storeProduct.priceString,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: isSelected ? AppTheme.ink : AppTheme.inkSoft,
-              ),
-            ),
-          ],
-        ),
-      ),
+                ),
+              ))
+          .toList(),
     );
   }
 }

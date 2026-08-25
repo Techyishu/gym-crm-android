@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,8 @@ import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/collect_payment.dart';
+import '../../../core/services/app_events.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -484,12 +487,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   }
 
   void _showAddMemberSheet(BuildContext context) {
-    showAdaptiveSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const _AddMemberSheet(),
-    ).then((_) => ref.invalidate(_membersProvider));
+    showAddMemberSheet(context).then((_) => ref.invalidate(_membersProvider));
   }
 
   void _openImportCsv(BuildContext context) {
@@ -707,14 +705,28 @@ class _NoPlansBox extends StatelessWidget {
 
 // ── Add Member Sheet ──────────────────────────────────────────────────────────
 
-class _AddMemberSheet extends ConsumerStatefulWidget {
-  const _AddMemberSheet();
-
-  @override
-  ConsumerState<_AddMemberSheet> createState() => _AddMemberSheetState();
+/// Opens the add-member sheet from anywhere in the app (not just this
+/// screen) — e.g. the dashboard's setup checklist jumps straight here instead
+/// of routing to the members list first. Fire-and-forget: resolves once the
+/// sheet closes for any reason (saved or dismissed); callers invalidate
+/// whatever provider they own.
+Future<void> showAddMemberSheet(BuildContext context) {
+  return showAdaptiveSheet(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) => const AddMemberSheet(),
+  );
 }
 
-class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
+class AddMemberSheet extends ConsumerStatefulWidget {
+  const AddMemberSheet({super.key});
+
+  @override
+  ConsumerState<AddMemberSheet> createState() => _AddMemberSheetState();
+}
+
+class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   final _formKey = GlobalKey<FormState>();
   final _firstCtrl = TextEditingController();
   final _lastCtrl = TextEditingController();
@@ -722,6 +734,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   final _phoneCtrl = TextEditingController();
   final _customIdCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  final _paidAmountCtrl = TextEditingController();
 
   String _status = 'active';
   String? _joinedAt;
@@ -729,11 +742,15 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
   int _billingIntervalMonths = 1;
   String? _planId;
   int? _planBillingIntervalMonths;
+  double _planPrice = 0;
   double _planDiscountAmount = 0;
-  bool _paidToday = false;
   String _paymentMethod = 'cash';
   File? _avatarFile;
   bool _loading = false;
+
+  double get _planAmount => (_planPrice - _planDiscountAmount).clamp(0, _planPrice);
+  double get _paidAmount => double.tryParse(_paidAmountCtrl.text.trim()) ?? 0;
+  double get _dueAmount => (_planAmount - _paidAmount).clamp(0, _planAmount);
 
   @override
   void dispose() {
@@ -743,6 +760,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     _phoneCtrl.dispose();
     _customIdCtrl.dispose();
     _notesCtrl.dispose();
+    _paidAmountCtrl.dispose();
     super.dispose();
   }
 
@@ -750,6 +768,8 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
     _planId = plan['id'] as String?;
     _planBillingIntervalMonths = plan['billing_interval_months'] as int? ??
         const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']];
+    _planPrice = (plan['price'] as num?)?.toDouble() ?? 0;
+    _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
   }
 
   // Gym has no plans yet — let staff make one without losing the half-filled
@@ -835,11 +855,33 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
       );
       return;
     }
+    final paidAmount = _paidAmount;
+    if (paidAmount > 0) {
+      final ok = await confirmPartialIfNeeded(context, enteredAmount: paidAmount, dueAmount: _planAmount);
+      if (!ok) return;
+    }
     setState(() => _loading = true);
 
     try {
       final gymId = await ref.read(gymIdProvider.future);
       final client = Supabase.instance.client;
+
+      // Real (non-demo) member count before this insert, so
+      // checkMemberMilestones can tell whether it just crossed 1 or 3.
+      // Own try/catch: this only supports analytics — a transient failure
+      // here must never block the actual member from being added.
+      int? countBefore;
+      try {
+        final res = await client
+            .from('members')
+            .select('id')
+            .eq('gym_id', gymId)
+            .eq('is_demo_data', false)
+            .count(CountOption.exact);
+        countBefore = res.count;
+      } catch (_) {
+        countBefore = null;
+      }
 
       final avatarUrl = await _uploadAvatar(gymId);
 
@@ -882,7 +924,7 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
         'discount_amount': _planDiscountAmount,
       });
 
-      if (_paidToday) {
+      if (paidAmount > 0) {
         final invoice = await client
             .from('invoices')
             .select('id')
@@ -892,14 +934,19 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
             .limit(1)
             .maybeSingle();
         if (invoice != null) {
-          await client.rpc('record_invoice_payment', params: {
-            'p_invoice_id': invoice['id'],
-            'p_method': _paymentMethod,
-            // next_payment_date was just set by the staff above — don't
-            // advance it again, or a 30-day pick becomes ~60 days.
-            'p_advance_date': false,
-          });
+          // next_payment_date was just set by the staff above — recordInvoicePayment
+          // doesn't touch it itself, so no separate "don't advance" flag is needed here.
+          await recordInvoicePayment(
+            invoiceId: invoice['id'] as String,
+            amount: paidAmount,
+            method: _paymentMethod,
+            recordedBy: client.auth.currentUser?.id,
+          );
         }
+      }
+
+      if (countBefore != null) {
+        unawaited(AppEvents.checkMemberMilestones(before: countBefore, after: countBefore + 1));
       }
 
       if (mounted) Navigator.pop(context);
@@ -962,7 +1009,14 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Basic Info',
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: AppTheme.cardDecoration(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+              const Text('Member',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
               const SizedBox(height: 12),
               Row(
@@ -999,6 +1053,19 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
               ),
               const SizedBox(height: 12),
               TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(labelText: 'Member ID (optional)', hintText: 'e.g. GYM-001', counterText: '')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: AppTheme.cardDecoration(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+              const Text('Plan & Payment',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkHint, letterSpacing: 0.5)),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -1099,34 +1166,27 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                   );
                 },
               ),
-              if (_planId != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: TextFormField(
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: InputDecoration(
-                      labelText: 'Recurring discount (optional)',
-                      hintText: '0',
-                      prefixText: '$currencySymbol ',
-                      helperText: 'Fixed amount deducted from every auto-generated invoice',
-                    ),
-                    onChanged: (v) {
-                      final parsed = double.tryParse(v.trim()) ?? 0.0;
-                      _planDiscountAmount = parsed < 0 ? 0 : parsed;
-                    },
+              if (_planId != null) ...[
+                Text('Plan Amount: $currencySymbol${_planAmount.toStringAsFixed(0)}',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _paidAmountCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Paid Amount', prefixText: '$currencySymbol '),
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Due Amount: $currencySymbol${_dueAmount.toStringAsFixed(0)}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: _dueAmount > 0 ? AppTheme.statusWarn : AppTheme.statusActive,
                   ),
                 ),
-              // Payment collected today — creates the invoice and marks it
-              // paid in the same step, instead of two separate actions.
-              if (_planId != null) ...[
-                CheckboxListTile(
-                  value: _paidToday,
-                  onChanged: (v) => setState(() => _paidToday = v ?? false),
-                  title: const Text('Payment collected today?'),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  contentPadding: EdgeInsets.zero,
-                ),
-                if (_paidToday)
+                const SizedBox(height: 12),
+                if (_paidAmount > 0)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: DropdownButtonFormField<String>(
@@ -1141,7 +1201,27 @@ class _AddMemberSheetState extends ConsumerState<_AddMemberSheet> {
                       onChanged: (v) => setState(() => _paymentMethod = v ?? 'cash'),
                     ),
                   ),
+                TextFormField(
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Recurring discount (optional)',
+                    hintText: '0',
+                    prefixText: '$currencySymbol ',
+                    helperText: 'Fixed amount deducted from every auto-generated invoice',
+                  ),
+                  onChanged: (v) {
+                    final parsed = double.tryParse(v.trim()) ?? 0.0;
+                    setState(() {
+                      _planDiscountAmount = parsed < 0 ? 0 : parsed;
+                      _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
+                    });
+                  },
+                ),
               ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               TextFormField(controller: _notesCtrl, maxLines: 2, maxLength: 500, decoration: const InputDecoration(labelText: 'Notes (optional)', counterText: '')),
               const SizedBox(height: 20),
               ElevatedButton(

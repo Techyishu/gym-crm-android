@@ -12,6 +12,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart' as platform_info;
@@ -24,7 +25,9 @@ import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 const _registrationBaseUrl = 'https://gymcrm.in';
 
 // Supabase project URL — hardcoded to match main.dart (required for Shorebird patch compatibility).
-const _supabaseProjectUrl = 'https://orlqjhqxeyukvfzsursl.supabase.co';
+// Plain-HTTP bridge (biometric devices can't do TLS) — forwards to the Supabase edge function.
+const _biometricBridgeHost = 'bio.gymcrm.in';
+const _biometricBridgePort = '58594';
 
 String _uuidV4() {
   final rnd = Random.secure();
@@ -145,17 +148,6 @@ class SettingsScreen extends ConsumerWidget {
               //     isScrollControlled: true,
               //     useSafeArea: true,
               //     builder: (_) => const _PaymentsSheet(),
-              //   ),
-              // ),
-              // BIOMETRIC HIDDEN — re-enable when ready to launch
-              // _SettingsRow(
-              //   icon: Icons.fingerprint,
-              //   label: 'Biometric Device',
-              //   onTap: () => showAdaptiveSheet(
-              //     context: context,
-              //     isScrollControlled: true,
-              //     useSafeArea: true,
-              //     builder: (_) => const _BiometricDeviceSheet(),
               //   ),
               // ),
             ]),
@@ -1629,35 +1621,37 @@ class _RegistrationLinkSheetState extends ConsumerState<_RegistrationLinkSheet> 
 }
 
 // ─── Biometric Device sheet ───────────────────────────────────────────────────
-class _BiometricDeviceSheet extends ConsumerStatefulWidget {
-  const _BiometricDeviceSheet();
+class BiometricDeviceSheet extends ConsumerStatefulWidget {
+  const BiometricDeviceSheet({super.key});
 
   @override
-  ConsumerState<_BiometricDeviceSheet> createState() => _BiometricDeviceSheetState();
+  ConsumerState<BiometricDeviceSheet> createState() => BiometricDeviceSheetState();
 }
 
-class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
+class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
   Map<String, dynamic>? _device;
   bool _loading = true;
   String? _error;
   bool _initialized = false;
+  String? _gymId;
 
-  Future<void> _loadOrCreate(String gymId) async {
+  final _snCtrl = TextEditingController();
+  bool _pairing = false;
+  String? _pairError;
+
+  @override
+  void dispose() {
+    _snCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load(String gymId) async {
     try {
-      var data = await Supabase.instance.client
+      final data = await Supabase.instance.client
           .from('biometric_devices')
           .select()
           .eq('gym_id', gymId)
           .maybeSingle();
-
-      if (data == null) {
-        final res = await Supabase.instance.client
-            .from('biometric_devices')
-            .insert({'gym_id': gymId})
-            .select()
-            .single();
-        data = res;
-      }
 
       if (mounted) setState(() { _device = data; _loading = false; });
     } catch (e) {
@@ -1665,9 +1659,36 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
     }
   }
 
-  String get _admsUrl {
-    final token = _device?['token'] as String? ?? '';
-    return '$_supabaseProjectUrl/functions/v1/biometric-adms/$token';
+  Future<void> _pairDevice() async {
+    // Uppercase so a case mismatch between what staff types and what the
+    // device actually sends in its SN parameter can never break the match.
+    final sn = _snCtrl.text.trim().toUpperCase();
+    if (sn.isEmpty || _gymId == null) return;
+
+    setState(() { _pairing = true; _pairError = null; });
+
+    try {
+      final data = await Supabase.instance.client
+          .from('biometric_devices')
+          .upsert({'gym_id': _gymId, 'device_sn': sn}, onConflict: 'gym_id')
+          .select()
+          .single();
+      if (mounted) {
+        setState(() { _device = data; _pairing = false; });
+        _snCtrl.clear();
+      }
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        setState(() {
+          _pairing = false;
+          _pairError = e.code == '23505'
+              ? 'This device is already paired to another gym. Double-check the serial number.'
+              : 'Could not pair device: ${e.message}';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _pairing = false; _pairError = '$e'; });
+    }
   }
 
   String get _lastPing {
@@ -1688,7 +1709,8 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
       ref.watch(_gymProvider).whenData((gym) {
         if (gym != null) {
           _initialized = true;
-          Future.microtask(() { if (mounted) _loadOrCreate(gym['id'] as String); });
+          _gymId = gym['id'] as String;
+          Future.microtask(() { if (mounted) _load(_gymId!); });
         }
       });
     }
@@ -1712,7 +1734,7 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
-                            Icon(Icons.warning_amber_outlined, color: AppTheme.statusWarn, size: 16),
+                            Icon(Icons.info_outline, color: AppTheme.statusWarn, size: 16),
                             SizedBox(width: 6),
                             Text('Beta Feature', style: TextStyle(color: AppTheme.statusWarn, fontWeight: FontWeight.w700, fontSize: 13)),
                           ]),
@@ -1729,89 +1751,135 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
 
                     const SizedBox(height: 16),
 
-                    // ── Device status ────────────────────────────────────────
-                    Row(
-                      children: [
-                        Container(
-                          width: 8, height: 8,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: (_device?['last_ping_at'] != null)
-                                ? AppTheme.statusActive
-                                : AppTheme.inkHint,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Last seen: $_lastPing',
-                          style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
-                        ),
-                        if (_device?['device_sn'] != null) ...[
-                          const SizedBox(width: 8),
-                          Text(
-                            '· SN: ${_device!['device_sn']}',
-                            style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
-                          ),
-                        ],
-                      ],
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // ── ADMS URL ─────────────────────────────────────────────
-                    const FieldLabel('Server URL'),
+                    // ── Before you begin ─────────────────────────────────────
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.all(14),
                       decoration: AppTheme.cardDecoration(),
-                      child: Row(
+                      child: const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          Icon(Icons.info_outline, size: 16, color: AppTheme.inkHint),
+                          SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              _admsUrl,
-                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppTheme.inkSoft),
+                              'You will need a LAN cable (or WiFi for MB-series devices), '
+                              'a router, and a phone or laptop on the same network.',
+                              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
                             ),
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              Clipboard.setData(ClipboardData(text: _admsUrl));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Server URL copied')),
-                              );
-                            },
-                            child: const Text('Copy',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.accent)),
                           ),
                         ],
                       ),
                     ),
 
                     const SizedBox(height: 20),
+                    const Text('Steps', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                    const SizedBox(height: 10),
 
-                    // ── Setup steps ──────────────────────────────────────────
+                    const _SetupStep(number: 1, text: 'Connect the device to your router — plug a LAN cable into the device '
+                        'and a free port on the router. For MB-series WiFi models, connect via the device\'s WiFi settings instead.'),
+                    const _SetupStep(number: 2, text: 'Find your router\'s Gateway IP — '
+                        'Android: Settings → WiFi → tap the ⓘ icon next to your network → look for "Gateway". '
+                        'iPhone: Settings → WiFi → tap the ⓘ icon → look for "Router". '
+                        'Usually looks like 192.168.1.1 or 192.168.0.1.'),
+                    const _SetupStep(number: 3, text: 'On the device, go to Menu → Comm → Ethernet and set: DHCP OFF, '
+                        'Gateway = the IP from step 2, IP Address = same network with a unique last number (e.g. 192.168.1.201), '
+                        'Subnet Mask = 255.255.255.0, DNS = 8.8.8.8.'),
+                    _SetupStep(number: 4, text: 'On the device, go to Menu → Comm → Cloud Server and set: '
+                        'Server Mode = ADMS, Server Address = $_biometricBridgeHost, Port = $_biometricBridgePort, HTTPS = OFF.'),
+                    const _SetupStep(number: 5, text: 'Restart the device.'),
+
+                    const SizedBox(height: 12),
+                    _CopyField(label: 'Server Address', value: _biometricBridgeHost),
+                    const SizedBox(height: 12),
+                    _CopyField(label: 'Port', value: _biometricBridgePort),
+
+                    const SizedBox(height: 20),
+
+                    // ── Connect a Device ──────────────────────────────────────
+                    const Text('Connect a Device', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                    const SizedBox(height: 6),
                     const Text(
-                      'How to Configure Your Device',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                      'Enter the serial number printed on the back of the device to pair it with this gym.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
                     ),
                     const SizedBox(height: 10),
-                    ..._steps.map((s) => _SetupStep(number: s.$1, text: s.$2)),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _snCtrl,
+                            decoration: const InputDecoration(hintText: 'e.g. AAKL251200123'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        FilledButton(
+                          onPressed: _pairing ? null : _pairDevice,
+                          child: _pairing
+                              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Text('Pair'),
+                        ),
+                      ],
+                    ),
+                    if (_pairError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(_pairError!, style: const TextStyle(fontSize: 12, color: AppTheme.statusDanger)),
+                    ],
 
                     const SizedBox(height: 16),
 
-                    // ── Compatible devices ───────────────────────────────────
+                    // ── Device status ────────────────────────────────────────
+                    if (_device?['device_sn'] != null)
+                      Row(
+                        children: [
+                          Container(
+                            width: 8, height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: (_device?['last_ping_at'] != null)
+                                  ? AppTheme.statusActive
+                                  : AppTheme.inkHint,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Paired: ${_device!['device_sn']} · Last seen: $_lastPing',
+                            style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                          ),
+                        ],
+                      ),
+
+                    const SizedBox(height: 20),
+
+                    // ── Supported devices ─────────────────────────────────────
+                    const Text('Supported Devices', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.inkSoft)),
+                    const SizedBox(height: 4),
                     const Text(
-                      'Compatible Devices',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
+                      'Any eSSL/ZKTeco device that supports the ADMS (push data) protocol. '
+                      'Not individually tested against real hardware yet — if your device behaves differently, contact support.',
+                      style: TextStyle(fontSize: 11, color: AppTheme.inkHint),
                     ),
+                    const SizedBox(height: 10),
+                    const Text('Fingerprint devices', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkSoft)),
                     const SizedBox(height: 6),
                     const Wrap(
                       spacing: 6, runSpacing: 6,
                       children: [
                         _DeviceChip('ZKTeco F22'),
                         _DeviceChip('ZKTeco K40 Pro'),
+                        _DeviceChip('eSSL K90 Pro'),
+                        _DeviceChip('eSSL X990 / iClock990'),
+                        _DeviceChip('eSSL K30 / K40'),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Multi-biometric (fingerprint + face)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.inkSoft)),
+                    const SizedBox(height: 6),
+                    const Wrap(
+                      spacing: 6, runSpacing: 6,
+                      children: [
                         _DeviceChip('ZKTeco SpeedFace'),
-                        _DeviceChip('eSSL E9'),
-                        _DeviceChip('eSSL E990'),
-                        _DeviceChip('eSSL MB160'),
+                        _DeviceChip('eSSL MB20 / MB160 / MB460'),
                       ],
                     ),
 
@@ -1837,21 +1905,76 @@ class _BiometricDeviceSheetState extends ConsumerState<_BiometricDeviceSheet> {
                         ],
                       ),
                     ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Need help ─────────────────────────────────────────────
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _launchExternal('https://gymcrm.in/docs/biometric-attendance'),
+                        icon: const Icon(Icons.info_outline, size: 16),
+                        label: const Text('View full setup guide'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _launchExternal('https://wa.me/917541004076?text=${Uri.encodeComponent("Hi, I'm having trouble setting up my biometric device on GymCRM.")}'),
+                        icon: const Icon(Icons.chat_bubble_outline, size: 16),
+                        label: const Text('Contact us on WhatsApp'),
+                      ),
+                    ),
                   ],
                 ),
     );
   }
+
+  Future<void> _launchExternal(String url) async {
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
 }
 
-const _steps = [
-  (1, 'On the device, go to Menu → Communication → Cloud / ADMS Settings'),
-  (2, 'Set Server Address to: your Supabase project domain (e.g. orlqjhqx...supabase.co)'),
-  (3, 'Set Port to 443 and enable HTTPS'),
-  (4, 'Set Server Path / Device Path to the path portion of the URL above (starting with /functions/...)'),
-  (5, 'Save and restart the device — status will show "Last seen: Just now" when connected'),
-  (6, 'Enroll each member\'s fingerprint and note the employee number assigned'),
-  (7, 'Open each member\'s profile in GymCRM and enter that employee number as "Biometric Device ID"'),
-];
+class _CopyField extends StatelessWidget {
+  final String label;
+  final String value;
+  const _CopyField({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FieldLabel(label),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: AppTheme.cardDecoration(),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: AppTheme.inkSoft),
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: value));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('$label copied')),
+                  );
+                },
+                child: const Text('Copy',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _SetupStep extends StatelessWidget {
   final int number;

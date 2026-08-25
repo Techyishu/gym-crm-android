@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/router.dart';
+import 'core/services/app_events.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_provider.dart';
 
@@ -28,6 +29,20 @@ class _GymCRMAppState extends ConsumerState<GymCRMApp> {
     _linkSub = AppLinks().uriLinkStream.listen((uri) {
       if (uri.host == 'payment-success') {
         ref.invalidate(staffProfileProvider);
+        // No amount/plan travels on this deep link — read it back off the
+        // gym row the webhook just wrote, rather than trusting an
+        // unverified query param that Dodo may or may not attach. Fires on
+        // every successful checkout redirect, new subscription or plan
+        // change alike — matches how ad platforms expect purchase events
+        // (each transaction counted, not just the first).
+        unawaited(() async {
+          final profile = await ref.read(staffProfileProvider.future);
+          final gym = profile?['gyms'] as Map<String, dynamic>?;
+          final planPrice = gym?['plan_price'] as int?;
+          if (planPrice != null) {
+            await AppEvents.purchase(amount: planPrice.toDouble(), plan: gym?['plan'] as String?);
+          }
+        }());
       }
     });
 
@@ -68,7 +83,21 @@ class _GymCRMAppState extends ConsumerState<GymCRMApp> {
       // error widget so one broken widget doesn't crash the whole app.
       builder: (context, child) {
         ErrorWidget.builder = (_) => const _AppErrorWidget();
-        return child ?? const SizedBox.shrink();
+        return GestureDetector(
+          // Global keyboard dismiss: tap outside a focused field, or scroll,
+          // closes the keyboard app-wide instead of relying on each screen.
+          onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+          behavior: HitTestBehavior.translucent,
+          child: NotificationListener<ScrollUpdateNotification>(
+            onNotification: (notification) {
+              if (notification.dragDetails != null) {
+                FocusManager.instance.primaryFocus?.unfocus();
+              }
+              return false;
+            },
+            child: child ?? const SizedBox.shrink(),
+          ),
+        );
       },
     );
   }

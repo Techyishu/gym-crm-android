@@ -1,10 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/services/activity_log_service.dart';
+import '../../../core/services/offline_checkin_queue.dart';
 import '../../../core/utils/formatters.dart';
+
+const _activeGymIdPrefsKey = 'active_gym_id';
 
 final supabaseProvider = Provider<SupabaseClient>((ref) => Supabase.instance.client);
 
@@ -62,26 +66,35 @@ final userTypeProvider = FutureProvider<String?>((ref) async {
   return 'setup';
 });
 
-// Staff profile
+// Staff profile — 'gyms' reflects whichever branch is currently active
+// (see gymIdProvider), not necessarily the staff member's primary gym_id.
 final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
   final client = ref.watch(supabaseProvider);
   final user = client.auth.currentUser;
   if (user == null) return null;
 
+  final activeGymId = await ref.watch(gymIdProvider.future);
+
   final profile = await client
       .from('profiles')
-      .select(
-        'id, role, gym_id, first_name, last_name, phone, '
-        'gyms(id, name, slug, member_code, plan, settings, razorpay_key_id, '
-        'registration_enabled, registration_token, '
-        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing)',
-      )
+      .select('id, role, gym_id, first_name, last_name, phone')
       .eq('id', user.id)
       .maybeSingle();
+  if (profile == null) return null;
 
-  final settings = (profile?['gyms'] as Map<String, dynamic>?)?['settings'];
+  final gym = await client
+      .from('gyms')
+      .select(
+        'id, name, slug, member_code, plan, settings, razorpay_key_id, '
+        'registration_enabled, registration_token, whatsapp_reminder_enabled, '
+        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing, created_at',
+      )
+      .eq('id', activeGymId)
+      .maybeSingle();
+
+  final settings = gym?['settings'];
   setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
-  return profile;
+  return {...profile, 'gyms': gym};
 });
 
 // Convenience provider: just the role string for the current staff user.
@@ -90,7 +103,11 @@ final staffRoleProvider = FutureProvider<String?>((ref) async {
   return profile?['role'] as String?;
 });
 
-/// The gym_id for the logged-in staff user.
+/// The gym_id every screen scopes its queries by — the staff member's
+/// currently ACTIVE branch. Defaults to their primary profiles.gym_id;
+/// persisted in SharedPreferences once they switch branches via
+/// AuthNotifier.switchActiveGym(). Falls back to primary if the persisted
+/// branch is no longer one they have access to.
 /// Cached by Riverpod — a single DB round-trip shared across every screen.
 /// All screen providers watch this instead of fetching profiles individually.
 /// Invalidated on sign-out so the next login gets a fresh value.
@@ -107,11 +124,51 @@ final gymIdProvider = FutureProvider<String>((ref) async {
       .eq('id', user.id)
       .maybeSingle();
 
-  final gymId = profile?['gym_id'] as String?;
-  if (gymId == null || gymId.isEmpty) {
+  final primaryGymId = profile?['gym_id'] as String?;
+  if (primaryGymId == null || primaryGymId.isEmpty) {
     throw Exception('No gym assigned — please complete gym setup');
   }
-  return gymId;
+
+  final prefs = await SharedPreferences.getInstance();
+  final activeGymId = prefs.getString(_activeGymIdPrefsKey);
+  if (activeGymId == null || activeGymId == primaryGymId) {
+    // Keep the offline check-in cache in sync with the resolved active gym
+    // every time it's looked up — not just after an online check-in — so a
+    // branch switch followed immediately by going offline never enqueues a
+    // check-in against the wrong (stale) branch.
+    await OfflineCheckInQueue.cacheGymId(primaryGymId);
+    return primaryGymId;
+  }
+
+  final access = await client
+      .from('staff_gym_access')
+      .select('gym_id')
+      .eq('profile_id', user.id)
+      .eq('gym_id', activeGymId)
+      .maybeSingle();
+  if (access == null) {
+    await prefs.remove(_activeGymIdPrefsKey);
+    await OfflineCheckInQueue.cacheGymId(primaryGymId);
+    return primaryGymId;
+  }
+  await OfflineCheckInQueue.cacheGymId(activeGymId);
+  return activeGymId;
+});
+
+/// Every gym branch the current staff member is linked to (their primary
+/// gym plus any added via AuthNotifier.createGymBranch()), for the branch
+/// switcher UI.
+final myGymBranchesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final client = ref.watch(supabaseProvider);
+  final user = client.auth.currentUser;
+  if (user == null) return [];
+
+  final rows = await client
+      .from('staff_gym_access')
+      .select('gym_id, role, gyms(id, name, slug)')
+      .eq('profile_id', user.id)
+      .order('created_at');
+  return List<Map<String, dynamic>>.from(rows as List);
 });
 
 // Member record for portal users
@@ -415,7 +472,47 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     } catch (e) {
       debugPrint('[GymCRM] signOut error: $e');
     } finally {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_activeGymIdPrefsKey);
       _ref.invalidate(gymIdProvider);
+    }
+  }
+
+  /// Switches which gym branch every screen scopes its data by. Persists
+  /// across restarts until switched again or the user signs out.
+  Future<void> switchActiveGym(String gymId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_activeGymIdPrefsKey, gymId);
+    _ref.invalidate(gymIdProvider);
+    _ref.invalidate(staffProfileProvider);
+  }
+
+  /// Creates a new gym branch under the current owner via the `create_gym_branch`
+  /// RPC and links it to their account — does not touch profiles.gym_id.
+  /// Returns the new gym id on success, or an error message.
+  Future<Object> createGymBranch({
+    required String gymName,
+    String? city,
+    String? phone,
+    String? gymType,
+    String? memberCount,
+    List<String> goals = const [],
+  }) async {
+    try {
+      final gymId = await _client.rpc('create_gym_branch', params: {
+        'p_gym_name': gymName,
+        'p_city': city,
+        'p_phone': phone,
+        'p_gym_type': gymType,
+        'p_member_count': memberCount,
+        'p_goals': goals,
+      }) as String;
+      _ref.invalidate(myGymBranchesProvider);
+      return gymId;
+    } on PostgrestException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'Could not create gym branch. Please try again.';
     }
   }
 }

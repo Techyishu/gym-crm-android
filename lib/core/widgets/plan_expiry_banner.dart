@@ -40,6 +40,15 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
     // renewal/expiry notices, so this custom nag popup never shows on iOS.
     if (isIOS) return;
 
+    // Never show this the moment a brand-new gym lands on its own dashboard —
+    // with a 1-day trial, "days left <= 3" is true from the very first
+    // second, so this used to be the first thing a new owner ever saw.
+    final createdAt = DateTime.tryParse(widget.gym['created_at'] as String? ?? '');
+    if (createdAt != null &&
+        DateTime.now().toUtc().difference(createdAt.toUtc()) < const Duration(hours: 1)) {
+      return;
+    }
+
     final daysLeft = planExpiryDaysRemaining(widget.gym);
     if (daysLeft == null || daysLeft > 3) return;
 
