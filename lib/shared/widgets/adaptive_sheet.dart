@@ -30,18 +30,21 @@ Future<T?> showAdaptiveSheet<T>({
     context: context,
     useRootNavigator: false,
     barrierDismissible: isDismissible,
-    builder: (dialogContext) => Dialog(
-      insetPadding: const EdgeInsets.all(24),
-      backgroundColor: backgroundColor ?? Theme.of(dialogContext).canvasColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: maxWidth ?? 480,
-          maxHeight: maxHeight ?? 680,
+    builder: (dialogContext) {
+      final size = MediaQuery.sizeOf(dialogContext);
+      return Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        backgroundColor: backgroundColor ?? Theme.of(dialogContext).canvasColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: maxWidth ?? 480,
+            maxHeight: maxHeight ?? size.height * 0.9,
+          ),
+          child: builder(dialogContext),
         ),
-        child: builder(dialogContext),
-      ),
-    ),
+      );
+    },
   );
 }

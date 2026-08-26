@@ -1253,8 +1253,6 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
     return Padding(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
         top: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
@@ -1265,21 +1263,24 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Add Member',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.ink,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Add Member',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 4),
               // Photo picker
@@ -1609,28 +1610,34 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _notesCtrl,
-                maxLines: 2,
-                maxLength: 500,
-                decoration: const InputDecoration(
-                  labelText: 'Notes (optional)',
-                  counterText: '',
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextFormField(
+                  controller: _notesCtrl,
+                  maxLines: 2,
+                  maxLength: 500,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes (optional)',
+                    counterText: '',
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _loading ? null : _save,
-                child: _loading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Text('Add Member'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: ElevatedButton(
+                  onPressed: _loading ? null : _save,
+                  child: _loading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('Add Member'),
+                ),
               ),
             ],
           ),
