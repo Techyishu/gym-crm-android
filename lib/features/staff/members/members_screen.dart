@@ -919,6 +919,8 @@ Future<void> showAddMemberSheet(BuildContext context) {
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    maxWidth: 820,
+    maxHeight: 760,
     builder: (_) => const AddMemberSheet(),
   );
 }
@@ -1217,6 +1219,38 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = ResponsiveContent.isWide(context);
+    final emailField = TextFormField(
+      controller: _emailCtrl,
+      maxLength: 254,
+      keyboardType: TextInputType.emailAddress,
+      decoration: const InputDecoration(
+        labelText: 'Email (optional)',
+        counterText: '',
+      ),
+      validator: validateOptionalEmail,
+    );
+    final mobileField = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _phoneCtrl,
+          maxLength: 20,
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: 'Mobile number (for member app)',
+            counterText: '',
+          ),
+          validator: validateOptionalPhone,
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Lets this member create an app account and use QR check-in.',
+          style: TextStyle(fontSize: 11, color: AppTheme.inkSoft),
+        ),
+      ],
+    );
+
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -1340,32 +1374,20 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _emailCtrl,
-                      maxLength: 254,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: 'Email (optional)',
-                        counterText: '',
-                      ),
-                      validator: validateOptionalEmail,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _phoneCtrl,
-                      maxLength: 20,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: 'Mobile number (for member app)',
-                        counterText: '',
-                      ),
-                      validator: validateOptionalPhone,
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Add a mobile number so this member can create their app account and use QR check-in.',
-                      style: TextStyle(fontSize: 11, color: AppTheme.inkSoft),
-                    ),
+                    if (isWide)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: emailField),
+                          const SizedBox(width: 12),
+                          Expanded(child: mobileField),
+                        ],
+                      )
+                    else ...[
+                      emailField,
+                      const SizedBox(height: 12),
+                      mobileField,
+                    ],
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _customIdCtrl,

@@ -12,6 +12,8 @@ Future<T?> showAdaptiveSheet<T>({
   bool useSafeArea = true,
   Color? backgroundColor,
   bool isDismissible = true,
+  double? maxWidth,
+  double? maxHeight,
 }) {
   if (!ResponsiveContent.isWide(context)) {
     return showModalBottomSheet<T>(
@@ -34,7 +36,10 @@ Future<T?> showAdaptiveSheet<T>({
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 680),
+        constraints: BoxConstraints(
+          maxWidth: maxWidth ?? 480,
+          maxHeight: maxHeight ?? 680,
+        ),
         child: builder(dialogContext),
       ),
     ),
