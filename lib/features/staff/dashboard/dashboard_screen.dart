@@ -1314,7 +1314,8 @@ class _CollectedHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final collected = (data['collectedToday'] as double?) ?? 0;
-    final outstanding = (data['pendingRevenue'] as double?) ?? 0;
+    final month = (data['monthRevenue'] as double?) ?? 0;
+    final growth = data['growthPct'] as int?;
     final renewals = (data['renewals'] as List<dynamic>? ?? const []).length;
     final expenses = (data['monthExpenses'] as double?) ?? 0;
     final profit = (data['profit'] as double?) ?? 0;
@@ -1328,7 +1329,7 @@ class _CollectedHero extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Needs attention today',
+              'Collected this month',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -1343,7 +1344,7 @@ class _CollectedHero extends StatelessWidget {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      _rupees(outstanding),
+                      _rupees(month),
                       style: AppTheme.numberStyle(
                         fontSize: 32,
                         color: AppTheme.onDark,
@@ -1356,13 +1357,15 @@ class _CollectedHero extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
-                    outstanding > 0 ? 'to collect' : 'all caught up',
+                    growth == null
+                        ? 'this month so far'
+                        : '${growth >= 0 ? '↑' : '↓'} ${growth.abs()}% vs last month',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: outstanding > 0
-                          ? AppTheme.statusWarn
-                          : AppTheme.mintOnDark,
+                      color: growth == null || growth >= 0
+                          ? AppTheme.mintOnDark
+                          : AppTheme.statusDanger,
                     ),
                   ),
                 ),
