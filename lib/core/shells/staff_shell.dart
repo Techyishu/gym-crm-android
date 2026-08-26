@@ -91,15 +91,19 @@ const _kMoreItems = [
 ];
 
 Widget _buildGymBranchesSheet(BuildContext context) => const GymBranchesSheet();
-Widget _buildBiometricDeviceSheet(BuildContext context) => const BiometricDeviceSheet();
+Widget _buildBiometricDeviceSheet(BuildContext context) =>
+    const BiometricDeviceSheet();
 Widget _buildGymCodeSheet(BuildContext context) => const GymCodeSheet();
 
 List<_MoreItem> _visibleMoreItemsFor(String? role) => _kMoreItems.where((item) {
   if (item.route == '/staff/classes') return RoleAccess.canSeeBatches(role);
   if (item.route == '/staff/leads') return RoleAccess.canSeeLeads(role);
-  if (item.route == '/staff/workout-plans') return RoleAccess.canManageWorkoutPlans(role);
-  if (item.route == '/staff/diet-plans') return RoleAccess.canManageDietPlans(role);
-  if (item.route == '/staff/reminders') return RoleAccess.canSeeCommunications(role);
+  if (item.route == '/staff/workout-plans')
+    return RoleAccess.canManageWorkoutPlans(role);
+  if (item.route == '/staff/diet-plans')
+    return RoleAccess.canManageDietPlans(role);
+  if (item.route == '/staff/reminders')
+    return RoleAccess.canSeeCommunications(role);
   if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(role);
   if (item.route == '#gym-branches') return RoleAccess.canSeeSettings(role);
   if (item.route == '#biometric-device') return RoleAccess.canSeeSettings(role);
@@ -117,7 +121,8 @@ class StaffShell extends ConsumerStatefulWidget {
   ConsumerState<StaffShell> createState() => _StaffShellState();
 }
 
-class _StaffShellState extends ConsumerState<StaffShell> with WidgetsBindingObserver {
+class _StaffShellState extends ConsumerState<StaffShell>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -192,14 +197,22 @@ class _StaffShellState extends ConsumerState<StaffShell> with WidgetsBindingObse
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _StaffSideNav(shell: shell, profile: profile, onSignOut: onSignOut),
+                    _StaffSideNav(
+                      shell: shell,
+                      profile: profile,
+                      onSignOut: onSignOut,
+                    ),
                     Expanded(child: content),
                   ],
                 )
               : content,
           bottomNavigationBar: isWide
               ? null
-              : _StaffBottomNav(shell: shell, profile: profile, onSignOut: onSignOut),
+              : _StaffBottomNav(
+                  shell: shell,
+                  profile: profile,
+                  onSignOut: onSignOut,
+                ),
         );
       },
     );
@@ -212,7 +225,11 @@ class _StaffSideNav extends StatelessWidget {
   final StatefulNavigationShell shell;
   final Map<String, dynamic>? profile;
   final VoidCallback onSignOut;
-  const _StaffSideNav({required this.shell, required this.profile, required this.onSignOut});
+  const _StaffSideNav({
+    required this.shell,
+    required this.profile,
+    required this.onSignOut,
+  });
 
   String? get role => profile?['role'] as String?;
   bool get _showMoney => RoleAccess.canSeeBilling(role);
@@ -223,7 +240,9 @@ class _StaffSideNav extends StatelessWidget {
     final gym = profile?['gyms'] as Map<String, dynamic>?;
     final gymName = (gym?['name'] as String?) ?? 'Gym';
     final moreItems = _visibleMoreItemsFor(role);
-    final moreActive = moreItems.any((m) => GoRouterState.of(context).matchedLocation.startsWith(m.route));
+    final moreActive = moreItems.any(
+      (m) => GoRouterState.of(context).matchedLocation.startsWith(m.route),
+    );
 
     return Container(
       width: 240,
@@ -241,7 +260,11 @@ class _StaffSideNav extends StatelessWidget {
                 gymName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
               ),
             ),
             Expanded(
@@ -253,14 +276,20 @@ class _StaffSideNav extends StatelessWidget {
                     activeIcon: Icons.home,
                     label: 'Home',
                     active: shell.currentIndex == 0 && !moreActive,
-                    onTap: () => shell.goBranch(0, initialLocation: shell.currentIndex == 0),
+                    onTap: () => shell.goBranch(
+                      0,
+                      initialLocation: shell.currentIndex == 0,
+                    ),
                   ),
                   _SideNavItem(
                     icon: Icons.people_outline,
                     activeIcon: Icons.people,
                     label: 'Members',
                     active: shell.currentIndex == 1 && !moreActive,
-                    onTap: () => shell.goBranch(1, initialLocation: shell.currentIndex == 1),
+                    onTap: () => shell.goBranch(
+                      1,
+                      initialLocation: shell.currentIndex == 1,
+                    ),
                   ),
                   if (_showCheckIn)
                     _SideNavItem(
@@ -268,7 +297,10 @@ class _StaffSideNav extends StatelessWidget {
                       activeIcon: Icons.qr_code_scanner,
                       label: 'Check-in',
                       active: shell.currentIndex == 3 && !moreActive,
-                      onTap: () => shell.goBranch(3, initialLocation: shell.currentIndex == 3),
+                      onTap: () => shell.goBranch(
+                        3,
+                        initialLocation: shell.currentIndex == 3,
+                      ),
                     ),
                   if (_showMoney)
                     _SideNavItem(
@@ -276,7 +308,10 @@ class _StaffSideNav extends StatelessWidget {
                       activeIcon: Icons.credit_card,
                       label: 'Billing',
                       active: shell.currentIndex == 2 && !moreActive,
-                      onTap: () => shell.goBranch(2, initialLocation: shell.currentIndex == 2),
+                      onTap: () => shell.goBranch(
+                        2,
+                        initialLocation: shell.currentIndex == 2,
+                      ),
                     ),
                   const Padding(
                     padding: EdgeInsets.fromLTRB(20, 12, 20, 8),
@@ -287,8 +322,11 @@ class _StaffSideNav extends StatelessWidget {
                       icon: item.icon,
                       activeIcon: item.icon,
                       label: item.label,
-                      active: item.sheetBuilder == null &&
-                          GoRouterState.of(context).matchedLocation.startsWith(item.route),
+                      active:
+                          item.sheetBuilder == null &&
+                          GoRouterState.of(
+                            context,
+                          ).matchedLocation.startsWith(item.route),
                       onTap: () {
                         if (item.sheetBuilder != null) {
                           showAdaptiveSheet(
@@ -349,7 +387,11 @@ class _SideNavItem extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(active ? activeIcon : icon, size: 19, color: active ? AppTheme.accent : AppTheme.inkSoft),
+            Icon(
+              active ? activeIcon : icon,
+              size: 19,
+              color: active ? AppTheme.accent : AppTheme.inkSoft,
+            ),
             const SizedBox(width: 12),
             Text(
               label,
@@ -729,6 +771,25 @@ class _MoreSheet extends StatelessWidget {
         ? ''
         : role[0].toUpperCase() + role.substring(1);
     final initials = _initials(fullName.isEmpty ? gymName : fullName);
+    final groups = <String, List<_MoreItem>>{
+      'Grow your gym': [],
+      'Member programs': [],
+      'Manage your gym': [],
+      'Insights': [],
+      'Account': [],
+    };
+    for (final item in items) {
+      final group = switch (item.route) {
+        '/staff/leads' || '/staff/classes' => 'Grow your gym',
+        '/staff/workout-plans' ||
+        '/staff/diet-plans' ||
+        '/staff/reminders' => 'Member programs',
+        '/staff/reports' || '/staff/expenses' => 'Insights',
+        '/staff/settings' => 'Account',
+        _ => 'Manage your gym',
+      };
+      groups[group]!.add(item);
+    }
 
     return Container(
       decoration: const BoxDecoration(
@@ -820,16 +881,54 @@ class _MoreSheet extends StatelessWidget {
               ],
             ),
           ),
-          // Menu list
+          // Group management tools by the owner's intent instead of making one
+          // long, equally weighted list.
           if (items.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(bottom: 8 + bottomPadding),
-              child: Column(
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.only(bottom: 8 + bottomPadding),
                 children: [
-                  for (final item in items) ...[
-                    const Divider(height: 1, color: AppTheme.border),
-                    _MoreRow(item: item, onTap: () => onTap(item)),
-                  ],
+                  for (final entry in groups.entries)
+                    if (entry.value.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+                        child: Text(
+                          entry.key.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.8,
+                            color: AppTheme.inkHint,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: AppTheme.cardDecoration(radius: 14),
+                        child: Column(
+                          children: [
+                            for (
+                              var index = 0;
+                              index < entry.value.length;
+                              index++
+                            ) ...[
+                              if (index > 0)
+                                const Divider(
+                                  height: 1,
+                                  indent: 16,
+                                  endIndent: 16,
+                                  color: AppTheme.border,
+                                ),
+                              _MoreRow(
+                                item: entry.value[index],
+                                onTap: () => onTap(entry.value[index]),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                 ],
               ),
             ),
@@ -919,6 +1018,7 @@ class _Tab {
 class _MoreItem {
   final IconData icon;
   final String label;
+
   /// A real go_router route for pushed items, or a non-route `#key` for
   /// items that open a bottom sheet instead (see [sheetBuilder]) — a `#`
   /// prefix never matches GoRouterState.matchedLocation, so it's never

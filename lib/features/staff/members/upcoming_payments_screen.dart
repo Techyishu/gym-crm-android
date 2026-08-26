@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/theme/app_theme.dart';
@@ -13,14 +12,18 @@ import '../../../core/access/role_access.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
-final _overdueProvider =
-    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, gymId) async {
+final _overdueProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((
+  ref,
+  gymId,
+) async {
   final today = DateTime.now();
   final todayStr =
       '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
   final data = await Supabase.instance.client
       .from('members')
-      .select('id, first_name, last_name, avatar_url, next_payment_date, status, phone, email')
+      .select(
+        'id, first_name, last_name, avatar_url, next_payment_date, status, phone, email',
+      )
       .eq('gym_id', gymId)
       .lte('next_payment_date', todayStr)
       .not('status', 'eq', 'cancelled')
@@ -28,8 +31,10 @@ final _overdueProvider =
   return (data as List).cast<Map<String, dynamic>>();
 });
 
-final _upcomingProvider =
-    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, gymId) async {
+final _upcomingProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((
+  ref,
+  gymId,
+) async {
   final today = DateTime.now();
   final tomorrow = today.add(const Duration(days: 1));
   final tomorrowStr =
@@ -39,7 +44,9 @@ final _upcomingProvider =
       '${end.year}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}';
   final data = await Supabase.instance.client
       .from('members')
-      .select('id, first_name, last_name, avatar_url, next_payment_date, status, phone, email, memberships(status, membership_plans(price))')
+      .select(
+        'id, first_name, last_name, avatar_url, next_payment_date, status, phone, email, memberships(status, membership_plans(price))',
+      )
       .eq('gym_id', gymId)
       .gte('next_payment_date', tomorrowStr)
       .lte('next_payment_date', endStr)
@@ -56,8 +63,7 @@ class UpcomingPaymentsScreen extends ConsumerStatefulWidget {
       _UpcomingPaymentsScreenState();
 }
 
-class _UpcomingPaymentsScreenState
-    extends ConsumerState<UpcomingPaymentsScreen>
+class _UpcomingPaymentsScreenState extends ConsumerState<UpcomingPaymentsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
   // bucket filter for upcoming tab: 3, 7, 14 days (null = all)
@@ -92,21 +98,23 @@ class _UpcomingPaymentsScreenState
           ],
         ),
       ),
-      body: ResponsiveContent(child: gymAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (gymId) => TabBarView(
-          controller: _tabs,
-          children: [
-            _OverdueTab(gymId: gymId),
-            _UpcomingTab(
-              gymId: gymId,
-              bucketFilter: _bucketFilter,
-              onBucketChange: (v) => setState(() => _bucketFilter = v),
-            ),
-          ],
+      body: ResponsiveContent(
+        child: gymAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(child: Text('Error: $e')),
+          data: (gymId) => TabBarView(
+            controller: _tabs,
+            children: [
+              _OverdueTab(gymId: gymId),
+              _UpcomingTab(
+                gymId: gymId,
+                bucketFilter: _bucketFilter,
+                onBucketChange: (v) => setState(() => _bucketFilter = v),
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 }
@@ -137,7 +145,8 @@ class _OverdueTab extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             itemCount: members.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) => _OverdueCard(member: members[i], gymId: gymId),
+            itemBuilder: (_, i) =>
+                _OverdueCard(member: members[i], gymId: gymId),
           ),
         );
       },
@@ -160,9 +169,11 @@ class _OverdueCard extends StatelessWidget {
       final due = DateTime.tryParse(dateStr);
       if (due != null) {
         final today = DateTime.now();
-        daysOverdue = DateTime(today.year, today.month, today.day)
-            .difference(DateTime(due.year, due.month, due.day))
-            .inDays;
+        daysOverdue = DateTime(
+          today.year,
+          today.month,
+          today.day,
+        ).difference(DateTime(due.year, due.month, due.day)).inDays;
       }
     }
 
@@ -171,9 +182,7 @@ class _OverdueCard extends StatelessWidget {
         color: isFrozen ? const Color(0xFFFFF0F0) : AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isFrozen
-              ? const Color(0xFFFFCDD2)
-              : AppTheme.border,
+          color: isFrozen ? const Color(0xFFFFCDD2) : AppTheme.border,
         ),
       ),
       padding: const EdgeInsets.all(14),
@@ -198,7 +207,11 @@ class _OverdueCard extends StatelessWidget {
                       ),
                     ),
                     if (isFrozen)
-                      _Badge(label: 'Hold', bg: const Color(0xFFFFCDD2), fg: const Color(0xFFB71C1C)),
+                      _Badge(
+                        label: 'Hold',
+                        bg: const Color(0xFFFFCDD2),
+                        fg: const Color(0xFFB71C1C),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -236,6 +249,7 @@ class _OverdueCard extends StatelessWidget {
                 memberId: member['id'] as String,
                 memberName: _name(member),
                 gymId: gymId,
+                nextPaymentDate: dateStr,
               ),
             ],
           ),
@@ -276,7 +290,10 @@ class _UpcomingTab extends ConsumerWidget {
           final memberships = (m['memberships'] as List?) ?? [];
           for (final ms in memberships) {
             if ((ms as Map)['status'] == 'active') {
-              value += ((ms['membership_plans'] as Map?)?['price'] as num?)?.toDouble() ?? 0;
+              value +=
+                  ((ms['membership_plans'] as Map?)?['price'] as num?)
+                      ?.toDouble() ??
+                  0;
               break;
             }
           }
@@ -290,23 +307,55 @@ class _UpcomingTab extends ConsumerWidget {
               child: Container(
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
                 decoration: AppTheme.darkCardDecoration(),
-                child: Row(children: [
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Next $window days',
-                        style: const TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
-                      const SizedBox(height: 4),
-                      Text('${filtered.length} plan${filtered.length == 1 ? '' : 's'}',
-                        style: AppTheme.numberStyle(fontSize: 20, color: AppTheme.onDark)),
-                    ]),
-                  ),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    const Text('Value', style: TextStyle(fontSize: 12, color: AppTheme.onDarkSoft)),
-                    const SizedBox(height: 4),
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(formatCurrency(value),
-                      style: AppTheme.numberStyle(fontSize: 20, color: AppTheme.mintOnDark))),
-                  ]),
-                ]),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Next $window days',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.onDarkSoft,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${filtered.length} plan${filtered.length == 1 ? '' : 's'}',
+                            style: AppTheme.numberStyle(
+                              fontSize: 20,
+                              color: AppTheme.onDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'Value',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.onDarkSoft,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            formatCurrency(value),
+                            style: AppTheme.numberStyle(
+                              fontSize: 20,
+                              color: AppTheme.mintOnDark,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
             // 7 / 30 day toggle
@@ -314,9 +363,17 @@ class _UpcomingTab extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  _FilterChip(label: '7 days', selected: window == 7, onTap: () => onBucketChange(7)),
+                  _FilterChip(
+                    label: '7 days',
+                    selected: window == 7,
+                    onTap: () => onBucketChange(7),
+                  ),
                   const SizedBox(width: 8),
-                  _FilterChip(label: '30 days', selected: window == 30, onTap: () => onBucketChange(30)),
+                  _FilterChip(
+                    label: '30 days',
+                    selected: window == 30,
+                    onTap: () => onBucketChange(30),
+                  ),
                 ],
               ),
             ),
@@ -331,12 +388,14 @@ class _UpcomingTab extends ConsumerWidget {
             else
               Expanded(
                 child: RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(_upcomingProvider(gymId)),
+                  onRefresh: () async =>
+                      ref.invalidate(_upcomingProvider(gymId)),
                   child: ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _UpcomingCard(member: filtered[i], gymId: gymId),
+                    itemBuilder: (_, i) =>
+                        _UpcomingCard(member: filtered[i], gymId: gymId),
                   ),
                 ),
               ),
@@ -351,9 +410,11 @@ class _UpcomingTab extends ConsumerWidget {
     final due = DateTime.tryParse(dateStr);
     if (due == null) return 999;
     final today = DateTime.now();
-    return DateTime(due.year, due.month, due.day)
-        .difference(DateTime(today.year, today.month, today.day))
-        .inDays;
+    return DateTime(
+      due.year,
+      due.month,
+      due.day,
+    ).difference(DateTime(today.year, today.month, today.day)).inDays;
   }
 }
 
@@ -370,17 +431,19 @@ class _UpcomingCard extends StatelessWidget {
       final due = DateTime.tryParse(dateStr);
       if (due != null) {
         final today = DateTime.now();
-        days = DateTime(due.year, due.month, due.day)
-            .difference(DateTime(today.year, today.month, today.day))
-            .inDays;
+        days = DateTime(
+          due.year,
+          due.month,
+          due.day,
+        ).difference(DateTime(today.year, today.month, today.day)).inDays;
       }
     }
 
     final Color daysColor = days <= 3
         ? AppTheme.statusDanger
         : days <= 7
-            ? const Color(0xFFF97316)
-            : const Color(0xFFEAB308);
+        ? const Color(0xFFF97316)
+        : const Color(0xFFEAB308);
 
     return Container(
       decoration: BoxDecoration(
@@ -410,7 +473,7 @@ class _UpcomingCard extends StatelessWidget {
                   text: TextSpan(
                     children: [
                       TextSpan(
-                        text: 'Due in $days day${days == 1 ? '' : 's'}',
+                        text: 'Upcoming in $days day${days == 1 ? '' : 's'}',
                         style: TextStyle(
                           fontSize: 12,
                           color: daysColor,
@@ -431,7 +494,10 @@ class _UpcomingCard extends StatelessWidget {
                 if ((member['email'] as String? ?? '').isNotEmpty)
                   Text(
                     member['email'] as String,
-                    style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
               ],
@@ -448,6 +514,7 @@ class _UpcomingCard extends StatelessWidget {
                 memberId: member['id'] as String,
                 memberName: _name(member),
                 gymId: gymId,
+                nextPaymentDate: dateStr,
               ),
             ],
           ),
@@ -520,7 +587,11 @@ class _WhatsAppButton extends StatelessWidget {
       height: 32,
       child: OutlinedButton.icon(
         onPressed: () => _launch(context),
-        icon: const Icon(Icons.chat_bubble_outline, size: 14, color: Color(0xFF25D366)),
+        icon: const Icon(
+          Icons.chat_bubble_outline,
+          size: 14,
+          color: Color(0xFF25D366),
+        ),
         label: const Text('WA', style: TextStyle(fontSize: 12)),
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFF25D366),
@@ -539,17 +610,22 @@ class _WhatsAppButton extends StatelessWidget {
     final number = clean.startsWith('91') ? clean : '91$clean';
     final name = _name(member);
     final dateStr = member['next_payment_date'] as String?;
-    final dueDateFormatted = dateStr != null ? formatDateFromString(dateStr) : '';
+    final dueDateFormatted = dateStr != null
+        ? formatDateFromString(dateStr)
+        : '';
 
     final text = isReminder
         ? 'Hi $name, this is a reminder that your gym membership payment is due on $dueDateFormatted. Please make the payment at the earliest. Thank you!'
         : 'Hi $name, ';
 
-    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(text)}');
+    final uri = Uri.parse(
+      'https://wa.me/$number?text=${Uri.encodeComponent(text)}',
+    );
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open WhatsApp')),
+        );
       }
     }
   }
@@ -559,10 +635,12 @@ class _CollectButton extends ConsumerWidget {
   final String memberId;
   final String memberName;
   final String gymId;
+  final String? nextPaymentDate;
   const _CollectButton({
     required this.memberId,
     required this.memberName,
     required this.gymId,
+    required this.nextPaymentDate,
   });
 
   @override
@@ -577,10 +655,8 @@ class _CollectButton extends ConsumerWidget {
             context: context,
             isScrollControlled: true,
             useSafeArea: true,
-            builder: (_) => QuickCollectSheet(
-              memberId: memberId,
-              memberName: memberName,
-            ),
+            builder: (_) =>
+                QuickCollectSheet(memberId: memberId, memberName: memberName),
           ).then((success) {
             if (success == true) {
               ref.invalidate(_overdueProvider(gymId));
@@ -594,7 +670,9 @@ class _CollectButton extends ConsumerWidget {
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
         ),
-        child: const Text('Collect'),
+        child: Text(
+          isFuturePaymentDate(nextPaymentDate) ? 'Collect early' : 'Collect',
+        ),
       ),
     );
   }
@@ -605,7 +683,11 @@ class _CollectButton extends ConsumerWidget {
 class QuickCollectSheet extends ConsumerStatefulWidget {
   final String memberId;
   final String memberName;
-  const QuickCollectSheet({super.key, required this.memberId, required this.memberName});
+  const QuickCollectSheet({
+    super.key,
+    required this.memberId,
+    required this.memberName,
+  });
 
   @override
   ConsumerState<QuickCollectSheet> createState() => QuickCollectSheetState();
@@ -619,7 +701,6 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   bool _loading = false;
   String? _planHint;
   String? _nextPaymentDate;
-  double? _expectedAmount;
   double? _due;
 
   static const _methods = [
@@ -648,7 +729,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       final client = Supabase.instance.client;
       final data = await client
           .from('members')
-          .select('next_payment_date, memberships(status, discount_amount, membership_plans(price, name))')
+          .select(
+            'next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
+          )
           .eq('id', widget.memberId)
           .maybeSingle();
       if (data == null || !mounted) return;
@@ -667,7 +750,6 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
         if (plan != null && plan['price'] != null) {
           final listPrice = (plan['price'] as num).toDouble();
           finalPrice = (listPrice - discount).clamp(0, listPrice);
-          _expectedAmount = finalPrice;
           _amountCtrl.text = finalPrice!.toStringAsFixed(0);
           _planHint = discount > 0
               ? '${plan['name']} — $currencySymbol${listPrice.toStringAsFixed(0)} − $currencySymbol${discount.toStringAsFixed(0)} discount'
@@ -693,7 +775,6 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
         final due = await invoiceDue(existing['id'] as String, invoiceAmount);
         if (!mounted) return;
         setState(() {
-          _expectedAmount = invoiceAmount;
           _due = due;
           _amountCtrl.text = due.toStringAsFixed(0);
         });
@@ -708,111 +789,77 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   Future<void> _save() async {
     final amountText = _amountCtrl.text.trim();
     if (amountText.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter an amount')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter an amount')));
       return;
     }
     final amount = double.tryParse(amountText);
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
       return;
     }
 
     final prior = await LocalPaymentGuard.check(widget.memberId);
     if (prior != null && mounted) {
-      final proceed = await showDialog<bool>(
+      await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Already collected today'),
           content: Text(
             '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
             'from ${widget.memberName} today at '
-            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}.\n\n'
-            'Collect $currencySymbol${amount.toStringAsFixed(0)} again?',
+            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}. '
+            'Refresh the member before collecting another renewal.',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Collect anyway')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
           ],
         ),
       );
-      if (proceed != true) return;
+      return;
     }
 
     if (!mounted) return;
-    final ok = await confirmPartialIfNeeded(context, enteredAmount: amount, dueAmount: _due ?? amount);
+    final early = await confirmEarlyRenewalIfNeeded(
+      context,
+      nextPaymentDate: _nextPaymentDate,
+    );
+    if (!early) return;
+    if (_nextPaymentDate == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Renewal date is missing. Refresh and try again.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    final ok = await confirmPartialIfNeeded(
+      context,
+      enteredAmount: amount,
+      dueAmount: _due ?? amount,
+    );
     if (!ok) return;
 
     setState(() => _loading = true);
     try {
-      final gymId = await ref.read(gymIdProvider.future);
-      final client = Supabase.instance.client;
-
-      // 1. Reuse existing open/partial invoice if one exists, otherwise create
-      // a new one. The invoice's own amount (the real total owed) is never
-      // overwritten by the amount being collected right now — those are two
-      // different numbers once partial payments are allowed.
-      final existingInvoice = await client
-          .from('invoices')
-          .select('id')
-          .eq('member_id', widget.memberId)
-          .eq('gym_id', gymId)
-          .inFilter('status', ['open', 'partial'])
-          .order('created_at', ascending: true)
-          .limit(1)
-          .maybeSingle();
-
-      final String invoiceId;
-      if (existingInvoice != null) {
-        invoiceId = existingInvoice['id'] as String;
-        if (_nextPaymentDate != null) {
-          await client.from('invoices').update({'due_at': _nextPaymentDate}).eq('id', invoiceId);
-        }
-      } else {
-        final invoiceResult = await client.from('invoices').insert({
-          'member_id': widget.memberId,
-          'gym_id': gymId,
-          'amount': _expectedAmount ?? amount,
-          if (_nextPaymentDate != null) 'due_at': _nextPaymentDate,
-          'status': 'open',
-        }).select('id').single();
-        invoiceId = invoiceResult['id'] as String;
-      }
-
-      // 2 & 3. Record the payment and set invoice status (paid or partial).
-      final isFullyPaid = await recordInvoicePayment(
-        invoiceId: invoiceId,
+      await collectMembershipRenewal(
+        memberId: widget.memberId,
+        expectedNextPaymentDate: _nextPaymentDate!,
         amount: amount,
         method: _method,
         referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        recordedBy: client.auth.currentUser?.id,
       );
-
-      // 4. Advance next_payment_date (only once the invoice is fully settled
-      // — a bill paid in installments shouldn't push renewal forward once
-      // per installment) + lift freeze
-      final memberRow = await client
-          .from('members')
-          .select('next_payment_date, status, billing_interval_months')
-          .eq('id', widget.memberId)
-          .maybeSingle();
-      if (memberRow != null) {
-        final updates = <String, dynamic>{};
-        final npd = memberRow['next_payment_date'] as String?;
-        if (isFullyPaid && npd != null) {
-          final advanced = advancePaymentDate(
-            npd,
-            months: (memberRow['billing_interval_months'] as int?) ?? 1,
-          );
-          if (advanced != null) updates['next_payment_date'] = advanced;
-        }
-        if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';
-        if (updates.isNotEmpty) {
-          await client.from('members').update(updates).eq('id', widget.memberId);
-        }
-      }
 
       await LocalPaymentGuard.record(widget.memberId, amount);
 
@@ -827,8 +874,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(paymentFailureMessage(e))));
         setState(() => _loading = false);
       }
     }
@@ -854,9 +902,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                 Text(
                   'Collect Payment',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.ink,
-                      ),
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.ink,
+                  ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -873,7 +921,11 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.person_outline, size: 16, color: AppTheme.inkSoft),
+                  const Icon(
+                    Icons.person_outline,
+                    size: 16,
+                    color: AppTheme.inkSoft,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     widget.memberName,
@@ -889,7 +941,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _amountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 labelText: 'Amount ($currencySymbol) *',
                 prefixText: '$currencySymbol ',
@@ -903,7 +957,10 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
               ),
             ],
             const SizedBox(height: 4),
-            Text(partialPaymentHint, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
+            Text(
+              partialPaymentHint,
+              style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+            ),
             const SizedBox(height: 16),
             const Text(
               'Payment method',
@@ -923,7 +980,10 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                   onTap: () => setState(() => _method = m.$1),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: selected ? AppTheme.ink : AppTheme.surface,
                       borderRadius: BorderRadius.circular(10),
@@ -935,9 +995,11 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(m.$3,
-                            size: 16,
-                            color: selected ? Colors.white : AppTheme.inkSoft),
+                        Icon(
+                          m.$3,
+                          size: 16,
+                          color: selected ? Colors.white : AppTheme.inkSoft,
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           m.$2,
@@ -978,7 +1040,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2),
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
                     )
                   : const Text('Collect Payment'),
             ),
@@ -999,8 +1063,14 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w600)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w600),
+      ),
     );
   }
 }
@@ -1010,7 +1080,12 @@ class _FilterChip extends StatelessWidget {
   final bool selected;
   final Color? color;
   final VoidCallback onTap;
-  const _FilterChip({required this.label, required this.selected, this.color, required this.onTap});
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1020,11 +1095,11 @@ class _FilterChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? activeColor.withValues(alpha: 0.12) : AppTheme.background,
+          color: selected
+              ? activeColor.withValues(alpha: 0.12)
+              : AppTheme.background,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? activeColor : AppTheme.border,
-          ),
+          border: Border.all(color: selected ? activeColor : AppTheme.border),
         ),
         child: Text(
           label,
@@ -1043,7 +1118,11 @@ class _EmptyState extends StatelessWidget {
   final IconData icon;
   final String label;
   final String sub;
-  const _EmptyState({required this.icon, required this.label, required this.sub});
+  const _EmptyState({
+    required this.icon,
+    required this.label,
+    required this.sub,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1053,9 +1132,19 @@ class _EmptyState extends StatelessWidget {
         children: [
           Icon(icon, size: 52, color: AppTheme.inkHint),
           const SizedBox(height: 12),
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              color: AppTheme.ink,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(sub, style: const TextStyle(color: AppTheme.inkHint, fontSize: 13)),
+          Text(
+            sub,
+            style: const TextStyle(color: AppTheme.inkHint, fontSize: 13),
+          ),
         ],
       ),
     );

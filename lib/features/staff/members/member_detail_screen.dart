@@ -1611,7 +1611,10 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   late final TextEditingController _notesCtrl;
   late String _status;
   String? _nextPaymentDate;
-  int _billingIntervalMonths = 1;
+  // Always derived from the member's active plan, never staff-editable here
+  // — a manual chip that could disagree with the assigned plan silently
+  // mis-billed members every cycle (2026-08-26 incident).
+  late int _billingIntervalMonths;
   String? _joinedAt;
   File? _avatarFile;
   bool _loading = false;
@@ -1629,7 +1632,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     _notesCtrl = TextEditingController(text: m.notes ?? '');
     _status = m.status;
     _nextPaymentDate = m.nextPaymentDate;
-    _billingIntervalMonths = m.billingIntervalMonths;
+    _billingIntervalMonths =
+        m.currentMembership?.plan?.resolvedIntervalMonths ?? m.billingIntervalMonths;
     _joinedAt = m.joinedAt;
   }
 
@@ -1640,11 +1644,6 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     super.dispose();
   }
 
-  String _intervalLabel(int months) {
-    if (months == 1) return '1 Month';
-    if (months == 12) return '1 Year';
-    return '$months Months';
-  }
 
   Future<void> _pickAvatar() async {
     final source = await showAdaptiveSheet<ImageSource>(
@@ -1889,31 +1888,6 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                 ),
               ],
             ),
-            if (_nextPaymentDate != null) ...[
-              const SizedBox(height: 14),
-              const FieldLabel('Payment interval'),
-              SizedBox(
-                height: 40,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: 5,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (_, i) {
-                    final months = [1, 2, 3, 6, 12][i];
-                    return PillChip(
-                      label: _intervalLabel(months),
-                      selected: _billingIntervalMonths == months,
-                      onTap: () => setState(() => _billingIntervalMonths = months),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Invoices will be generated every ${_intervalLabel(_billingIntervalMonths).toLowerCase()} starting ${formatDateFromString(_nextPaymentDate)}.',
-                style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
-              ),
-            ],
             const SizedBox(height: 14),
             const FieldLabel('Status'),
             DropdownButtonFormField<String>(

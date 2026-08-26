@@ -476,7 +476,7 @@ Run the whole grid for A6/A7/A8 plus owner. Expected column derived directly fro
 | MEM-23 | "No plan" | No membership row, no invoice | F | P1 |
 | MEM-24 | Recurring discount entered | Applied to invoice amount | F | P1 |
 | MEM-25 | Discount > price | Blocked or clamps to 0; never negative invoice | E | P0 |
-| MEM-26 | "Payment received" checkbox on | Invoice + `record_invoice_payment` RPC called | F | P0 |
+| MEM-26 | "Payment received" checkbox on | Invoice + `record_invoice_payment_atomic` RPC called | F | P0 |
 | MEM-27 | Checkbox off | Invoice stays open | F | P1 |
 | MEM-28 | Payment method dropdown values | cash/upi/card/bank_transfer stored verbatim | F | P2 |
 | MEM-29 | Avatar from gallery | Uploads via Worker; shows immediately (cache evicted) | F | P1 |

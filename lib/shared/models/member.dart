@@ -133,6 +133,7 @@ class MembershipPlan {
   final String name;
   final double price;
   final String billingInterval;
+  final int? billingIntervalMonths;
   final List<String> features;
   final int? maxClasses;
   final bool isActive;
@@ -143,10 +144,21 @@ class MembershipPlan {
     required this.name,
     required this.price,
     required this.billingInterval,
+    this.billingIntervalMonths,
     required this.features,
     this.maxClasses,
     required this.isActive,
   });
+
+  // Authoritative billing cadence for this plan: the explicit months column
+  // when set, else derived from the text label. Every screen that advances
+  // a member's next_payment_date should use this instead of trusting
+  // members.billing_interval_months, which can drift out of sync with the
+  // plan (see 2026-08-26 quarterly/annual-billed-as-monthly incident).
+  int get resolvedIntervalMonths =>
+      billingIntervalMonths ??
+      const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[billingInterval] ??
+      1;
 
   factory MembershipPlan.fromJson(Map<String, dynamic> j) {
     final id = j['id'] as String?;
@@ -158,6 +170,7 @@ class MembershipPlan {
       name: j['name'] as String? ?? '',
       price: (j['price'] as num?)?.toDouble() ?? 0.0,
       billingInterval: j['billing_interval'] as String? ?? 'monthly',
+      billingIntervalMonths: j['billing_interval_months'] as int?,
       features: List<String>.from(j['features'] ?? []),
       maxClasses: j['max_classes'] as int?,
       isActive: j['is_active'] as bool? ?? false,

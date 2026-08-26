@@ -7,7 +7,6 @@ import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
-import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/billing/local_payment_guard.dart';
@@ -32,7 +31,9 @@ final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
       .order('price');
 });
 
-final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -46,6 +47,11 @@ final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
 
 // Period shown on the balance card's hero number.
 enum BillingPeriod { today, week, month }
+
+// "To collect" always shows overdue members plus anyone due within this
+// many days — no filter toggle, just one fixed window. Bounds how far past
+// today the dues/renewals queries fetch.
+const _collectWindowDays = 7;
 
 // Money dashboard: collected totals for today/week/month (each vs the same
 // elapsed-length window immediately before it), open due count, and a merged
@@ -67,23 +73,36 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
   final prevMonthStart = startOfMonth.subtract(elapsedMonth);
 
   // Earliest bound any of the three period comparisons need.
-  final statsFrom = prevMonthStart.isBefore(prevWeekStart) ? prevMonthStart : prevWeekStart;
+  final statsFrom = prevMonthStart.isBefore(prevWeekStart)
+      ? prevMonthStart
+      : prevWeekStart;
 
   final results = await Future.wait([
     // Recent payments feed (with member/method info for display) — widened to
     // the start of the month so the Today/Week/Month toggle always has data.
     client
         .from('payments')
-        .select('amount, method, created_at, invoice_id, invoices!inner(gym_id, members(first_name, last_name))')
+        .select(
+          'amount, method, created_at, invoice_id, invoices!inner(gym_id, members(first_name, last_name))',
+        )
         .eq('invoices.gym_id', gymId)
         .eq('status', 'succeeded')
         .gte('created_at', startOfMonth.toIso8601String())
         .order('created_at', ascending: false),
+    // A partial invoice is a real outstanding balance and must always stay
+    // visible, regardless of its renewal date. An untouched open invoice is
+    // only a collection item once it is due within the short collection
+    // window; that prevents 102-day-away renewals looking collectible today.
     client
         .from('invoices')
-        .select('id, amount, due_at, member_id, members(first_name, last_name, email, phone), payments(amount, status)')
+        .select(
+          'id, amount, status, due_at, member_id, members(first_name, last_name, email, phone), payments(amount, status)',
+        )
         .eq('gym_id', gymId)
         .inFilter('status', ['open', 'partial'])
+        .or(
+          'status.eq.partial,due_at.lt.${startOfToday.add(const Duration(days: _collectWindowDays + 1)).toIso8601String()}',
+        )
         .order('due_at'),
     // Wider-range, lightweight payments for the today/week/month sums.
     client
@@ -92,15 +111,25 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
         .eq('invoices.gym_id', gymId)
         .eq('status', 'succeeded')
         .gte('created_at', statsFrom.toIso8601String()),
-    // Members whose next renewal has passed or falls in the next 30 days but
-    // don't have an open invoice yet (mirrors Upcoming Payments' window) —
-    // Collect on these creates the invoice on the spot.
+    // Members whose renewal falls due soon but don't have an open invoice
+    // yet — Collect on these creates the invoice on the spot. Same
+    // _collectWindowDays cap as above and the same rule: only the overdue
+    // subset feeds the "Amount due" figures.
     client
         .from('members')
-        .select('id, first_name, last_name, next_payment_date, memberships(status, discount_amount, membership_plans(price, name))')
+        .select(
+          'id, first_name, last_name, next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
+        )
         .eq('gym_id', gymId)
         .not('status', 'eq', 'cancelled')
-        .lte('next_payment_date', now.add(const Duration(days: 30)).toIso8601String().split('T').first)
+        .lte(
+          'next_payment_date',
+          startOfToday
+              .add(const Duration(days: _collectWindowDays))
+              .toIso8601String()
+              .split('T')
+              .first,
+        )
         .order('next_payment_date'),
   ]);
 
@@ -112,7 +141,18 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
   final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
   final renewingMembers = (results[3] as List).cast<Map<String, dynamic>>();
   final invoicedMemberIds = dues.map((d) => d['member_id']).toSet();
-  final projected = renewingMembers.where((m) => !invoicedMemberIds.contains(m['id']));
+  final projected = renewingMembers.where(
+    (m) => !invoicedMemberIds.contains(m['id']),
+  );
+  bool isOverdueOrToday(DateTime? due) => due != null && !due.isAfter(now);
+  final overdueDues = dues.where(
+    (d) => isOverdueOrToday(DateTime.tryParse(d['due_at'] as String? ?? '')),
+  );
+  final overdueProjected = projected.where(
+    (m) => isOverdueOrToday(
+      DateTime.tryParse(m['next_payment_date'] as String? ?? ''),
+    ),
+  );
 
   double sumBetween(DateTime from, DateTime to) => statsPayments
       .where((p) {
@@ -137,16 +177,19 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     for (final m in projected) _TxnItem.projected(m),
   ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
 
-  final invoicedTotal = dues.fold<double>(0, (s, d) => s + _remainingDue(d));
-  final projectedTotal = projected.fold<double>(0, (s, m) => s + _activePlanPrice(m));
-  final overdueCount = dues.where((d) {
-        final due = DateTime.tryParse(d['due_at'] as String? ?? '');
-        return due != null && due.isBefore(now);
-      }).length +
-      projected.where((m) {
-        final due = DateTime.tryParse(m['next_payment_date'] as String? ?? '');
-        return due != null && due.isBefore(now);
-      }).length;
+  // "Amount due" and the overdue/member counts below deliberately use only
+  // the overdue-or-today subset, never the full (bucket-widened) dues/
+  // projected lists — otherwise the summary card would silently start
+  // counting members who aren't actually due yet again.
+  final invoicedTotal = overdueDues.fold<double>(
+    0,
+    (s, d) => s + _remainingDue(d),
+  );
+  final projectedTotal = overdueProjected.fold<double>(
+    0,
+    (s, m) => s + _activePlanPrice(m),
+  );
+  final overdueCount = overdueDues.length + overdueProjected.length;
 
   return _BillingFeed(
     collected: {
@@ -159,9 +202,11 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
       BillingPeriod.week: pctChange(collectedWeek, collectedPrevWeek),
       BillingPeriod.month: pctChange(collectedMonth, collectedPrevMonth),
     },
-    dueCount: dues.length + projected.length,
+    dueCount: overdueCount,
     dueTotal: invoicedTotal + projectedTotal,
-    dueMembers: invoicedMemberIds.length + projected.length,
+    dueMembers:
+        overdueDues.map((d) => d['member_id']).toSet().length +
+        overdueProjected.length,
     overdueCount: overdueCount,
     items: items,
   );
@@ -239,27 +284,47 @@ class _TxnItem {
 
   // No invoice exists yet for this due — Collect creates one on the spot.
   bool get needsInvoice => isDue && invoiceId.isEmpty;
+  bool get isPartial => raw['status'] == 'partial';
+  bool get isUpcoming {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = DateTime(sortKey.year, sortKey.month, sortKey.day);
+    return isDue && date.isAfter(today);
+  }
 
   static ({String subtitle, Color color}) _dueSubtitle(DateTime? due) {
     if (due == null) return (subtitle: 'Due', color: AppTheme.statusWarn);
     final days = due.difference(DateTime.now()).inDays;
-    if (days < 0) return (subtitle: '${days.abs()} day${days == -1 ? '' : 's'} overdue', color: AppTheme.statusDanger);
+    if (days < 0)
+      return (
+        subtitle: '${days.abs()} day${days == -1 ? '' : 's'} overdue',
+        color: AppTheme.statusDanger,
+      );
     if (days == 0) return (subtitle: 'Due today', color: AppTheme.statusWarn);
-    return (subtitle: 'Due in $days day${days == 1 ? '' : 's'}', color: AppTheme.statusWarn);
+    return (
+      subtitle: 'Upcoming in $days day${days == 1 ? '' : 's'}',
+      color: AppTheme.statusWarn,
+    );
   }
 
   factory _TxnItem.payment(Map<String, dynamic> p) {
     final invoice = p['invoices'] as Map<String, dynamic>?;
     final member = invoice?['members'] as Map<String, dynamic>?;
-    final created = DateTime.tryParse(p['created_at'] as String? ?? '') ?? DateTime.now();
+    final created =
+        DateTime.tryParse(p['created_at'] as String? ?? '') ?? DateTime.now();
     final method = (p['method'] as String?)?.replaceAll('_', ' ') ?? '';
-    final methodLabel = method.isEmpty ? 'Payment' : method[0].toUpperCase() + method.substring(1);
+    final methodLabel = method.isEmpty
+        ? 'Payment'
+        : method[0].toUpperCase() + method.substring(1);
     return _TxnItem._(
       isDue: false,
       invoiceId: p['invoice_id'] as String? ?? '',
-      name: member != null ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim() : 'Unknown',
+      name: member != null
+          ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim()
+          : 'Unknown',
       amount: (p['amount'] as num?)?.toDouble() ?? 0,
-      subtitle: '$methodLabel · ${DateFormat('d MMM, h:mm a').format(created.toLocal())}',
+      subtitle:
+          '$methodLabel · ${DateFormat('d MMM, h:mm a').format(created.toLocal())}',
       color: AppTheme.statusActive,
       sortKey: created,
       raw: p,
@@ -274,9 +339,13 @@ class _TxnItem {
       isDue: true,
       invoiceId: inv['id'] as String? ?? '',
       memberId: inv['member_id'] as String?,
-      name: member != null ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim() : 'Unknown',
+      name: member != null
+          ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim()
+          : 'Unknown',
       amount: _remainingDue(inv),
-      subtitle: s.subtitle,
+      subtitle: inv['status'] == 'partial'
+          ? 'Partially paid · ${s.subtitle}'
+          : s.subtitle,
       color: s.color,
       sortKey: due ?? DateTime.now(),
       raw: inv,
@@ -339,8 +408,15 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Billing',
-                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+                const Text(
+                  'Billing',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                    letterSpacing: -0.5,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 feed.when(
                   loading: () => const _BalanceCardSkeleton(),
@@ -376,16 +452,35 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('All transactions',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                        const Text(
+                          'Payment activity',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.ink,
+                          ),
+                        ),
                         const SizedBox(height: 10),
                         Row(
                           children: [
-                            PillChip(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+                            PillChip(
+                              label: 'All activity',
+                              selected: _filter == 'all',
+                              onTap: () => setState(() => _filter = 'all'),
+                            ),
                             const SizedBox(width: 8),
-                            PillChip(label: 'Due', selected: _filter == 'due', onTap: () => setState(() => _filter = 'due')),
+                            PillChip(
+                              label: 'To collect',
+                              selected: _filter == 'due',
+                              onTap: () => setState(() => _filter = 'due'),
+                            ),
                             const SizedBox(width: 8),
-                            PillChip(label: 'Collected', selected: _filter == 'collected', onTap: () => setState(() => _filter = 'collected')),
+                            PillChip(
+                              label: 'Collected',
+                              selected: _filter == 'collected',
+                              onTap: () =>
+                                  setState(() => _filter = 'collected'),
+                            ),
                           ],
                         ),
                       ],
@@ -410,8 +505,15 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
           const SliverPadding(
             padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
             sliver: SliverToBoxAdapter(
-              child: Text('Billing',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+              child: Text(
+                'Billing',
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                  letterSpacing: -0.5,
+                ),
+              ),
             ),
           ),
           SliverPadding(
@@ -429,9 +531,9 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                   dueCount: data.dueCount,
                   onRecord: () => setState(() => _filter = 'due'),
                   onInvoice: () => _showCreateInvoiceSheet(context),
-                  onNewPlan: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const _PlansTab()),
-                  ),
+                  onNewPlan: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const _PlansTab())),
                   onDue: () => setState(() => _filter = 'due'),
                 ),
               ),
@@ -443,16 +545,34 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('All transactions',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                  const Text(
+                    'Payment activity',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      PillChip(label: 'All', selected: _filter == 'all', onTap: () => setState(() => _filter = 'all')),
+                      PillChip(
+                        label: 'All activity',
+                        selected: _filter == 'all',
+                        onTap: () => setState(() => _filter = 'all'),
+                      ),
                       const SizedBox(width: 8),
-                      PillChip(label: 'Due', selected: _filter == 'due', onTap: () => setState(() => _filter = 'due')),
+                      PillChip(
+                        label: 'To collect',
+                        selected: _filter == 'due',
+                        onTap: () => setState(() => _filter = 'due'),
+                      ),
                       const SizedBox(width: 8),
-                      PillChip(label: 'Collected', selected: _filter == 'collected', onTap: () => setState(() => _filter = 'collected')),
+                      PillChip(
+                        label: 'Collected',
+                        selected: _filter == 'collected',
+                        onTap: () => setState(() => _filter = 'collected'),
+                      ),
                     ],
                   ),
                 ],
@@ -467,7 +587,11 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 
   // Shared between narrow (single CustomScrollView) and wide (right column's
   // own CustomScrollView) layouts — same data, same _TxnCard rendering.
-  List<Widget> _transactionSlivers(BuildContext context, AsyncValue<_BillingFeed> feed, {required double leftPad}) {
+  List<Widget> _transactionSlivers(
+    BuildContext context,
+    AsyncValue<_BillingFeed> feed, {
+    required double leftPad,
+  }) {
     return [
       feed.when(
         loading: () => SliverPadding(
@@ -480,7 +604,10 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 height: 68,
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
             ),
           ),
@@ -488,41 +615,79 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         error: (_, __) => const SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.symmetric(vertical: 40),
-            child: Center(child: Text('Could not load transactions. Pull to retry.', style: TextStyle(color: AppTheme.inkSoft))),
+            child: Center(
+              child: Text(
+                'Could not load transactions. Pull to retry.',
+                style: TextStyle(color: AppTheme.inkSoft),
+              ),
+            ),
           ),
         ),
         data: (data) {
+          final today = DateTime.now();
+          final todayDate = DateTime(today.year, today.month, today.day);
           final items = data.items.where((t) {
-            if (_filter == 'due') return t.isDue;
+            if (_filter == 'due') {
+              if (!t.isDue) return false;
+              // A partial invoice is already a genuine balance due. Unlike a
+              // future renewal, it must not disappear just because its due
+              // date is outside the upcoming-renewal window.
+              if (t.isPartial) return true;
+              final dueDate = DateTime(
+                t.sortKey.year,
+                t.sortKey.month,
+                t.sortKey.day,
+              );
+              final daysUntil = dueDate.difference(todayDate).inDays;
+              // Overdue members plus anyone due within the next
+              // _collectWindowDays — the upcoming ones are gated behind
+              // the "Collect early" confirmation (see _TxnItem.isUpcoming).
+              return daysUntil <= _collectWindowDays;
+            }
             if (_filter == 'collected') return !t.isDue;
             return true;
           }).toList();
-          if (items.isEmpty) {
-            return const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 40),
-                child: Center(child: Text('No transactions', style: TextStyle(color: AppTheme.inkHint, fontSize: 14))),
-              ),
-            );
-          }
-          final canDelete = RoleAccess.canDeleteInvoice(ref.watch(staffRoleProvider).valueOrNull);
-          return SliverPadding(
-            padding: EdgeInsets.fromLTRB(leftPad, 4, 16, 24),
-            sliver: SliverList.builder(
-              itemCount: items.length,
-              itemBuilder: (_, i) => _TxnCard(
-                item: items[i],
-                onTap: () => _openInvoice(context, items[i]),
-                onCollect: () => _collect(context, items[i]),
-                onDelete: canDelete && items[i].invoiceId.isNotEmpty
-                    ? () => _deleteInvoice(context, items[i])
-                    : null,
-              ),
-            ),
-          );
+          return _transactionListSliver(context, items, leftPad);
         },
       ),
     ];
+  }
+
+  Widget _transactionListSliver(
+    BuildContext context,
+    List<_TxnItem> items,
+    double leftPad,
+  ) {
+    if (items.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 40),
+          child: Center(
+            child: Text(
+              'No transactions',
+              style: TextStyle(color: AppTheme.inkHint, fontSize: 14),
+            ),
+          ),
+        ),
+      );
+    }
+    final canDelete = RoleAccess.canDeleteInvoice(
+      ref.watch(staffRoleProvider).valueOrNull,
+    );
+    return SliverPadding(
+      padding: EdgeInsets.fromLTRB(leftPad, 4, 16, 24),
+      sliver: SliverList.builder(
+        itemCount: items.length,
+        itemBuilder: (_, i) => _TxnCard(
+          item: items[i],
+          onTap: () => _openInvoice(context, items[i]),
+          onCollect: () => _collect(context, items[i]),
+          onDelete: canDelete && items[i].invoiceId.isNotEmpty
+              ? () => _deleteInvoice(context, items[i])
+              : null,
+        ),
+      ),
+    );
   }
 
   void _openInvoice(BuildContext context, _TxnItem item) {
@@ -534,12 +699,16 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     final ok = await showConfirmDialog(
       context,
       title: 'Delete invoice?',
-      body: 'This invoice and its payment records will be permanently deleted. This cannot be undone.',
+      body:
+          'This invoice and its payment records will be permanently deleted. This cannot be undone.',
       confirmLabel: 'Delete',
       icon: Icons.delete_outline,
     );
     if (ok != true) return;
-    await Supabase.instance.client.from('invoices').delete().eq('id', item.invoiceId);
+    await Supabase.instance.client
+        .from('invoices')
+        .delete()
+        .eq('id', item.invoiceId);
     ref.invalidate(_billingFeedProvider);
   }
 
@@ -551,7 +720,8 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        builder: (_) => QuickCollectSheet(memberId: item.memberId!, memberName: item.name),
+        builder: (_) =>
+            QuickCollectSheet(memberId: item.memberId!, memberName: item.name),
       ).then((_) => ref.invalidate(_billingFeedProvider));
       return;
     }
@@ -608,29 +778,59 @@ class _BalanceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text('Amount due',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.statusWarn)),
+          Text(
+            'Amount due',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.statusWarn,
+            ),
+          ),
           const SizedBox(height: 6),
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text(formatCurrency(dueTotal),
-              style: AppTheme.numberStyle(fontSize: 38, color: AppTheme.onDark, height: 1.0)),
+            child: Text(
+              formatCurrency(dueTotal),
+              style: AppTheme.numberStyle(
+                fontSize: 38,
+                color: AppTheme.onDark,
+                height: 1.0,
+              ),
+            ),
           ),
           const SizedBox(height: 6),
-          Text('$dueMembers member${dueMembers == 1 ? '' : 's'} · $overdueCount overdue',
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+          Text(
+            '$dueMembers member${dueMembers == 1 ? '' : 's'} · $overdueCount overdue',
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.onDarkSoft,
+            ),
+          ),
           const SizedBox(height: 18),
           const Divider(height: 1, color: Color(0x1FFFFFFF)),
           const SizedBox(height: 14),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Collected this month',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+              const Text(
+                'Collected this month',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.onDarkSoft,
+                ),
+              ),
               Row(
                 children: [
-                  Text(formatCurrency(collectedMonth),
-                    style: AppTheme.numberStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.onDark)),
+                  Text(
+                    formatCurrency(collectedMonth),
+                    style: AppTheme.numberStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.onDark,
+                    ),
+                  ),
                   if (growthPct != null) ...[
                     const SizedBox(width: 6),
                     Text(
@@ -638,7 +838,9 @@ class _BalanceCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
-                        color: growthPct! >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger,
+                        color: growthPct! >= 0
+                            ? AppTheme.mintOnDark
+                            : AppTheme.statusDanger,
                       ),
                     ),
                   ],
@@ -650,10 +852,26 @@ class _BalanceCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _DockAction(icon: Icons.credit_card_outlined, label: 'Record', onTap: onRecord),
-              _DockAction(icon: Icons.receipt_outlined, label: 'Invoice', onTap: onInvoice),
-              _DockAction(icon: Icons.sell_outlined, label: 'Plans', onTap: onNewPlan),
-              _DockAction(icon: Icons.schedule_outlined, label: 'Due · $dueCount', onTap: onDue),
+              _DockAction(
+                icon: Icons.credit_card_outlined,
+                label: 'Collect',
+                onTap: onRecord,
+              ),
+              _DockAction(
+                icon: Icons.receipt_outlined,
+                label: 'Invoice',
+                onTap: onInvoice,
+              ),
+              _DockAction(
+                icon: Icons.sell_outlined,
+                label: 'Plans',
+                onTap: onNewPlan,
+              ),
+              _DockAction(
+                icon: Icons.schedule_outlined,
+                label: 'Dues · $dueCount',
+                onTap: onDue,
+              ),
             ],
           ),
         ],
@@ -666,7 +884,11 @@ class _DockAction extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _DockAction({required this.icon, required this.label, required this.onTap});
+  const _DockAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -677,12 +899,23 @@ class _DockAction extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 46, height: 46,
-            decoration: BoxDecoration(color: AppTheme.darkCard2, shape: BoxShape.circle),
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: AppTheme.darkCard2,
+              shape: BoxShape.circle,
+            ),
             child: Icon(icon, size: 19, color: AppTheme.onDark),
           ),
           const SizedBox(height: 6),
-          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.onDarkSoft,
+            ),
+          ),
         ],
       ),
     );
@@ -694,10 +927,7 @@ class _BalanceCardSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 216,
-      decoration: AppTheme.darkCardDecoration(),
-    );
+    return Container(height: 216, decoration: AppTheme.darkCardDecoration());
   }
 }
 
@@ -708,7 +938,12 @@ class _TxnCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onCollect;
   final VoidCallback? onDelete;
-  const _TxnCard({required this.item, required this.onTap, required this.onCollect, this.onDelete});
+  const _TxnCard({
+    required this.item,
+    required this.onTap,
+    required this.onCollect,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -727,13 +962,27 @@ class _TxnCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(item.name,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
+                  Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14.5,
+                      color: AppTheme.ink,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(item.subtitle,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: item.color)),
+                  Text(
+                    item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: item.color,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -742,16 +991,29 @@ class _TxnCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('${formatCurrency(item.amount)} due',
-                    style: AppTheme.numberStyle(fontSize: 15, fontWeight: FontWeight.w800, color: item.color)),
+                  Text(
+                    '${formatCurrency(item.amount)} ${item.isUpcoming ? 'upcoming' : 'due'}',
+                    style: AppTheme.numberStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: item.color,
+                    ),
+                  ),
                   const SizedBox(height: 6),
-                  PillButton(label: 'Collect', onTap: onCollect),
+                  PillButton(
+                    label: item.isUpcoming ? 'Collect early' : 'Collect',
+                    onTap: onCollect,
+                  ),
                 ],
               )
             else
               Text(
                 '+${formatCurrency(item.amount)}',
-                style: AppTheme.numberStyle(fontSize: 15, fontWeight: FontWeight.w800, color: item.color),
+                style: AppTheme.numberStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: item.color,
+                ),
               ),
           ],
         ),
@@ -767,7 +1029,8 @@ class _RecordPaymentSheet extends ConsumerStatefulWidget {
   const _RecordPaymentSheet({required this.invoice});
 
   @override
-  ConsumerState<_RecordPaymentSheet> createState() => _RecordPaymentSheetState();
+  ConsumerState<_RecordPaymentSheet> createState() =>
+      _RecordPaymentSheetState();
 }
 
 class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
@@ -812,9 +1075,17 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     final inv = widget.invoice;
     final amount = double.tryParse(_amountCtrl.text.trim());
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
       return;
     }
+
+    final early = await confirmEarlyRenewalIfNeeded(
+      context,
+      nextPaymentDate: inv.dueAt,
+    );
+    if (!early) return;
 
     final prior = await LocalPaymentGuard.check(inv.memberId);
     if (prior != null && mounted) {
@@ -829,8 +1100,14 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
             'Record $currencySymbol${amount.toStringAsFixed(0)} again?',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Record anyway')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Record anyway'),
+            ),
           ],
         ),
       );
@@ -838,7 +1115,11 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     }
 
     if (!mounted) return;
-    final ok = await confirmPartialIfNeeded(context, enteredAmount: amount, dueAmount: _due ?? inv.amount);
+    final ok = await confirmPartialIfNeeded(
+      context,
+      enteredAmount: amount,
+      dueAmount: _due ?? inv.amount,
+    );
     if (!ok) return;
 
     setState(() => _loading = true);
@@ -850,45 +1131,50 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       if (userId == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Session expired. Please sign in again.')),
+            const SnackBar(
+              content: Text('Session expired. Please sign in again.'),
+            ),
           );
           setState(() => _loading = false);
         }
         return;
       }
 
-      // 1 & 2. Record the payment and set invoice status (paid or partial).
-      final isFullyPaid = await recordInvoicePayment(
-        invoiceId: inv.id,
-        amount: amount,
-        method: _method,
-        referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
-        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        recordedBy: userId,
-      );
-
-      // 3. Lift any freeze, and advance the member's next payment date —
-      // only once the invoice is fully settled, so a bill paid in
-      // installments doesn't push renewal forward once per installment.
       final memberRow = await client
           .from('members')
-          .select('next_payment_date, status, billing_interval_months')
+          .select('next_payment_date')
           .eq('id', inv.memberId)
           .maybeSingle();
-      if (memberRow != null) {
-        final updates = <String, dynamic>{};
-        final npd = memberRow['next_payment_date'] as String?;
-        if (isFullyPaid && npd != null) {
-          final advanced = advancePaymentDate(
-            npd,
-            months: (memberRow['billing_interval_months'] as int?) ?? 1,
-          );
-          if (advanced != null) updates['next_payment_date'] = advanced;
-        }
-        if (memberRow['status'] == 'frozen' || memberRow['status'] == 'expired') updates['status'] = 'active';
-        if (updates.isNotEmpty) {
-          await client.from('members').update(updates).eq('id', inv.memberId);
-        }
+      final nextPaymentDate = memberRow?['next_payment_date'] as String?;
+      final invoiceDueDate = inv.dueAt?.split('T').first;
+      final renewalDate = nextPaymentDate?.split('T').first;
+
+      // A membership-renewal invoice advances the plan date inside the same
+      // locked transaction. A manually created invoice records only its own
+      // payment and must not move the membership schedule.
+      if (invoiceDueDate != null && invoiceDueDate == renewalDate) {
+        await collectMembershipRenewal(
+          memberId: inv.memberId,
+          expectedNextPaymentDate: renewalDate!,
+          amount: amount,
+          method: _method,
+          referenceNo: _refCtrl.text.trim().isEmpty
+              ? null
+              : _refCtrl.text.trim(),
+          notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+          invoiceId: inv.id,
+        );
+      } else {
+        await recordInvoicePayment(
+          invoiceId: inv.id,
+          amount: amount,
+          method: _method,
+          referenceNo: _refCtrl.text.trim().isEmpty
+              ? null
+              : _refCtrl.text.trim(),
+          notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+          recordedBy: userId,
+        );
       }
 
       await LocalPaymentGuard.record(inv.memberId, amount);
@@ -896,15 +1182,18 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment recorded'), backgroundColor: AppTheme.statusActive),
+          const SnackBar(
+            content: Text('Payment recorded'),
+            backgroundColor: AppTheme.statusActive,
+          ),
         );
       }
     } catch (e) {
       debugPrint('[GymCRM] RecordPayment error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to record payment. Please try again.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(paymentFailureMessage(e))));
         setState(() => _loading = false);
       }
     }
@@ -912,9 +1201,16 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final methodIndex = _methods.indexWhere((m) => m.$1 == _method).clamp(0, _methods.length - 1);
+    final methodIndex = _methods
+        .indexWhere((m) => m.$1 == _method)
+        .clamp(0, _methods.length - 1);
     return Padding(
-      padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -922,19 +1218,25 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
           children: [
             SheetHeader(
               title: 'Record payment',
-              subtitle: '${widget.invoice.member?.fullName ?? 'Member'}'
+              subtitle:
+                  '${widget.invoice.member?.fullName ?? 'Member'}'
                   '${widget.invoice.description != null ? ' · ${widget.invoice.description}' : ''}',
             ),
             const SizedBox(height: 18),
             const FieldLabel('Amount'),
             TextFormField(
               controller: _amountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(prefixText: '$currencySymbol '),
               style: AppTheme.numberStyle(fontSize: 22),
             ),
             const SizedBox(height: 4),
-            Text(partialPaymentHint, style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
+            Text(
+              partialPaymentHint,
+              style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+            ),
             const SizedBox(height: 16),
             const FieldLabel('Method'),
             SizedBox(
@@ -964,7 +1266,14 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
             ElevatedButton(
               onPressed: _loading ? null : _save,
               child: _loading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
                   : const Text('Record payment'),
             ),
           ],
@@ -980,7 +1289,8 @@ class _CreateInvoiceSheet extends ConsumerStatefulWidget {
   const _CreateInvoiceSheet();
 
   @override
-  ConsumerState<_CreateInvoiceSheet> createState() => _CreateInvoiceSheetState();
+  ConsumerState<_CreateInvoiceSheet> createState() =>
+      _CreateInvoiceSheetState();
 }
 
 class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
@@ -1006,7 +1316,9 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
     try {
       final data = await Supabase.instance.client
           .from('members')
-          .select('next_payment_date, memberships(status, membership_plans(price, name))')
+          .select(
+            'next_payment_date, memberships(status, membership_plans(price, name))',
+          )
           .eq('id', memberId)
           .maybeSingle();
       if (data == null || !mounted) return;
@@ -1047,7 +1359,9 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
 
   Future<void> _create() async {
     if (_selectedMemberId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a member first')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Select a member first')));
       return;
     }
     if (_amountCtrl.text.trim().isEmpty) return;
@@ -1059,7 +1373,10 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
 
       final originalAmount = double.parse(_amountCtrl.text.trim());
       final discountAmount = double.tryParse(_discountCtrl.text.trim()) ?? 0.0;
-      final finalAmount = (originalAmount - discountAmount).clamp(0.0, double.infinity);
+      final finalAmount = (originalAmount - discountAmount).clamp(
+        0.0,
+        double.infinity,
+      );
 
       await client.from('invoices').insert({
         'member_id': _selectedMemberId,
@@ -1067,7 +1384,8 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
         'original_amount': originalAmount,
         'discount_amount': discountAmount,
         'amount': finalAmount,
-        if (_descCtrl.text.trim().isNotEmpty) 'description': _descCtrl.text.trim(),
+        if (_descCtrl.text.trim().isNotEmpty)
+          'description': _descCtrl.text.trim(),
         if (_dueAt != null) 'due_at': _dueAt,
         'status': 'open',
       });
@@ -1075,7 +1393,9 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -1087,11 +1407,15 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
 
     final originalAmount = double.tryParse(_amountCtrl.text.trim());
     final discountAmount = double.tryParse(_discountCtrl.text.trim()) ?? 0.0;
-    final total = originalAmount == null ? null : (originalAmount - discountAmount).clamp(0.0, double.infinity);
+    final total = originalAmount == null
+        ? null
+        : (originalAmount - discountAmount).clamp(0.0, double.infinity);
 
     return Padding(
       padding: EdgeInsets.only(
-        left: 16, right: 16, top: 16,
+        left: 16,
+        right: 16,
+        top: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       child: SingleChildScrollView(
@@ -1110,8 +1434,12 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                 isExpanded: true,
                 hint: const Text('Select member'),
                 items: list.map((m) {
-                  final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
-                  return DropdownMenuItem(value: m['id'] as String, child: Text(name));
+                  final name =
+                      '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
+                  return DropdownMenuItem(
+                    value: m['id'] as String,
+                    child: Text(name),
+                  );
                 }).toList(),
                 onChanged: (v) {
                   setState(() => _selectedMemberId = v);
@@ -1123,20 +1451,26 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
             const FieldLabel('Amount'),
             TextFormField(
               controller: _amountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(prefixText: '$currencySymbol '),
             ),
             if (_planHint != null) ...[
               const SizedBox(height: 4),
-              Text('Auto-filled from active plan: $_planHint',
-                  style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft)),
+              Text(
+                'Auto-filled from active plan: $_planHint',
+                style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+              ),
             ],
             const SizedBox(height: 14),
             const FieldLabel('Discount (optional)'),
             TextFormField(
               controller: _discountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(prefixText: '$currencySymbol '),
             ),
@@ -1146,29 +1480,77 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
             const SizedBox(height: 16),
             if (total != null) ...[
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: AppTheme.cardDecoration(),
-                child: Column(children: [
-                  Row(children: [
-                    const Text('Amount', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
-                    const Spacer(),
-                    Text(formatCurrency(originalAmount!), style: const TextStyle(fontSize: 13, color: AppTheme.ink)),
-                  ]),
-                  if (discountAmount > 0) ...[
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      const Text('Discount', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
-                      const Spacer(),
-                      Text('− ${formatCurrency(discountAmount)}', style: const TextStyle(fontSize: 13, color: AppTheme.statusActive)),
-                    ]),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Amount',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.inkSoft,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          formatCurrency(originalAmount!),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.ink,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (discountAmount > 0) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Text(
+                            'Discount',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.inkSoft,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '− ${formatCurrency(discountAmount)}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.statusActive,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1),
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          'Total',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.ink,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          formatCurrency(total),
+                          style: AppTheme.numberStyle(fontSize: 16),
+                        ),
+                      ],
+                    ),
                   ],
-                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1)),
-                  Row(children: [
-                    const Text('Total', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-                    const Spacer(),
-                    Text(formatCurrency(total), style: AppTheme.numberStyle(fontSize: 16)),
-                  ]),
-                ]),
+                ),
               ),
               const SizedBox(height: 16),
             ],
@@ -1179,12 +1561,17 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               child: InputDecorator(
                 decoration: InputDecoration(
                   suffixIcon: _dueAt != null
-                      ? IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () => setState(() => _dueAt = null))
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16),
+                          onPressed: () => setState(() => _dueAt = null),
+                        )
                       : const Icon(Icons.calendar_today_outlined, size: 16),
                 ),
                 child: Text(
                   _dueAt != null ? formatDateFromString(_dueAt) : 'Select date',
-                  style: TextStyle(color: _dueAt != null ? AppTheme.ink : AppTheme.inkHint),
+                  style: TextStyle(
+                    color: _dueAt != null ? AppTheme.ink : AppTheme.inkHint,
+                  ),
                 ),
               ),
             ),
@@ -1192,7 +1579,14 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
             ElevatedButton(
               onPressed: _loading ? null : _create,
               child: _loading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
                   : const Text('Create & send invoice'),
             ),
           ],
@@ -1219,7 +1613,11 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
     final phone = widget.invoice.member?.phone ?? '';
     if (phone.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No phone number saved for this member. Add it in their profile first.')),
+        const SnackBar(
+          content: Text(
+            'No phone number saved for this member. Add it in their profile first.',
+          ),
+        ),
       );
       return;
     }
@@ -1231,20 +1629,27 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
       // 1. Fetch full invoice data (gym header needed for PDF)
       final data = await client
           .from('invoices')
-          .select('*, members(first_name, last_name, email, phone), gyms(name, settings)')
+          .select(
+            '*, members(first_name, last_name, email, phone), gyms(name, settings)',
+          )
           .eq('id', widget.invoice.id)
           .single();
 
       // 2. Generate PDF bytes
-      final bytes  = await buildInvoicePdf(data);
+      final bytes = await buildInvoicePdf(data);
       final invNum = invoiceNumber(widget.invoice.id, widget.invoice.createdAt);
 
       // 3. Upload to Supabase Storage (upsert so same invoice never duplicates)
-      await client.storage.from('invoice-pdfs').uploadBinary(
-        '${widget.invoice.id}.pdf',
-        bytes,
-        fileOptions: const FileOptions(contentType: 'application/pdf', upsert: true),
-      );
+      await client.storage
+          .from('invoice-pdfs')
+          .uploadBinary(
+            '${widget.invoice.id}.pdf',
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'application/pdf',
+              upsert: true,
+            ),
+          );
 
       // 4. Get public download URL
       final downloadUrl = client.storage
@@ -1252,16 +1657,18 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
           .getPublicUrl('${widget.invoice.id}.pdf');
 
       // 5. Build WhatsApp message with download link
-      final name   = widget.invoice.member?.fullName ?? 'there';
+      final name = widget.invoice.member?.fullName ?? 'there';
       final amount = formatCurrency(widget.invoice.amount);
-      final text   = widget.invoice.status == 'paid'
+      final text = widget.invoice.status == 'paid'
           ? 'Hi $name, we have received your payment of $amount for invoice $invNum. Download your receipt here: $downloadUrl'
           : 'Hi $name, your invoice $invNum for $amount is due. Download it here: $downloadUrl';
 
       // 6. Open WhatsApp directly to member's chat
-      final clean  = phone.replaceAll(RegExp(r'\D'), '');
+      final clean = phone.replaceAll(RegExp(r'\D'), '');
       final number = clean.startsWith('91') ? clean : '91$clean';
-      final uri    = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(text)}');
+      final uri = Uri.parse(
+        'https://wa.me/$number?text=${Uri.encodeComponent(text)}',
+      );
 
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         if (mounted) {
@@ -1273,7 +1680,9 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not generate or upload invoice PDF')),
+          const SnackBar(
+            content: Text('Could not generate or upload invoice PDF'),
+          ),
         );
       }
     } finally {
@@ -1291,9 +1700,16 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
             ? const SizedBox(
                 width: 14,
                 height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF25D366)),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF25D366),
+                ),
               )
-            : const Icon(Icons.chat_bubble_outline, size: 14, color: Color(0xFF25D366)),
+            : const Icon(
+                Icons.chat_bubble_outline,
+                size: 14,
+                color: Color(0xFF25D366),
+              ),
         label: const Text('WhatsApp', style: TextStyle(fontSize: 12)),
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFF25D366),
@@ -1318,7 +1734,10 @@ class _PlansTab extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Plans & pricing'), leading: const BackButton()),
+      appBar: AppBar(
+        title: const Text('Plans & pricing'),
+        leading: const BackButton(),
+      ),
       body: plans.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
@@ -1331,19 +1750,28 @@ class _PlansTab extends ConsumerWidget {
               if (list.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Center(child: Text('No plans yet', style: TextStyle(color: AppTheme.inkHint, fontSize: 14))),
+                  child: Center(
+                    child: Text(
+                      'No plans yet',
+                      style: TextStyle(color: AppTheme.inkHint, fontSize: 14),
+                    ),
+                  ),
                 )
               else
                 CardList(
-                  children: list.map((plan) => _PlanCard(
-                    plan: plan,
-                    onEdit: () => showAdaptiveSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      useSafeArea: true,
-                      builder: (_) => PlanFormSheet(plan: plan),
-                    ).then((_) => ref.invalidate(_plansProvider)),
-                  )).toList(),
+                  children: list
+                      .map(
+                        (plan) => _PlanCard(
+                          plan: plan,
+                          onEdit: () => showAdaptiveSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            useSafeArea: true,
+                            builder: (_) => PlanFormSheet(plan: plan),
+                          ).then((_) => ref.invalidate(_plansProvider)),
+                        ),
+                      )
+                      .toList(),
                 ),
               const SizedBox(height: 12),
               GestureDetector(
@@ -1359,8 +1787,14 @@ class _PlansTab extends ConsumerWidget {
                     children: const [
                       Icon(Icons.add, size: 18, color: AppTheme.accent),
                       SizedBox(width: 6),
-                      Text('Add new plan',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                      Text(
+                        'Add new plan',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.accent,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1385,7 +1819,9 @@ class _PlanCard extends StatelessWidget {
     final features = List<String>.from(plan['features'] ?? []);
     final interval = plan['billing_interval'] as String;
     final months = plan['billing_interval_months'] as int?;
-    final intervalLabel = interval == 'custom' && months != null ? '$months months' : interval;
+    final intervalLabel = interval == 'custom' && months != null
+        ? '$months months'
+        : interval;
     final isActive = plan['is_active'] as bool? ?? true;
 
     return InkWell(
@@ -1404,38 +1840,74 @@ class _PlanCard extends StatelessWidget {
                     children: [
                       Text(
                         plan['name'] as String,
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5, color: AppTheme.ink),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15.5,
+                          color: AppTheme.ink,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       if (plan['max_classes'] != null)
-                        Text('Up to ${plan['max_classes']} classes',
-                          style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+                        Text(
+                          'Up to ${plan['max_classes']} classes',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: AppTheme.inkSoft,
+                          ),
+                        ),
                     ],
                   ),
                 ),
-                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Row(children: [
-                    Text(formatCurrency(plan['price'] as num), style: AppTheme.numberStyle(fontSize: 15)),
-                    Text(' / $intervalLabel',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                  ]),
-                  const SizedBox(height: 4),
-                  isActive ? StatusPill.active() : StatusPill.neutral(label: 'Inactive'),
-                ]),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          formatCurrency(plan['price'] as num),
+                          style: AppTheme.numberStyle(fontSize: 15),
+                        ),
+                        Text(
+                          ' / $intervalLabel',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.inkSoft,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    isActive
+                        ? StatusPill.active()
+                        : StatusPill.neutral(label: 'Inactive'),
+                  ],
+                ),
               ],
             ),
             if (features.isNotEmpty) ...[
               const SizedBox(height: 10),
-              ...features.map((f) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.check, size: 14, color: AppTheme.statusActive),
-                        const SizedBox(width: 6),
-                        Text(f, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
-                      ],
-                    ),
-                  )),
+              ...features.map(
+                (f) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.check,
+                        size: 14,
+                        color: AppTheme.statusActive,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        f,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.inkSoft,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ],
         ),
@@ -1477,9 +1949,15 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
     super.initState();
     final p = widget.plan;
     _nameCtrl = TextEditingController(text: p?['name'] as String? ?? '');
-    _priceCtrl = TextEditingController(text: p != null ? (p['price'] as num).toString() : '');
-    _maxClassesCtrl = TextEditingController(text: p?['max_classes']?.toString() ?? '');
-    _monthsCtrl = TextEditingController(text: p?['billing_interval_months']?.toString() ?? '');
+    _priceCtrl = TextEditingController(
+      text: p != null ? (p['price'] as num).toString() : '',
+    );
+    _maxClassesCtrl = TextEditingController(
+      text: p?['max_classes']?.toString() ?? '',
+    );
+    _monthsCtrl = TextEditingController(
+      text: p?['billing_interval_months']?.toString() ?? '',
+    );
     _featureCtrl = TextEditingController();
     _interval = p?['billing_interval'] as String? ?? 'monthly';
     _isActive = p?['is_active'] as bool? ?? true;
@@ -1488,15 +1966,21 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _priceCtrl.dispose(); _maxClassesCtrl.dispose();
-    _monthsCtrl.dispose(); _featureCtrl.dispose();
+    _nameCtrl.dispose();
+    _priceCtrl.dispose();
+    _maxClassesCtrl.dispose();
+    _monthsCtrl.dispose();
+    _featureCtrl.dispose();
     super.dispose();
   }
 
   void _addFeature() {
     final f = _featureCtrl.text.trim();
     if (f.isEmpty) return;
-    setState(() { _features.add(f); _featureCtrl.clear(); });
+    setState(() {
+      _features.add(f);
+      _featureCtrl.clear();
+    });
   }
 
   Future<void> _save() async {
@@ -1519,13 +2003,18 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
 
       Map<String, dynamic>? created;
       if (_isEdit) {
-        await client.from('membership_plans').update(data).eq('id', widget.plan!['id']);
+        await client
+            .from('membership_plans')
+            .update(data)
+            .eq('id', widget.plan!['id']);
       } else {
         data['gym_id'] = await ref.read(gymIdProvider.future);
         created = await client
             .from('membership_plans')
             .insert(data)
-            .select('id, name, price, billing_interval, billing_interval_months')
+            .select(
+              'id, name, price, billing_interval, billing_interval_months',
+            )
             .single();
       }
 
@@ -1533,7 +2022,9 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
       if (mounted) Navigator.pop(context, created);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -1543,26 +2034,34 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
     final ok = await showConfirmDialog(
       context,
       title: 'Delete plan?',
-      body: "This permanently deletes '${_nameCtrl.text.trim()}'. This can't be undone.",
+      body:
+          "This permanently deletes '${_nameCtrl.text.trim()}'. This can't be undone.",
       cancelLabel: 'Cancel',
       confirmLabel: 'Delete',
     );
     if (ok != true) return;
     setState(() => _loading = true);
     try {
-      await Supabase.instance.client.from('membership_plans').delete().eq('id', widget.plan!['id']);
+      await Supabase.instance.client
+          .from('membership_plans')
+          .delete()
+          .eq('id', widget.plan!['id']);
       if (mounted) Navigator.pop(context);
     } on PostgrestException catch (e) {
       if (mounted) {
         final msg = e.code == '23503'
             ? 'This plan has members assigned — deactivate it instead of deleting.'
             : 'Error: ${e.message}';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
         setState(() => _loading = false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -1571,7 +2070,12 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
       child: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -1584,43 +2088,72 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
               const FieldLabel('Plan name'),
               TextFormField(
                 controller: _nameCtrl,
-                validator: (v) => (v?.trim().isEmpty ?? true) ? 'Required' : null,
+                validator: (v) =>
+                    (v?.trim().isEmpty ?? true) ? 'Required' : null,
               ),
               const SizedBox(height: 14),
-              Row(children: [
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('Price'),
-                    TextFormField(
-                      controller: _priceCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(prefixText: '$currencySymbol '),
-                      validator: (v) {
-                        if (v?.trim().isEmpty ?? true) return 'Required';
-                        if (double.tryParse(v!) == null) return 'Enter a valid price';
-                        return null;
-                      },
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('Duration'),
-                    DropdownButtonFormField<String>(
-                      value: _interval,
-                      items: const [
-                        DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                        DropdownMenuItem(value: 'quarterly', child: Text('Quarterly')),
-                        DropdownMenuItem(value: 'biannual', child: Text('6 months')),
-                        DropdownMenuItem(value: 'annual', child: Text('Yearly')),
-                        DropdownMenuItem(value: 'custom', child: Text('Custom…')),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FieldLabel('Price'),
+                        TextFormField(
+                          controller: _priceCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            prefixText: '$currencySymbol ',
+                          ),
+                          validator: (v) {
+                            if (v?.trim().isEmpty ?? true) return 'Required';
+                            if (double.tryParse(v!) == null)
+                              return 'Enter a valid price';
+                            return null;
+                          },
+                        ),
                       ],
-                      onChanged: (v) => setState(() => _interval = v!),
                     ),
-                  ]),
-                ),
-              ]),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FieldLabel('Duration'),
+                        DropdownButtonFormField<String>(
+                          value: _interval,
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'monthly',
+                              child: Text('Monthly'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'quarterly',
+                              child: Text('Quarterly'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'biannual',
+                              child: Text('6 months'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'annual',
+                              child: Text('Yearly'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'custom',
+                              child: Text('Custom…'),
+                            ),
+                          ],
+                          onChanged: (v) => setState(() => _interval = v!),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               if (_interval == 'custom') ...[
                 const SizedBox(height: 14),
                 const FieldLabel('Duration (months)'),
@@ -1629,15 +2162,20 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                   keyboardType: TextInputType.number,
                   validator: (v) {
                     if (_interval != 'custom') return null;
-                    if (v?.trim().isEmpty ?? true) return 'Required for custom interval';
-                    if (int.tryParse(v!) == null || int.parse(v) < 1) return 'Enter a positive number';
+                    if (v?.trim().isEmpty ?? true)
+                      return 'Required for custom interval';
+                    if (int.tryParse(v!) == null || int.parse(v) < 1)
+                      return 'Enter a positive number';
                     return null;
                   },
                 ),
               ],
               const SizedBox(height: 14),
               const FieldLabel('Max classes (blank = unlimited)'),
-              TextFormField(controller: _maxClassesCtrl, keyboardType: TextInputType.number),
+              TextFormField(
+                controller: _maxClassesCtrl,
+                keyboardType: TextInputType.number,
+              ),
               const SizedBox(height: 18),
               const FieldLabel('Includes'),
               Row(
@@ -1645,34 +2183,77 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                   Expanded(
                     child: TextFormField(
                       controller: _featureCtrl,
-                      decoration: const InputDecoration(hintText: 'Add a feature', isDense: true),
+                      decoration: const InputDecoration(
+                        hintText: 'Add a feature',
+                        isDense: true,
+                      ),
                       onFieldSubmitted: (_) => _addFeature(),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  RoundIconButton(icon: Icons.add, onTap: _addFeature, bg: AppTheme.accentSoft, fg: AppTheme.accent),
+                  RoundIconButton(
+                    icon: Icons.add,
+                    onTap: _addFeature,
+                    bg: AppTheme.accentSoft,
+                    fg: AppTheme.accent,
+                  ),
                 ],
               ),
               if (_features.isNotEmpty)
                 CardList(
-                  children: _features.asMap().entries.map((e) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    child: Row(children: [
-                      const Icon(Icons.check, size: 15, color: AppTheme.statusActive),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(e.value, style: const TextStyle(fontSize: 13.5, color: AppTheme.ink))),
-                      GestureDetector(
-                        onTap: () => setState(() => _features.removeAt(e.key)),
-                        child: const Icon(Icons.close, size: 16, color: AppTheme.inkHint),
-                      ),
-                    ]),
-                  )).toList(),
+                  children: _features
+                      .asMap()
+                      .entries
+                      .map(
+                        (e) => Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.check,
+                                size: 15,
+                                color: AppTheme.statusActive,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  e.value,
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    color: AppTheme.ink,
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => _features.removeAt(e.key)),
+                                child: const Icon(
+                                  Icons.close,
+                                  size: 16,
+                                  color: AppTheme.inkHint,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
                 ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Active', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
+                  const Text(
+                    'Active',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: AppTheme.ink,
+                    ),
+                  ),
                   Switch(
                     value: _isActive,
                     onChanged: (v) => setState(() => _isActive = v),
@@ -1684,14 +2265,24 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
               ElevatedButton(
                 onPressed: _loading ? null : _save,
                 child: _loading
-                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
                     : const Text('Save plan'),
               ),
               if (_isEdit) ...[
                 const SizedBox(height: 10),
                 TextButton(
                   onPressed: _loading ? null : _delete,
-                  child: const Text('Delete plan', style: TextStyle(color: AppTheme.statusDanger)),
+                  child: const Text(
+                    'Delete plan',
+                    style: TextStyle(color: AppTheme.statusDanger),
+                  ),
                 ),
               ],
             ],

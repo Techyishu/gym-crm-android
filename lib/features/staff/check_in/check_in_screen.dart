@@ -39,13 +39,17 @@ final _gymQrProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
       .maybeSingle();
 });
 
-final _recentCheckInsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _recentCheckInsProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
   final data = await client
       .from('check_ins')
-      .select('id, member_id, checked_in_at, checked_out_at, method, members(first_name, last_name, email)')
+      .select(
+        'id, member_id, checked_in_at, checked_out_at, method, members(first_name, last_name, email)',
+      )
       .eq('gym_id', gymId)
       .order('checked_in_at', ascending: false)
       .limit(20);
@@ -69,7 +73,9 @@ String _formatTime(String? s) {
 /// "1h 09m" once past an hour, otherwise "55m".
 String _formatDuration(String inAt, String outAt) {
   try {
-    final d = DateTime.parse(outAt).toLocal().difference(DateTime.parse(inAt).toLocal());
+    final d = DateTime.parse(
+      outAt,
+    ).toLocal().difference(DateTime.parse(inAt).toLocal());
     final h = d.inHours;
     final m = d.inMinutes % 60;
     return h > 0 ? '${h}h ${m.toString().padLeft(2, '0')}m' : '${m}m';
@@ -79,10 +85,10 @@ String _formatDuration(String inAt, String outAt) {
 }
 
 Color _methodColor(String method) => switch (method) {
-      'qr' => AppTheme.accent,
-      'biometric' => const Color(0xFF7C3AED),
-      _ => AppTheme.inkHint,
-    };
+  'qr' => AppTheme.accent,
+  'biometric' => const Color(0xFF7C3AED),
+  _ => AppTheme.inkHint,
+};
 
 /// Method badge as a plain colored dot rather than an icon glyph — new
 /// Material icon glyphs grow the tree-shaken font, which Shorebird can't
@@ -94,8 +100,12 @@ class _MethodDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 6, height: 6,
-      decoration: BoxDecoration(color: _methodColor(method), shape: BoxShape.circle),
+      width: 6,
+      height: 6,
+      decoration: BoxDecoration(
+        color: _methodColor(method),
+        shape: BoxShape.circle,
+      ),
     );
   }
 }
@@ -115,8 +125,9 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
   bool _processing = false;
   String? _message;
   bool _success = false;
-  _CheckResult? _qrResult; // confirmation shown in the scanner card; pauses the camera
-  int _pendingSync = 0;    // queued offline check-ins waiting to sync
+  _CheckResult?
+  _qrResult; // confirmation shown in the scanner card; pauses the camera
+  int _pendingSync = 0; // queued offline check-ins waiting to sync
   final _searchCtrl = TextEditingController();
   List<Map<String, dynamic>> _searchResults = [];
   bool _searching = false;
@@ -160,7 +171,10 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
   /// Core check-in: validates the member, blocks a second check-in on the same
   /// day (Asia/Kolkata), inserts the row, and returns the outcome. Does not
   /// touch the banner or the QR confirmation — the callers decide how to show it.
-  Future<_CheckResult> _doCheckIn(String memberId, {String method = 'manual'}) async {
+  Future<_CheckResult> _doCheckIn(
+    String memberId, {
+    String method = 'manual',
+  }) async {
     setState(() => _processing = true);
     try {
       // If offline, enqueue and return immediately (QR only; manual needs names).
@@ -172,7 +186,8 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
             return const _CheckResult(
               success: false,
               title: 'No connection',
-              subtitle: 'Check-in needs internet on first use. Connect once to enable offline mode.',
+              subtitle:
+                  'Check-in needs internet on first use. Connect once to enable offline mode.',
             );
           }
           final staffId = Supabase.instance.client.auth.currentUser?.id;
@@ -220,18 +235,23 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         );
       }
 
-      final name =
-          '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim();
+      final name = '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'
+          .trim();
       final label = name.isNotEmpty ? name : 'Member';
       final avatarUrl = member['avatar_url'] as String?;
 
       if ((member['status'] as String) != 'active') {
-        unawaited(client.rpc('notify_owner_expired_checkin', params: {
-          'p_gym_id': gymId,
-          'p_member_name': label,
-          'p_member_status': member['status'],
-          'p_method': method,
-        }));
+        unawaited(
+          client.rpc(
+            'notify_owner_expired_checkin',
+            params: {
+              'p_gym_id': gymId,
+              'p_member_name': label,
+              'p_member_status': member['status'],
+              'p_method': method,
+            },
+          ),
+        );
         return _CheckResult(
           success: false,
           title: label,
@@ -262,7 +282,11 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       ActivityLogService.logActivity(
         gymId: gymId,
         action: 'check_in',
-        metadata: {'member_id': memberId, 'member_name': label, 'method': method},
+        metadata: {
+          'member_id': memberId,
+          'member_name': label,
+          'method': method,
+        },
       );
       ref.invalidate(_recentCheckInsProvider);
       unawaited(ReviewPrompt.recordSuccess());
@@ -337,11 +361,13 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     final trimmed = raw.trim();
     if (!_uuidPattern.hasMatch(trimmed)) {
       if (!mounted) return;
-      setState(() => _qrResult = const _CheckResult(
-        success: false,
-        title: 'Invalid QR Code',
-        subtitle: 'This is not a GymCRM member QR code.',
-      ));
+      setState(
+        () => _qrResult = const _CheckResult(
+          success: false,
+          title: 'Invalid QR Code',
+          subtitle: 'This is not a GymCRM member QR code.',
+        ),
+      );
       return;
     }
     final r = await _doCheckIn(trimmed, method: 'qr');
@@ -373,7 +399,9 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
           .limit(10);
 
       if (mounted) {
-        setState(() => _searchResults = (data as List).cast<Map<String, dynamic>>());
+        setState(
+          () => _searchResults = (data as List).cast<Map<String, dynamic>>(),
+        );
       }
     } catch (e) {
       debugPrint('[GymCRM] Member search error: $e');
@@ -398,8 +426,15 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
               child: Row(
                 children: [
-                  const Text('Check-in',
-                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
+                  const Text(
+                    'Check-in',
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
                   const Spacer(),
                   _HeaderIconButton(
                     icon: Icons.history,
@@ -410,8 +445,10 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                 ],
               ),
             ),
-            if (_pendingSync > 0) _PendingSyncBanner(count: _pendingSync, onTap: _tryFlushQueue),
-            if (_message != null) _ResultBanner(message: _message!, success: _success),
+            if (_pendingSync > 0)
+              _PendingSyncBanner(count: _pendingSync, onTap: _tryFlushQueue),
+            if (_message != null)
+              _ResultBanner(message: _message!, success: _success),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: _ScanTabSwitch(
@@ -423,21 +460,31 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
               child: _tab == 0
                   ? RefreshIndicator(
                       color: AppTheme.accent,
-                      onRefresh: () async => ref.invalidate(_recentCheckInsProvider),
+                      onRefresh: () async =>
+                          ref.invalidate(_recentCheckInsProvider),
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                         children: [
                           _buildScannerCard(),
                           const SizedBox(height: 18),
-                          Row(children: [
-                            const Expanded(child: Divider()),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              child: Text('or tap a name',
-                                style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
-                            ),
-                            const Expanded(child: Divider()),
-                          ]),
+                          Row(
+                            children: [
+                              const Expanded(child: Divider()),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Text(
+                                  'or search member by name',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.inkHint,
+                                  ),
+                                ),
+                              ),
+                              const Expanded(child: Divider()),
+                            ],
+                          ),
                           const SizedBox(height: 14),
                           _buildSearch(),
                           const SizedBox(height: 20),
@@ -479,24 +526,50 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                     height: 150,
                     child: Stack(
                       children: [
-                        Positioned(top: 0, left: 0, child: _CornerAccent(corner: _Corner.topLeft)),
-                        Positioned(top: 0, right: 0, child: _CornerAccent(corner: _Corner.topRight)),
-                        Positioned(bottom: 0, left: 0, child: _CornerAccent(corner: _Corner.bottomLeft)),
-                        Positioned(bottom: 0, right: 0, child: _CornerAccent(corner: _Corner.bottomRight)),
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          child: _CornerAccent(corner: _Corner.topLeft),
+                        ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: _CornerAccent(corner: _Corner.topRight),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          child: _CornerAccent(corner: _Corner.bottomLeft),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: _CornerAccent(corner: _Corner.bottomRight),
+                        ),
                       ],
                     ),
                   ),
                 ),
                 const Positioned(
-                  left: 0, right: 0, bottom: 18,
-                  child: Text("Point at the member's QR",
+                  left: 0,
+                  right: 0,
+                  bottom: 18,
+                  child: Text(
+                    "Point at the member's QR",
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDark)),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.onDark,
+                    ),
+                  ),
                 ),
                 if (_processing)
                   Container(
                     color: Colors.black38,
-                    child: const Center(child: CircularProgressIndicator(color: AppTheme.accent)),
+                    child: const Center(
+                      child: CircularProgressIndicator(color: AppTheme.accent),
+                    ),
                   ),
               ],
             ),
@@ -514,23 +587,37 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
           onChanged: _searchMembers,
           decoration: InputDecoration(
             hintText: 'Search to check in',
-            prefixIcon: const Icon(Icons.search, color: AppTheme.inkHint, size: 20),
+            prefixIcon: const Icon(
+              Icons.search,
+              color: AppTheme.inkHint,
+              size: 20,
+            ),
             isDense: true,
             suffixIcon: _searching
                 ? const Padding(
                     padding: EdgeInsets.all(12),
-                    child: SizedBox(width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.ink)),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppTheme.ink,
+                      ),
+                    ),
                   )
                 : (_searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18, color: AppTheme.inkHint),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchResults = []);
-                        },
-                      )
-                    : null),
+                      ? IconButton(
+                          icon: const Icon(
+                            Icons.clear,
+                            size: 18,
+                            color: AppTheme.inkHint,
+                          ),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _searchResults = []);
+                          },
+                        )
+                      : null),
           ),
         ),
         if (_searchResults.isNotEmpty) ...[
@@ -538,19 +625,29 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
           Container(
             decoration: AppTheme.cardDecoration(),
             child: Column(
-              children: _searchResults.map((m) => _SearchResultRow(
-                member: m,
-                processing: _processing,
-                onCheckIn: () => _processManual(m['id'] as String),
-              )).toList(),
+              children: _searchResults
+                  .map(
+                    (m) => _SearchResultRow(
+                      member: m,
+                      processing: _processing,
+                      onCheckIn: () => _processManual(m['id'] as String),
+                    ),
+                  )
+                  .toList(),
             ),
           ),
         ],
-        if (_searchCtrl.text.isNotEmpty && _searchResults.isEmpty && !_searching)
+        if (_searchCtrl.text.isNotEmpty &&
+            _searchResults.isEmpty &&
+            !_searching)
           const Padding(
             padding: EdgeInsets.only(top: 12),
-            child: Center(child: Text('No members found',
-              style: TextStyle(color: AppTheme.inkHint, fontSize: 13))),
+            child: Center(
+              child: Text(
+                'No members found',
+                style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+              ),
+            ),
           ),
       ],
     );
@@ -562,23 +659,41 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(children: [
-          const Text('In today',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-          const Spacer(),
-          recentAsync.maybeWhen(
-            data: (list) {
-              final today = DateTime.now();
-              final count = list.where((c) {
-                final dt = DateTime.tryParse(c['checked_in_at'] as String? ?? '')?.toLocal();
-                return dt != null && dt.year == today.year && dt.month == today.month && dt.day == today.day;
-              }).length;
-              return Text('$count',
-                style: AppTheme.numberStyle(fontSize: 16, color: AppTheme.accent));
-            },
-            orElse: () => const SizedBox.shrink(),
-          ),
-        ]),
+        Row(
+          children: [
+            const Text(
+              'Today\'s check-ins',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.ink,
+              ),
+            ),
+            const Spacer(),
+            recentAsync.maybeWhen(
+              data: (list) {
+                final today = DateTime.now();
+                final count = list.where((c) {
+                  final dt = DateTime.tryParse(
+                    c['checked_in_at'] as String? ?? '',
+                  )?.toLocal();
+                  return dt != null &&
+                      dt.year == today.year &&
+                      dt.month == today.month &&
+                      dt.day == today.day;
+                }).length;
+                return Text(
+                  '$count',
+                  style: AppTheme.numberStyle(
+                    fontSize: 16,
+                    color: AppTheme.accent,
+                  ),
+                );
+              },
+              orElse: () => const SizedBox.shrink(),
+            ),
+          ],
+        ),
         const SizedBox(height: 10),
         recentAsync.when(
           loading: () => const Padding(
@@ -587,7 +702,10 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
           ),
           error: (e, _) => Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('Error: $e', style: const TextStyle(color: AppTheme.statusDanger)),
+            child: Text(
+              'Error: $e',
+              style: const TextStyle(color: AppTheme.statusDanger),
+            ),
           ),
           data: (list) {
             if (list.isEmpty) {
@@ -595,8 +713,12 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 decoration: AppTheme.cardDecoration(),
-                child: const Center(child: Text('No check-ins yet today',
-                  style: TextStyle(color: AppTheme.inkHint, fontSize: 13))),
+                child: const Center(
+                  child: Text(
+                    'No check-ins yet today',
+                    style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+                  ),
+                ),
               );
             }
             return Container(
@@ -605,11 +727,16 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                 children: list.map((c) {
                   final isOpen = c['checked_out_at'] == null;
                   final member = c['members'] as Map<String, dynamic>?;
-                  final name = '${member?['first_name'] ?? ''} ${member?['last_name'] ?? ''}'.trim();
+                  final name =
+                      '${member?['first_name'] ?? ''} ${member?['last_name'] ?? ''}'
+                          .trim();
                   return _RecentCheckInRow(
                     checkIn: c,
                     onCheckOut: isOpen && !_processing
-                        ? () => _processCheckOut(c['id'] as String, name.isNotEmpty ? name : 'Member')
+                        ? () => _processCheckOut(
+                            c['id'] as String,
+                            name.isNotEmpty ? name : 'Member',
+                          )
                         : null,
                   );
                 }).toList(),
@@ -634,8 +761,12 @@ class _HeaderIconButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 38, height: 38,
-        decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(13)),
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(13),
+        ),
         child: Icon(icon, size: 20, color: AppTheme.ink),
       ),
     );
@@ -659,8 +790,8 @@ class _ScanTabSwitch extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: _segment(context, 0, 'Scan member')),
-          Expanded(child: _segment(context, 1, 'Show gym QR')),
+          Expanded(child: _segment(context, 0, 'Scan member QR')),
+          Expanded(child: _segment(context, 1, 'Display gym QR')),
         ],
       ),
     );
@@ -677,7 +808,13 @@ class _ScanTabSwitch extends StatelessWidget {
           color: selected ? AppTheme.surface : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           boxShadow: selected
-              ? const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 1))]
+              ? const [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 1),
+                  ),
+                ]
               : null,
         ),
         child: Text(
@@ -708,7 +845,10 @@ class _GymQrTab extends ConsumerWidget {
       error: (e, _) => Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text('Could not load gym QR: $e', style: const TextStyle(color: AppTheme.inkHint)),
+          child: Text(
+            'Could not load gym QR: $e',
+            style: const TextStyle(color: AppTheme.inkHint),
+          ),
         ),
       ),
       data: (gym) {
@@ -718,7 +858,10 @@ class _GymQrTab extends ConsumerWidget {
           return const Center(
             child: Padding(
               padding: EdgeInsets.all(24),
-              child: Text('No check-in code for this gym yet.', style: TextStyle(color: AppTheme.inkHint)),
+              child: Text(
+                'No check-in code for this gym yet.',
+                style: TextStyle(color: AppTheme.inkHint),
+              ),
             ),
           );
         }
@@ -731,7 +874,11 @@ class _GymQrTab extends ConsumerWidget {
               const Text(
                 'Members scan this to check themselves in',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.inkSoft),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.inkSoft,
+                ),
               ),
               const SizedBox(height: 20),
               Container(
@@ -739,40 +886,65 @@ class _GymQrTab extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 4))],
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x14000000),
+                      blurRadius: 16,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: QrImageView(
                   data: url,
                   version: QrVersions.auto,
                   size: 200,
-                  eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: AppTheme.ink),
-                  dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: AppTheme.ink),
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: AppTheme.ink,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: AppTheme.ink,
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
-              Text(gymName,
+              Text(
+                gymName,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
               const SizedBox(height: 4),
               GestureDetector(
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: url));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Check-in link copied'), duration: Duration(seconds: 2)),
+                    const SnackBar(
+                      content: Text('Check-in link copied'),
+                      duration: Duration(seconds: 2),
+                    ),
                   );
                 },
                 child: const Text(
                   'Tap to copy check-in link',
-                  style: TextStyle(fontSize: 12, color: AppTheme.inkHint, decoration: TextDecoration.underline),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.inkHint,
+                    decoration: TextDecoration.underline,
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: GestureDetector(
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const _GymQrPage()),
-                  ),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const _GymQrPage())),
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
@@ -783,7 +955,11 @@ class _GymQrTab extends ConsumerWidget {
                     child: const Text(
                       'Full screen for front desk display',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
                     ),
                   ),
                 ),
@@ -811,7 +987,9 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
   bool _sharing = false;
 
   Future<Uint8List?> _captureQrPng() async {
-    final boundary = _captureKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    final boundary =
+        _captureKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
     if (boundary == null) return null;
     final image = await boundary.toImage(pixelRatio: 3);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -828,14 +1006,16 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
       final safeName = gymName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
       await Gal.putImageBytes(bytes, album: 'GymCRM', name: 'gym_qr_$safeName');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved to gallery')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Saved to gallery')));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save the QR code. Please try again.')),
+          const SnackBar(
+            content: Text('Could not save the QR code. Please try again.'),
+          ),
         );
       }
     } finally {
@@ -853,19 +1033,25 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
 
       final dir = await getTemporaryDirectory();
       final safeName = gymName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
-      final file = await File('${dir.path}/gym_qr_$safeName.png').writeAsBytes(bytes);
+      final file = await File(
+        '${dir.path}/gym_qr_$safeName.png',
+      ).writeAsBytes(bytes);
 
       if (!mounted) return;
       final box = context.findRenderObject() as RenderBox?;
       await Share.shareXFiles(
         [XFile(file.path)],
         text: 'Scan to check in at $gymName',
-        sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
+        sharePositionOrigin: box != null
+            ? box.localToGlobal(Offset.zero) & box.size
+            : null,
       );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not share the QR code. Please try again.')),
+          const SnackBar(
+            content: Text('Could not share the QR code. Please try again.'),
+          ),
         );
       }
     } finally {
@@ -881,159 +1067,185 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(title: const Text('Gym QR')),
       body: gymAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text('Could not load gym QR: $e',
-              style: const TextStyle(color: AppTheme.inkHint)),
-        ),
-      ),
-      data: (gym) {
-        final token = gym?['checkin_token']?.toString() ?? '';
-        final gymName = gym?['name'] as String? ?? 'Your Gym';
-        if (token.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('No check-in code for this gym yet.',
-                  style: TextStyle(color: AppTheme.inkHint)),
-            ),
-          );
-        }
-        final url = '$_checkinBaseUrl$token';
-
-        return Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                RepaintBoundary(
-                  key: _captureKey,
-                  child: Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 20,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        QrImageView(
-                          data: url,
-                          version: QrVersions.auto,
-                          size: 220,
-                          eyeStyle: const QrEyeStyle(
-                            eyeShape: QrEyeShape.square,
-                            color: AppTheme.textPrimary,
-                          ),
-                          dataModuleStyle: const QrDataModuleStyle(
-                            dataModuleShape: QrDataModuleShape.square,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          gymName,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Members scan this to check themselves in.\nPrint it and place it at the front desk.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _saving ? null : () => _saveToGallery(gymName),
-                    icon: _saving
-                        ? const SizedBox(
-                            height: 16, width: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.download_outlined, size: 18),
-                    label: Text(_saving ? 'Saving…' : 'Save to gallery'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _sharing ? null : () => _shareQr(gymName),
-                    icon: _sharing
-                        ? const SizedBox(
-                            height: 16, width: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.ink),
-                          )
-                        : const Icon(Icons.share_outlined, size: 18),
-                    label: Text(_sharing ? 'Preparing…' : 'Share / Print'),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                GestureDetector(
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: url));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Check-in link copied'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryLight,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            url,
-                            style: const TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              color: AppTheme.primary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.copy, size: 14, color: AppTheme.primary),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Tap to copy check-in link',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                ),
-              ],
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Could not load gym QR: $e',
+              style: const TextStyle(color: AppTheme.inkHint),
             ),
           ),
-        );
-      },
+        ),
+        data: (gym) {
+          final token = gym?['checkin_token']?.toString() ?? '';
+          final gymName = gym?['name'] as String? ?? 'Your Gym';
+          if (token.isEmpty) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'No check-in code for this gym yet.',
+                  style: TextStyle(color: AppTheme.inkHint),
+                ),
+              ),
+            );
+          }
+          final url = '$_checkinBaseUrl$token';
+
+          return Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  RepaintBoundary(
+                    key: _captureKey,
+                    child: Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 20,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          QrImageView(
+                            data: url,
+                            version: QrVersions.auto,
+                            size: 220,
+                            eyeStyle: const QrEyeStyle(
+                              eyeShape: QrEyeShape.square,
+                              color: AppTheme.textPrimary,
+                            ),
+                            dataModuleStyle: const QrDataModuleStyle(
+                              dataModuleShape: QrDataModuleShape.square,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Text(
+                            gymName,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Members scan this to check themselves in.\nPrint it and place it at the front desk.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _saving ? null : () => _saveToGallery(gymName),
+                      icon: _saving
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.download_outlined, size: 18),
+                      label: Text(_saving ? 'Saving…' : 'Save to gallery'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _sharing ? null : () => _shareQr(gymName),
+                      icon: _sharing
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.ink,
+                              ),
+                            )
+                          : const Icon(Icons.share_outlined, size: 18),
+                      label: Text(_sharing ? 'Preparing…' : 'Share / Print'),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  GestureDetector(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: url));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Check-in link copied'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryLight,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppTheme.primary.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              url,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                                color: AppTheme.primary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.copy,
+                            size: 14,
+                            color: AppTheme.primary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Tap to copy check-in link',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1098,7 +1310,11 @@ class _ResultBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13),
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
             ),
           ),
         ],
@@ -1112,7 +1328,7 @@ class _ResultBanner extends StatelessWidget {
 class _CheckResult {
   final bool success; // green — a fresh check-in was recorded
   final bool already; // amber — already checked in today
-  final bool queued;  // amber — saved offline, will sync later
+  final bool queued; // amber — saved offline, will sync later
   final String title;
   final String? subtitle;
   final String? avatarUrl;
@@ -1166,7 +1382,11 @@ class _InitialsAvatar extends StatelessWidget {
         color: AppTheme.activeBg,
         shape: BoxShape.circle,
       ),
-      child: Icon(Icons.person_outline, size: size * 0.5, color: AppTheme.inkSoft),
+      child: Icon(
+        Icons.person_outline,
+        size: size * 0.5,
+        color: AppTheme.inkSoft,
+      ),
     );
   }
 }
@@ -1255,8 +1475,10 @@ class _CheckResultView extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                label: Text(buttonLabel,
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                label: Text(
+                  buttonLabel,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
@@ -1295,13 +1517,25 @@ class _CornerAccent extends StatelessWidget {
     Border b;
     switch (corner) {
       case _Corner.topLeft:
-        b = const Border(top: BorderSide(color: color, width: width), left: BorderSide(color: color, width: width));
+        b = const Border(
+          top: BorderSide(color: color, width: width),
+          left: BorderSide(color: color, width: width),
+        );
       case _Corner.topRight:
-        b = const Border(top: BorderSide(color: color, width: width), right: BorderSide(color: color, width: width));
+        b = const Border(
+          top: BorderSide(color: color, width: width),
+          right: BorderSide(color: color, width: width),
+        );
       case _Corner.bottomLeft:
-        b = const Border(bottom: BorderSide(color: color, width: width), left: BorderSide(color: color, width: width));
+        b = const Border(
+          bottom: BorderSide(color: color, width: width),
+          left: BorderSide(color: color, width: width),
+        );
       case _Corner.bottomRight:
-        b = const Border(bottom: BorderSide(color: color, width: width), right: BorderSide(color: color, width: width));
+        b = const Border(
+          bottom: BorderSide(color: color, width: width),
+          right: BorderSide(color: color, width: width),
+        );
     }
 
     return Container(
@@ -1362,10 +1596,20 @@ class _SearchResultRow extends StatelessWidget {
               children: [
                 Text(
                   '$firstName $lastName'.trim(),
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppTheme.ink,
+                  ),
                 ),
                 if (email != null)
-                  Text(email, style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
+                  Text(
+                    email,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1378,7 +1622,11 @@ class _SearchResultRow extends StatelessWidget {
               ),
               child: const Text(
                 'Inactive',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusDanger),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.statusDanger,
+                ),
               ),
             )
           else
@@ -1390,9 +1638,17 @@ class _SearchResultRow extends StatelessWidget {
                   backgroundColor: AppTheme.ink,
                   foregroundColor: Colors.white,
                   minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 0,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 child: const Text('Check In'),
               ),
@@ -1448,10 +1704,20 @@ class _RecentCheckInRow extends StatelessWidget {
                   children: [
                     Text(
                       '$firstName $lastName'.trim(),
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppTheme.ink,
+                      ),
                     ),
                     if (email != null)
-                      Text(email, style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
+                      Text(
+                        email,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.inkHint,
+                        ),
+                      ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
@@ -1461,7 +1727,10 @@ class _RecentCheckInRow extends StatelessWidget {
                           isOpen
                               ? 'In ${_formatTime(checkedAt)}'
                               : 'In ${_formatTime(checkedAt)} · Out ${_formatTime(checkedOut)}',
-                          style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.inkHint,
+                          ),
                         ),
                       ],
                     ),
@@ -1472,26 +1741,43 @@ class _RecentCheckInRow extends StatelessWidget {
               GestureDetector(
                 onTap: onCheckOut,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
-                    color: isOpen ? AppTheme.statusActiveBg : AppTheme.statusNeutralBg,
+                    color: isOpen
+                        ? AppTheme.statusActiveBg
+                        : AppTheme.statusNeutralBg,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: isOpen
                       ? const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.logout, size: 12, color: AppTheme.statusActive),
+                            Icon(
+                              Icons.logout,
+                              size: 12,
+                              color: AppTheme.statusActive,
+                            ),
                             SizedBox(width: 4),
                             Text(
                               'Check out',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.statusActive),
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.statusActive,
+                              ),
                             ),
                           ],
                         )
                       : Text(
                           _formatDuration(checkedAt!, checkedOut),
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.statusNeutral),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.statusNeutral,
+                          ),
                         ),
                 ),
               ),
@@ -1551,10 +1837,21 @@ class _HistoryPage extends StatelessWidget {
                 children: [
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back, size: 20, color: AppTheme.ink),
+                    icon: const Icon(
+                      Icons.arrow_back,
+                      size: 20,
+                      color: AppTheme.ink,
+                    ),
                   ),
-                  const Text('History',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.3)),
+                  const Text(
+                    'History',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1649,14 +1946,21 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
             .or('first_name.ilike.$q,last_name.ilike.$q');
         memberIds = (matched as List).map((m) => m['id'] as String).toList();
         if (memberIds.isEmpty) {
-          if (mounted) setState(() { _items = []; _count = 0; _loading = false; });
+          if (mounted)
+            setState(() {
+              _items = [];
+              _count = 0;
+              _loading = false;
+            });
           return;
         }
       }
 
       var query = client
           .from('check_ins')
-          .select('id, checked_in_at, checked_out_at, method, members(first_name, last_name)')
+          .select(
+            'id, checked_in_at, checked_out_at, method, members(first_name, last_name)',
+          )
           .eq('gym_id', gymId)
           .gte('checked_in_at', from.toUtc().toIso8601String())
           .lt('checked_in_at', to.toUtc().toIso8601String());
@@ -1703,11 +2007,18 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                 onChanged: _onSearchChanged,
                 decoration: InputDecoration(
                   hintText: 'Search member name...',
-                  prefixIcon: const Icon(Icons.search, color: AppTheme.inkHint, size: 20),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: AppTheme.inkHint,
+                    size: 20,
+                  ),
                   isDense: true,
                   filled: true,
                   fillColor: AppTheme.surface,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: const BorderSide(color: AppTheme.border),
@@ -1718,7 +2029,10 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: AppTheme.ink, width: 1.5),
+                    borderSide: const BorderSide(
+                      color: AppTheme.ink,
+                      width: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -1734,7 +2048,10 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                         onTap: () => _selectPreset(i),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 7,
+                          ),
                           decoration: BoxDecoration(
                             color: selected ? AppTheme.ink : AppTheme.activeBg,
                             borderRadius: BorderRadius.circular(8),
@@ -1743,7 +2060,9 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                             _historyPresets[i].label,
                             style: TextStyle(
                               fontSize: 13,
-                              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
                               color: selected ? Colors.white : AppTheme.inkSoft,
                             ),
                           ),
@@ -1762,22 +2081,27 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _items.isEmpty
-                    ? ListView(
-                        children: const [
-                          SizedBox(height: 120),
-                          Center(
-                            child: Text(
-                              'No check-ins found',
-                              style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
-                            ),
+                ? ListView(
+                    children: const [
+                      SizedBox(height: 120),
+                      Center(
+                        child: Text(
+                          'No check-ins found',
+                          style: TextStyle(
+                            color: AppTheme.inkHint,
+                            fontSize: 13,
                           ),
-                        ],
-                      )
-                    : ListView.separated(
-                        itemCount: _items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 16),
-                        itemBuilder: (_, i) => _HistoryCheckInRow(checkIn: _items[i]),
+                        ),
                       ),
+                    ],
+                  )
+                : ListView.separated(
+                    itemCount: _items.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, indent: 16),
+                    itemBuilder: (_, i) =>
+                        _HistoryCheckInRow(checkIn: _items[i]),
+                  ),
           ),
         ),
         if (_count > _pageSize)
@@ -1874,7 +2198,11 @@ class _HistoryCheckInRow extends StatelessWidget {
             backgroundColor: AppTheme.activeBg,
             child: Text(
               inits.isEmpty ? '?' : inits,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.ink),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+                color: AppTheme.ink,
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -1884,7 +2212,11 @@ class _HistoryCheckInRow extends StatelessWidget {
               children: [
                 Text(
                   name.isEmpty ? 'Unknown' : name,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppTheme.ink,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Row(
@@ -1895,7 +2227,10 @@ class _HistoryCheckInRow extends StatelessWidget {
                       isOpen
                           ? 'In ${_formatTime(checkedAt)} · still on floor'
                           : 'In ${_formatTime(checkedAt)} · Out ${_formatTime(checkedOut)}',
-                      style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.inkHint,
+                      ),
                     ),
                   ],
                 ),
@@ -1906,7 +2241,9 @@ class _HistoryCheckInRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: isOpen ? AppTheme.statusActiveBg : AppTheme.statusNeutralBg,
+              color: isOpen
+                  ? AppTheme.statusActiveBg
+                  : AppTheme.statusNeutralBg,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(

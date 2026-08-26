@@ -7,6 +7,58 @@ import '../utils/formatters.dart';
 const partialPaymentHint =
     'Partial payment available — you can collect less than the full amount due.';
 
+DateTime? paymentDate(String? value) {
+  if (value == null) return null;
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return null;
+  return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+bool isFuturePaymentDate(String? value) {
+  final date = paymentDate(value);
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  return date?.isAfter(today) ?? false;
+}
+
+String paymentFailureMessage(Object error) =>
+    error.toString().replaceFirst('Bad state: ', '');
+
+/// Future renewals remain visible, but collecting them is an explicit advance
+/// payment action instead of looking like an already-due balance.
+Future<bool> confirmEarlyRenewalIfNeeded(
+  BuildContext context, {
+  required String? nextPaymentDate,
+}) async {
+  final date = paymentDate(nextPaymentDate);
+  if (date == null || !isFuturePaymentDate(nextPaymentDate)) return true;
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final days = date.difference(today).inDays;
+  final formatted = MaterialLocalizations.of(context).formatMediumDate(date);
+  final proceed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Collect renewal early?'),
+      content: Text(
+        'This renewal is due on $formatted (in $days day${days == 1 ? '' : 's'}). '
+        'Continue only if you have received an advance payment.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Collect advance'),
+        ),
+      ],
+    ),
+  );
+  return proceed ?? false;
+}
+
 /// If [enteredAmount] is less than [dueAmount], confirms the remaining
 /// balance with the user before proceeding. Returns false if they cancel.
 /// Used by every "Collect Payment" screen so the confirmation reads the same
@@ -98,6 +150,41 @@ Future<bool> recordInvoicePayment({
   if (result['ok'] != true) {
     throw StateError(
       (result['error'] as String?) ?? 'Could not record payment.',
+    );
+  }
+  unawaited(AppEvents.paymentRecorded());
+  return result['is_fully_paid'] == true;
+}
+
+/// Atomically collects the renewal currently shown on screen. The database
+/// locks the member and compares [expectedNextPaymentDate] before writing, so
+/// a second phone with stale data cannot collect the same renewal again.
+Future<bool> collectMembershipRenewal({
+  required String memberId,
+  required String expectedNextPaymentDate,
+  required double amount,
+  required String method,
+  String? referenceNo,
+  String? notes,
+  String? invoiceId,
+}) async {
+  final result =
+      await Supabase.instance.client.rpc(
+            'collect_membership_renewal_atomic',
+            params: {
+              'p_member_id': memberId,
+              'p_expected_next_payment_date': expectedNextPaymentDate,
+              'p_amount': amount,
+              'p_method': method,
+              'p_reference_no': referenceNo,
+              'p_notes': notes,
+              'p_invoice_id': invoiceId,
+            },
+          )
+          as Map;
+  if (result['ok'] != true) {
+    throw StateError(
+      (result['error'] as String?) ?? 'Could not collect this renewal.',
     );
   }
   unawaited(AppEvents.paymentRecorded());
