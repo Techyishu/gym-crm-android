@@ -51,6 +51,16 @@ final _recentCheckInsProvider = FutureProvider<List<Map<String, dynamic>>>((
         'id, member_id, checked_in_at, checked_out_at, method, members(first_name, last_name, email)',
       )
       .eq('gym_id', gymId)
+      // The screen is labelled "Today's check-ins". Fetching recent history
+      // here made the list disagree with the number in its own heading.
+      .gte(
+        'checked_in_at',
+        DateTime(
+          DateTime.now().year,
+          DateTime.now().month,
+          DateTime.now().day,
+        ).toIso8601String(),
+      )
       .order('checked_in_at', ascending: false)
       .limit(20);
 
@@ -790,8 +800,8 @@ class _ScanTabSwitch extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: _segment(context, 0, 'Scan member QR')),
-          Expanded(child: _segment(context, 1, 'Display gym QR')),
+          Expanded(child: _segment(context, 0, 'Staff scans member')),
+          Expanded(child: _segment(context, 1, 'Members scan gym')),
         ],
       ),
     );

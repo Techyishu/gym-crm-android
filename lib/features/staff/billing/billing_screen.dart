@@ -137,12 +137,17 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
   // Each due row still carries its true invoice 'amount' (needed intact when
   // Collect opens _RecordPaymentSheet) plus the joined 'payments' rows —
   // _TxnItem.due() computes the remaining balance for display separately.
-  final dues = (results[1] as List).cast<Map<String, dynamic>>();
+  final dues = (results[1] as List)
+      .cast<Map<String, dynamic>>()
+      // A zero balance is not actionable. Showing it with a Collect button
+      // makes the owner doubt every number on this page.
+      .where((invoice) => _remainingDue(invoice) > 0)
+      .toList();
   final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
   final renewingMembers = (results[3] as List).cast<Map<String, dynamic>>();
   final invoicedMemberIds = dues.map((d) => d['member_id']).toSet();
   final projected = renewingMembers.where(
-    (m) => !invoicedMemberIds.contains(m['id']),
+    (m) => !invoicedMemberIds.contains(m['id']) && _activePlanPrice(m) > 0,
   );
   bool isOverdueOrToday(DateTime? due) => due != null && !due.isAfter(now);
   final overdueDues = dues.where(
@@ -779,7 +784,7 @@ class _BalanceCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            'Amount due',
+            'Payments due',
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -800,7 +805,7 @@ class _BalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '$dueMembers member${dueMembers == 1 ? '' : 's'} · $overdueCount overdue',
+            '$dueMembers member${dueMembers == 1 ? '' : 's'} · $overdueCount overdue · next 30 days',
             style: const TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
@@ -834,7 +839,7 @@ class _BalanceCard extends StatelessWidget {
                   if (growthPct != null) ...[
                     const SizedBox(width: 6),
                     Text(
-                      '${growthPct! >= 0 ? '↑' : '↓'}${growthPct!.abs()}%',
+                      '${growthPct! >= 0 ? '↑' : '↓'}${growthPct!.abs()}% vs last month',
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w700,
@@ -854,12 +859,12 @@ class _BalanceCard extends StatelessWidget {
             children: [
               _DockAction(
                 icon: Icons.credit_card_outlined,
-                label: 'Collect',
+                label: 'Find payment',
                 onTap: onRecord,
               ),
               _DockAction(
                 icon: Icons.receipt_outlined,
-                label: 'Invoice',
+                label: 'New invoice',
                 onTap: onInvoice,
               ),
               _DockAction(
@@ -869,7 +874,7 @@ class _BalanceCard extends StatelessWidget {
               ),
               _DockAction(
                 icon: Icons.schedule_outlined,
-                label: 'Dues · $dueCount',
+                label: '$dueCount due',
                 onTap: onDue,
               ),
             ],

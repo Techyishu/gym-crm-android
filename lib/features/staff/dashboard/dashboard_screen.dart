@@ -619,7 +619,7 @@ class _QuickActions extends ConsumerWidget {
       (
         icon: Icons.person_add_outlined,
         label: 'Add member',
-        accent: true,
+        accent: !canCollect,
         onTap: () => showAddMemberSheet(
           context,
         ).then((_) => ref.invalidate(_dashboardDataProvider)),
@@ -628,7 +628,7 @@ class _QuickActions extends ConsumerWidget {
         (
           icon: Icons.payments_outlined,
           label: 'Collect payment',
-          accent: false,
+          accent: true,
           onTap: () => context.push('/staff/billing'),
         ),
       if (canLeads)
@@ -727,7 +727,7 @@ class _TodayCheckins extends StatelessWidget {
         Row(
           children: [
             const Text(
-              'In today',
+              'Checked in today',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
@@ -1329,7 +1329,7 @@ class _CollectedHero extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'This month',
+              'Revenue this month',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -1358,7 +1358,7 @@ class _CollectedHero extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
-                      '${growth >= 0 ? '↑' : '↓'} ${growth.abs()}%',
+                      '${growth >= 0 ? '↑' : '↓'} ${growth.abs()}% vs last month',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -1412,7 +1412,7 @@ class _CollectedHero extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'New members',
+                        'New members this month',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.onDarkSoft,
@@ -1519,7 +1519,7 @@ class _StatRow extends StatelessWidget {
       children: [
         Expanded(
           child: StatTileLight(
-            label: 'Active',
+            label: 'Active members',
             value: '$active',
             onTap: () => context.push('/staff/members'),
           ),
@@ -1527,7 +1527,7 @@ class _StatRow extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: StatTileLight(
-            label: 'Check-ins',
+            label: 'Checked in today',
             value: '$checkins',
             onTap: () => context.push('/staff/check-in'),
           ),
@@ -1535,7 +1535,7 @@ class _StatRow extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: StatTileLight(
-            label: 'Renewals',
+            label: 'Due in 7 days',
             value: '$renewals',
             onTap: () => context.push('/staff/upcoming-payments'),
           ),

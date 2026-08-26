@@ -19,6 +19,7 @@ import '../../../shared/models/member.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../billing/billing_screen.dart' show PlanFormSheet;
+import '../settings/gym_code_sheet.dart';
 import 'import_csv_screen.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 
@@ -478,7 +479,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             GestureDetector(
               onTap: () => _showAddMemberSheet(context),
               child: Container(
-                width: 38,
+                width: 84,
                 height: 38,
                 decoration: BoxDecoration(
                   color: AppTheme.accent,
@@ -491,7 +492,21 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                     ),
                   ],
                 ),
-                child: const Icon(Icons.add, size: 21, color: Colors.white),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add, size: 18, color: Colors.white),
+                    SizedBox(width: 3),
+                    Text(
+                      'Add',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -526,6 +541,18 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 context.push('/staff/upcoming-payments');
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.qr_code_outlined, color: AppTheme.ink),
+              title: const Text('Member signup code'),
+              subtitle: const Text('Invite members to use the app'),
+              onTap: () {
+                Navigator.pop(ctx);
+                showAdaptiveSheet(
+                  context: context,
+                  builder: (_) => const GymCodeSheet(),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -543,12 +570,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     final filters = [
       ('all', 'All', null, null),
       ('active', 'Active', null, null),
-      (
-        'lapsing',
-        'Lapsing ${_lapsingDays}d',
-        AppTheme.statusWarnBg,
-        AppTheme.statusWarn,
-      ),
+      ('lapsing', 'Due soon', AppTheme.statusWarnBg, AppTheme.statusWarn),
       ('frozen', 'On hold', null, null),
       ('expired', 'Expired', null, null),
     ];
@@ -1327,29 +1349,22 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                         counterText: '',
                       ),
                       validator: validateOptionalEmail,
-                      onChanged: (_) => setState(() {}),
                     ),
-                    if (_emailCtrl.text.trim().isEmpty) ...[
-                      const SizedBox(height: 4),
-                      const Text(
-                        '⚠ Without email, the member portal won\'t be available and check-ins must be done manually.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF92400E),
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _phoneCtrl,
                       maxLength: 20,
                       keyboardType: TextInputType.phone,
                       decoration: const InputDecoration(
-                        labelText: 'Phone (optional)',
+                        labelText: 'Mobile number (for member app)',
                         counterText: '',
                       ),
                       validator: validateOptionalPhone,
-                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Add a mobile number so this member can create their app account and use QR check-in.',
+                      style: TextStyle(fontSize: 11, color: AppTheme.inkSoft),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
