@@ -2,5 +2,8 @@
   "framework": null,
   "installCommand": "true",
   "buildCommand": "sh vercel-build.sh",
-  "outputDirectory": "build/web"
+  "outputDirectory": "build/web",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
