@@ -4,28 +4,38 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
+import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/services/data_refresh.dart';
 import '../../../core/services/member_photo_service.dart';
+import '../../../core/services/check_in_service.dart';
+import 'upcoming_payments_screen.dart' show QuickCollectSheet;
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/validators.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../features/staff/workout/workout_plan_sheet.dart';
 import '../../../features/staff/diet/diet_plan_sheet.dart';
+import '../../../shared/models/activity_log_entry.dart';
 import '../../../shared/models/member.dart';
 import '../../../shared/widgets/member_photo.dart';
 import '../../../shared/widgets/redesign.dart';
 import 'member_plan_viewer.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
 // Active membership plans for the current gym (for assign/change actions).
-final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
   final data = await client
@@ -37,9 +47,14 @@ final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
   return (data as List).cast<Map<String, dynamic>>();
 });
 
-final _memberDueProvider = FutureProvider.family<double, String>((ref, memberId) => memberDueAmount(memberId));
+final _memberDueProvider = FutureProvider.family<double, String>(
+  (ref, memberId) => memberDueAmount(memberId),
+);
 
-final _memberDetailProvider = FutureProvider.family<Member?, String>((ref, id) async {
+final _memberDetailProvider = FutureProvider.family<Member?, String>((
+  ref,
+  id,
+) async {
   final gymId = await ref.read(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('members')
@@ -50,64 +65,85 @@ final _memberDetailProvider = FutureProvider.family<Member?, String>((ref, id) a
   return data != null ? Member.fromJson(data) : null;
 });
 
-final _memberCheckInsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
-  final gymId = await ref.read(gymIdProvider.future);
-  return await Supabase.instance.client
-      .from('check_ins')
-      .select('*')
-      .eq('member_id', id)
-      .eq('gym_id', gymId)
-      .order('checked_in_at', ascending: false)
-      .limit(10);
-});
+final _memberActivityProvider =
+    FutureProvider.family<List<ActivityLogEntry>, String>((ref, id) async {
+      final raw = await Supabase.instance.client.rpc(
+        'get_member_activity_log',
+        params: {'p_member_id': id},
+      );
+      final items = (raw as Map)['items'] as List;
+      return items
+          .map((e) => ActivityLogEntry.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    });
 
-final _memberInvoicesProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
-  final gymId = await ref.read(gymIdProvider.future);
-  return await Supabase.instance.client
-      .from('invoices')
-      .select('id, amount, status, description, due_at, paid_at, created_at, payments(amount, status)')
-      .eq('member_id', id)
-      .eq('gym_id', gymId)
-      .order('created_at', ascending: false)
-      .limit(8);
-});
+final _memberCheckInsProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      final gymId = await ref.read(gymIdProvider.future);
+      return await Supabase.instance.client
+          .from('check_ins')
+          .select('*')
+          .eq('member_id', id)
+          .eq('gym_id', gymId)
+          .order('checked_in_at', ascending: false)
+          .limit(10);
+    });
 
-final _memberBatchesProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
-  final data = await Supabase.instance.client
-      .from('class_enrollments')
-      .select('id, enrolled_at, classes(id, name, color, default_start_time, default_end_time)')
-      .eq('member_id', id)
-      .order('enrolled_at', ascending: false);
-  return (data as List).cast<Map<String, dynamic>>();
-});
+final _memberInvoicesProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      final gymId = await ref.read(gymIdProvider.future);
+      return await Supabase.instance.client
+          .from('invoices')
+          .select(
+            'id, amount, status, description, due_at, paid_at, created_at, payments(amount, status)',
+          )
+          .eq('member_id', id)
+          .eq('gym_id', gymId)
+          .order('created_at', ascending: false)
+          .limit(8);
+    });
 
-final _memberWorkoutPlansProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
-  try {
-    final data = await Supabase.instance.client
-        .from('workout_plans')
-        .select('id, name, type, days, created_at')
-        .eq('member_id', id)
-        .order('created_at', ascending: false);
-    return (data as List).cast<Map<String, dynamic>>();
-  } catch (e) {
-    debugPrint('[GymCRM] Load workout plans error: $e');
-    return [];
-  }
-});
+final _memberBatchesProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      final data = await Supabase.instance.client
+          .from('class_enrollments')
+          .select(
+            'id, enrolled_at, classes(id, name, color, default_start_time, default_end_time)',
+          )
+          .eq('member_id', id)
+          .order('enrolled_at', ascending: false);
+      return (data as List).cast<Map<String, dynamic>>();
+    });
 
-final _memberDietPlansProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
-  try {
-    final data = await Supabase.instance.client
-        .from('diet_plans')
-        .select('id, name, goal, calories, meals, created_at')
-        .eq('member_id', id)
-        .order('created_at', ascending: false);
-    return (data as List).cast<Map<String, dynamic>>();
-  } catch (e) {
-    debugPrint('[GymCRM] Load diet plans error: $e');
-    return [];
-  }
-});
+final _memberWorkoutPlansProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      try {
+        final data = await Supabase.instance.client
+            .from('workout_plans')
+            .select('id, name, type, days, created_at')
+            .eq('member_id', id)
+            .order('created_at', ascending: false);
+        return (data as List).cast<Map<String, dynamic>>();
+      } catch (e) {
+        debugPrint('[GymCRM] Load workout plans error: $e');
+        return [];
+      }
+    });
+
+final _memberDietPlansProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      try {
+        final data = await Supabase.instance.client
+            .from('diet_plans')
+            .select('id, name, goal, calories, meals, created_at')
+            .eq('member_id', id)
+            .order('created_at', ascending: false);
+        return (data as List).cast<Map<String, dynamic>>();
+      } catch (e) {
+        debugPrint('[GymCRM] Load diet plans error: $e');
+        return [];
+      }
+    });
 
 // Devices vary in whether they zero-pad employee IDs ("001" vs "1") — normalize
 // on save so it always matches however the device formats it in an ATTLOG push.
@@ -149,8 +185,11 @@ void _showFullPhoto(BuildContext context, Member m) {
               child: Container(
                 width: 36,
                 height: 36,
-                decoration: const BoxDecoration(color: Colors.black, shape: BoxShape.circle),
-                child: const Icon(Icons.close, color: Colors.white, size: 20),
+                decoration: const BoxDecoration(
+                  color: Colors.black,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(AppIcons.close, color: Colors.white, size: 20),
               ),
             ),
           ),
@@ -160,24 +199,56 @@ void _showFullPhoto(BuildContext context, Member m) {
   );
 }
 
-class MemberDetailScreen extends ConsumerWidget {
+class MemberDetailScreen extends ConsumerStatefulWidget {
   final String memberId;
   const MemberDetailScreen({super.key, required this.memberId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MemberDetailScreen> createState() => _MemberDetailScreenState();
+}
+
+class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
+  static const _baseTabs = [
+    'Overview',
+    'Payments',
+    'Attendance',
+    'Plans',
+    'Fitness',
+  ];
+  int _tab = 0;
+
+  String get memberId => widget.memberId;
+
+  @override
+  Widget build(BuildContext context) {
     final member = ref.watch(_memberDetailProvider(memberId));
     final role = ref.watch(staffRoleProvider).valueOrNull;
     final canPii = RoleAccess.canSeeMemberPii(role);
-    final canEdit = RoleAccess.canEditMembers(role);
+    final canEdit = ref.watch(
+      gymPermissionProvider((GymModule.members, GymAction.edit)),
+    );
+    final canDelete = ref.watch(
+      gymPermissionProvider((GymModule.members, GymAction.delete)),
+    );
+    // Same gate as the standalone activity log — owner/manager only.
+    final canSeeActivity = ref.watch(
+      gymPermissionProvider((GymModule.reports, GymAction.view)),
+    );
+    final tabs = [..._baseTabs, if (canSeeActivity) 'Activity'];
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: member.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (_, _) => const ErrorState(what: 'this member'),
         data: (m) {
-          if (m == null) return const Center(child: Text('Member not found'));
+          if (m == null) {
+            return const StateMessage(
+              icon: AppIcons.personOff,
+              title: 'Member not found',
+              body: 'This member may have been deleted from your gym.',
+            );
+          }
           return RefreshIndicator(
             color: AppTheme.accent,
             onRefresh: () async {
@@ -188,23 +259,25 @@ class MemberDetailScreen extends ConsumerWidget {
               physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
                 children: [
-                  _buildHeader(context, ref, m, canPii: canPii, canEdit: canEdit),
+                  _buildHeader(
+                    context,
+                    ref,
+                    m,
+                    canPii: canPii,
+                    canEdit: canEdit,
+                    canDelete: canDelete,
+                  ),
+                  Container(
+                    color: AppTheme.background,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: UnderlineTabs(
+                      tabs: tabs,
+                      selectedIndex: _tab,
+                      onChanged: (i) => setState(() => _tab = i),
+                    ),
+                  ),
                   const SizedBox(height: 16),
-                  _buildMembershipCard(context, ref, m),
-                  const SizedBox(height: 12),
-                  _buildStatTiles(ref),
-                  const SizedBox(height: 12),
-                  _buildQuickLinks(context, ref, m, role),
-                  const SizedBox(height: 12),
-                  _MemberQuickActions(member: m, canPii: canPii),
-                  const SizedBox(height: 12),
-                  if (canPii) _buildContactInfo(context, ref, m, canEdit: canEdit),
-                  const SizedBox(height: 12),
-                  _buildBatches(ref),
-                  const SizedBox(height: 12),
-                  _buildCheckInHistory(ref),
-                  const SizedBox(height: 12),
-                  _buildMemberId(context, m),
+                  ..._tabBody(context, ref, m, role, canPii, canEdit),
                   const SizedBox(height: 24),
                 ],
               ),
@@ -215,17 +288,73 @@ class MemberDetailScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirmDeleteMember(BuildContext context, WidgetRef ref, Member m) async {
+  // Canvas 1c splits what used to be one long scroll into five tabs; each
+  // one is the same section builder as before, just grouped.
+  List<Widget> _tabBody(
+    BuildContext context,
+    WidgetRef ref,
+    Member m,
+    String? role,
+    bool canPii,
+    bool canEdit,
+  ) {
+    switch (_tab) {
+      case 1:
+        return [
+          _PaymentHistoryBody(memberId: memberId, memberName: m.fullName),
+        ];
+      case 2:
+        return [
+          _buildStatTiles(ref),
+          const SizedBox(height: 12),
+          _buildCheckInHistory(ref),
+          const SizedBox(height: 12),
+          _buildBatches(ref),
+        ];
+      case 3:
+        return [
+          _buildMembershipCard(context, ref, m),
+          const SizedBox(height: 12),
+          _MemberQuickActions(member: m, canPii: canPii),
+        ];
+      case 4:
+        return [_buildFitnessLinks(context, ref, m, role)];
+      case 5:
+        return [_MemberActivityBody(memberId: memberId)];
+      default:
+        return [
+          if (canPii) ...[
+            _buildContactInfo(context, ref, m, canEdit: canEdit),
+            const SizedBox(height: 12),
+          ],
+          _buildStatTiles(ref),
+          const SizedBox(height: 12),
+          _buildCheckInHistory(ref),
+          const SizedBox(height: 12),
+          _buildMemberId(context, m),
+        ];
+    }
+  }
+
+  Future<void> _confirmDeleteMember(
+    BuildContext context,
+    WidgetRef ref,
+    Member m,
+  ) async {
     final ok = await showConfirmDialog(
       context,
       title: 'Delete member?',
-      body: 'Permanently delete ${m.fullName}? All their data (memberships, invoices, check-ins) will be removed. This cannot be undone.',
+      body:
+          'Permanently delete ${m.fullName}? All their data (memberships, invoices, check-ins) will be removed. This cannot be undone.',
       confirmLabel: 'Delete',
-      icon: Icons.delete_outline,
+      icon: AppIcons.delete,
     );
     if (ok != true || !context.mounted) return;
     try {
-      await Supabase.instance.client.from('members').delete().eq('id', m.id);
+      await Supabase.instance.client.rpc(
+        'delete_member_secure',
+        params: {'p_member_id': m.id},
+      );
       if (context.mounted) Navigator.pop(context);
     } catch (e) {
       debugPrint('[GymCRM] Delete member error: $e');
@@ -237,22 +366,23 @@ class MemberDetailScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _call(String? phone) async {
-    if (phone == null || phone.isEmpty) return;
-    final url = Uri.parse('tel:$phone');
-    if (await canLaunchUrl(url)) await launchUrl(url);
-  }
-
   Future<void> _whatsApp(Member m) async {
     final phone = m.phone;
     if (phone == null || phone.isEmpty) return;
     final cleaned = phone.replaceAll(RegExp(r'\D'), '');
     final url = Uri.parse('https://wa.me/91$cleaned');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (await canLaunchUrl(url))
+      await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
-  Widget _buildHeader(BuildContext context, WidgetRef ref, Member m,
-      {required bool canPii, required bool canEdit}) {
+  Widget _buildHeader(
+    BuildContext context,
+    WidgetRef ref,
+    Member m, {
+    required bool canPii,
+    required bool canEdit,
+    required bool canDelete,
+  }) {
     final topPad = MediaQuery.of(context).padding.top;
     final hasPhone = canPii && (m.phone?.isNotEmpty ?? false);
     return Container(
@@ -265,39 +395,60 @@ class MemberDetailScreen extends ConsumerWidget {
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: AppTheme.onDark),
+                icon: const Icon(
+                  AppIcons.arrowBackIosNew,
+                  size: 20,
+                  color: AppTheme.onDark,
+                ),
                 onPressed: () => Navigator.of(context).maybePop(),
               ),
               const Spacer(),
+              if (canDelete)
+                IconButton(
+                  icon: const Icon(
+                    AppIcons.edit,
+                    size: 21,
+                    color: AppTheme.onDark,
+                  ),
+                  onPressed: () =>
+                      showAdaptiveSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        useSafeArea: true,
+                        builder: (_) => _EditMemberSheet(member: m),
+                      ).then(
+                        (_) => ref.invalidate(_memberDetailProvider(memberId)),
+                      ),
+                ),
               if (canEdit)
                 IconButton(
-                  icon: const Icon(Icons.more_vert, size: 22, color: AppTheme.onDark),
+                  icon: const Icon(
+                    AppIcons.moreVert,
+                    size: 22,
+                    color: AppTheme.onDark,
+                  ),
                   onPressed: () => showAdaptiveSheet(
                     context: context,
                     builder: (ctx) => SafeArea(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        ListTile(
-                          leading: const Icon(Icons.edit_outlined, color: AppTheme.ink),
-                          title: const Text('Edit member'),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            showAdaptiveSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              useSafeArea: true,
-                              builder: (_) => _EditMemberSheet(member: m),
-                            ).then((_) => ref.invalidate(_memberDetailProvider(memberId)));
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.delete_outline, color: AppTheme.statusDanger),
-                          title: const Text('Delete member', style: TextStyle(color: AppTheme.statusDanger)),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _confirmDeleteMember(context, ref, m);
-                          },
-                        ),
-                      ]),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: const Icon(
+                              AppIcons.delete,
+                              color: AppTheme.statusDanger,
+                            ),
+                            title: const Text(
+                              'Delete member',
+                              style: TextStyle(color: AppTheme.statusDanger),
+                            ),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _confirmDeleteMember(context, ref, m);
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -307,7 +458,9 @@ class MemberDetailScreen extends ConsumerWidget {
           Row(
             children: [
               GestureDetector(
-                onTap: m.avatarUrl == null ? null : () => _showFullPhoto(context, m),
+                onTap: m.avatarUrl == null
+                    ? null
+                    : () => _showFullPhoto(context, m),
                 child: Container(
                   width: 76,
                   height: 76,
@@ -321,7 +474,11 @@ class MemberDetailScreen extends ConsumerWidget {
                     fallback: Center(
                       child: Text(
                         initials(m.firstName, m.lastName),
-                        style: const TextStyle(color: AppTheme.mintOnDark, fontWeight: FontWeight.w800, fontSize: 28),
+                        style: const TextStyle(
+                          color: AppTheme.mintOnDark,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 28,
+                        ),
                       ),
                     ),
                   ),
@@ -332,60 +489,292 @@ class MemberDetailScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(m.fullName,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: AppTheme.onDark, letterSpacing: -0.3)),
+                    Text(
+                      m.fullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 19,
+                        color: AppTheme.onDark,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text(
-                      [
-                        if (hasPhone) m.phone!,
-                        'Member since ${formatDateFromString(m.joinedAt)}',
-                      ].join(' · '),
+                      _identityLine(ref, m),
                       maxLines: 2,
-                      style: const TextStyle(color: AppTheme.onDarkSoft, fontSize: 12.5),
+                      style: const TextStyle(
+                        color: AppTheme.onDarkSoft,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _statusChip(m),
+                        if (_planChipLabel(m) case final label?)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.darkCard2,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.onDarkSoft,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          if (hasPhone) ...[
+          if (ref.watch(_memberDueProvider(m.id)).valueOrNull case final due?
+              when due > 0) ...[
             const SizedBox(height: 14),
-            Row(children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => _call(m.phone),
-                  child: Container(
-                    height: 46,
-                    decoration: BoxDecoration(color: AppTheme.darkCard2, borderRadius: BorderRadius.circular(14)),
-                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(Icons.call_outlined, size: 17, color: AppTheme.onDark),
-                      SizedBox(width: 8),
-                      Text('Call', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.onDark)),
-                    ]),
-                  ),
-                ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.darkCard2,
+                borderRadius: BorderRadius.circular(14),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => _whatsApp(m),
-                  child: Container(
-                    height: 46,
-                    decoration: BoxDecoration(color: const Color(0xFF2E7D4F), borderRadius: BorderRadius.circular(14)),
-                    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(Icons.chat_bubble_outline, size: 17, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text('WhatsApp', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
-                    ]),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'OUTSTANDING',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                            color: AppTheme.onDarkSoft,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatCurrency(due),
+                          style: AppTheme.numberStyle(
+                            fontSize: 22,
+                            color: AppTheme.onDark,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                  if (m.nextPaymentDate?.isNotEmpty ?? false)
+                    Text(
+                      () {
+                        final date = DateTime.tryParse(m.nextPaymentDate!);
+                        final overdue =
+                            date != null && date.isBefore(DateTime.now());
+                        final label = formatDateFromString(m.nextPaymentDate!);
+                        return overdue ? 'Pending since $label' : 'Due $label';
+                      }(),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.onDarkSoft,
+                      ),
+                    ),
+                ],
               ),
-            ]),
+            ),
           ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _HeroAction(
+                  icon: AppIcons.payments,
+                  label: 'Collect',
+                  filled: true,
+                  onTap: canEdit ? () => _collect(context, ref, m) : null,
+                ),
+              ),
+              // Only offered once the plan has actually lapsed — an active
+              // member is renewed through Collect, not this shortcut.
+              if (m.status == 'expired') ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _HeroAction(
+                    icon: AppIcons.autorenew,
+                    label: 'Renew',
+                    onTap: canEdit ? () => _renew(context, ref, m) : null,
+                  ),
+                ),
+              ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: _HeroAction(
+                  icon: AppIcons.howToReg,
+                  label: 'Check in',
+                  onTap: m.status == 'active'
+                      ? () => _checkIn(context, ref, m)
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _HeroAction(
+                  icon: AppIcons.chat,
+                  label: 'WhatsApp',
+                  onTap: hasPhone ? () => _whatsApp(m) : null,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
+  }
+
+  // "ID 001 · Batch: Evening" — the canvas also shows a branch, which this
+  // app has no per-member concept of, so it is left out.
+  String _identityLine(WidgetRef ref, Member m) {
+    final parts = <String>[];
+    final code = m.customId;
+    if (code != null && code.isNotEmpty) parts.add('ID $code');
+    final batches =
+        ref.watch(_memberBatchesProvider(memberId)).valueOrNull ?? const [];
+    if (batches.isNotEmpty) {
+      final cls = batches.first['classes'] as Map<String, dynamic>?;
+      final batchName = cls?['name'] as String?;
+      if (batchName != null && batchName.isNotEmpty) {
+        parts.add('Batch: $batchName');
+      }
+    }
+    parts.add('Member since ${formatDateFromString(m.joinedAt)}');
+    return parts.join(' · ');
+  }
+
+  Widget _statusChip(Member m) {
+    final (bg, fg, label) = switch (m.status) {
+      'active' => (AppTheme.statusActiveBg, AppTheme.statusActive, 'Active'),
+      'frozen' => (AppTheme.statusNeutralBg, AppTheme.statusNeutral, 'Frozen'),
+      'expired' => (AppTheme.statusDangerBg, AppTheme.statusDanger, 'Expired'),
+      _ => (AppTheme.statusNeutralBg, AppTheme.statusNeutral, m.status),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg),
+      ),
+    );
+  }
+
+  // "Monthly · exp 26 Sep"
+  String? _planChipLabel(Member m) {
+    final plan = m.currentMembership?.plan?.name;
+    final npd = m.nextPaymentDate;
+    final parts = <String>[
+      if (plan != null && plan.isNotEmpty) plan,
+      if (npd != null && npd.isNotEmpty) 'exp ${formatDateFromString(npd)}',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  void _collect(BuildContext context, WidgetRef ref, Member m) {
+    showAdaptiveSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => QuickCollectSheet(memberId: m.id, memberName: m.fullName),
+    ).then((_) {
+      ref.invalidate(_memberDetailProvider(memberId));
+      ref.invalidate(_memberDueProvider(m.id));
+    });
+  }
+
+  // One-tap reactivation for a lapsed member: confirm, then collect the
+  // outstanding due and extend the plan in a single atomic call — the same
+  // RPC Collect uses, just without the full payment-method form since this
+  // path assumes cash/default terms already agreed with the member.
+  Future<void> _renew(BuildContext context, WidgetRef ref, Member m) async {
+    final npd = m.nextPaymentDate;
+    if (npd == null || npd.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Renewal date is missing. Refresh and try again.'),
+        ),
+      );
+      return;
+    }
+    final due = ref.read(_memberDueProvider(m.id)).valueOrNull;
+    final amount = (due != null && due > 0)
+        ? due
+        : (m.currentMembership?.plan?.price ?? 0);
+    if (amount <= 0) {
+      _collect(context, ref, m);
+      return;
+    }
+
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Renew plan?',
+      body:
+          'This marks ${formatCurrency(amount)} as collected from '
+          '${m.fullName} and extends their plan by one cycle. Confirm the '
+          'payment was received before continuing.',
+      confirmLabel: 'Renew',
+      icon: AppIcons.autorenew,
+      danger: false,
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await collectMembershipRenewal(
+        memberId: m.id,
+        expectedNextPaymentDate: npd.split('T').first,
+        amount: amount,
+        method: 'cash',
+      );
+      ref.invalidate(_memberDetailProvider(memberId));
+      ref.invalidate(_memberDueProvider(m.id));
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Plan renewed'),
+          backgroundColor: AppTheme.statusActive,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(paymentFailureMessage(e))));
+    }
+  }
+
+  Future<void> _checkIn(BuildContext context, WidgetRef ref, Member m) async {
+    // Captured before the await — see showCheckInResult's note.
+    final messenger = ScaffoldMessenger.of(context);
+    final gymId = await ref.read(gymIdProvider.future);
+    final r = await checkInMember(memberId: m.id, gymId: gymId);
+    showCheckInResult(
+      messenger,
+      success: r.success,
+      already: r.already,
+      title: r.title,
+      subtitle: r.subtitle,
+    );
+    if (r.success) ref.invalidate(_memberCheckInsProvider(memberId));
   }
 
   Widget _buildStatTiles(WidgetRef ref) {
@@ -398,28 +787,50 @@ class MemberDetailScreen extends ConsumerWidget {
     }).length;
     String lastVisit = '—';
     if (list.isNotEmpty) {
-      final dt = DateTime.tryParse(list.first['checked_in_at'] as String? ?? '');
+      final dt = DateTime.tryParse(
+        list.first['checked_in_at'] as String? ?? '',
+      );
       if (dt != null) {
         final days = now.difference(dt).inDays;
-        lastVisit = days == 0 ? 'Today' : days == 1 ? '1d ago' : '${days}d ago';
+        lastVisit = days == 0
+            ? 'Today'
+            : days == 1
+            ? '1d ago'
+            : '${days}d ago';
       }
     }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(children: [
-        Expanded(child: StatTileLight(label: 'Check-ins / month', value: '$monthCount')),
-        const SizedBox(width: 10),
-        Expanded(child: StatTileLight(label: 'Last visit', value: lastVisit)),
-      ]),
+      child: Row(
+        children: [
+          Expanded(
+            child: StatTileLight(
+              label: 'Check-ins / month',
+              value: '$monthCount',
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: StatTileLight(label: 'Last visit', value: lastVisit),
+          ),
+        ],
+      ),
     );
   }
 
   // ── Quick links: Workout plan · Diet plan · Payment history ────────────────
 
-  Widget _buildQuickLinks(BuildContext context, WidgetRef ref, Member m, String? role) {
-    final workoutPlans = ref.watch(_memberWorkoutPlansProvider(memberId)).valueOrNull ?? const [];
-    final dietPlans = ref.watch(_memberDietPlansProvider(memberId)).valueOrNull ?? const [];
-    final invoices = ref.watch(_memberInvoicesProvider(memberId)).valueOrNull ?? const [];
+  Widget _buildFitnessLinks(
+    BuildContext context,
+    WidgetRef ref,
+    Member m,
+    String? role,
+  ) {
+    final workoutPlans =
+        ref.watch(_memberWorkoutPlansProvider(memberId)).valueOrNull ??
+        const [];
+    final dietPlans =
+        ref.watch(_memberDietPlansProvider(memberId)).valueOrNull ?? const [];
     final canWorkout = RoleAccess.canManageWorkoutPlans(role);
     final canDiet = RoleAccess.canManageDietPlans(role);
 
@@ -431,7 +842,9 @@ class MemberDetailScreen extends ConsumerWidget {
     String dietSummary() {
       if (dietPlans.isEmpty) return canDiet ? 'Add plan' : '—';
       final kcal = dietPlans.first['calories'] as int?;
-      return kcal != null ? '$kcal kcal' : (dietPlans.first['name'] as String? ?? 'View');
+      return kcal != null
+          ? '$kcal kcal'
+          : (dietPlans.first['name'] as String? ?? 'View');
     }
 
     Future<void> openWorkout() async {
@@ -441,20 +854,25 @@ class MemberDetailScreen extends ConsumerWidget {
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
-          builder: (_) => WorkoutPlanSheet(memberId: memberId, memberName: m.fullName),
+          builder: (_) =>
+              WorkoutPlanSheet(memberId: memberId, memberName: m.fullName),
         );
-        if (saved == true) ref.invalidate(_memberWorkoutPlansProvider(memberId));
+        if (saved == true)
+          ref.invalidate(_memberWorkoutPlansProvider(memberId));
         return;
       }
       final changed = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => WorkoutPlanViewerPage(
-          plan: workoutPlans.first,
-          memberId: memberId,
-          memberName: m.fullName,
-          canManage: canWorkout,
-        )),
+        MaterialPageRoute(
+          builder: (_) => WorkoutPlanViewerPage(
+            plan: workoutPlans.first,
+            memberId: memberId,
+            memberName: m.fullName,
+            canManage: canWorkout,
+          ),
+        ),
       );
-      if (changed == true) ref.invalidate(_memberWorkoutPlansProvider(memberId));
+      if (changed == true)
+        ref.invalidate(_memberWorkoutPlansProvider(memberId));
     }
 
     Future<void> openDiet() async {
@@ -464,62 +882,56 @@ class MemberDetailScreen extends ConsumerWidget {
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
-          builder: (_) => DietPlanSheet(memberId: memberId, memberName: m.fullName),
+          builder: (_) =>
+              DietPlanSheet(memberId: memberId, memberName: m.fullName),
         );
         if (saved == true) ref.invalidate(_memberDietPlansProvider(memberId));
         return;
       }
       final changed = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => DietPlanViewerPage(
-          plan: dietPlans.first,
-          memberId: memberId,
-          memberName: m.fullName,
-          canManage: canDiet,
-        )),
+        MaterialPageRoute(
+          builder: (_) => DietPlanViewerPage(
+            plan: dietPlans.first,
+            memberId: memberId,
+            memberName: m.fullName,
+            canManage: canDiet,
+          ),
+        ),
       );
       if (changed == true) ref.invalidate(_memberDietPlansProvider(memberId));
     }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: CardList(children: [
-        _QuickLinkRow(
-          icon: Icons.fitness_center_outlined,
-          iconBg: AppTheme.accentSoft,
-          iconColor: AppTheme.accent,
-          label: 'Workout plan',
-          summary: workoutSummary(),
-          onTap: openWorkout,
-        ),
-        _QuickLinkRow(
-          icon: Icons.restaurant_menu_outlined,
-          iconBg: AppTheme.statusActiveBg,
-          iconColor: AppTheme.statusActive,
-          label: 'Diet plan',
-          summary: dietSummary(),
-          onTap: openDiet,
-        ),
-        _QuickLinkRow(
-          icon: Icons.receipt_long_outlined,
-          iconBg: AppTheme.statusNeutralBg,
-          iconColor: AppTheme.statusNeutral,
-          label: 'Payment history',
-          summary: '${invoices.length} payment${invoices.length == 1 ? '' : 's'}',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => _PaymentHistoryPage(
-              memberId: memberId,
-              memberName: m.fullName,
-            )),
+      child: CardList(
+        children: [
+          _QuickLinkRow(
+            icon: AppIcons.fitness,
+            iconBg: AppTheme.accentSoft,
+            iconColor: AppTheme.accent,
+            label: 'Workout plan',
+            summary: workoutSummary(),
+            onTap: openWorkout,
           ),
-        ),
-      ]),
+          _QuickLinkRow(
+            icon: AppIcons.restaurant,
+            iconBg: AppTheme.statusActiveBg,
+            iconColor: AppTheme.statusActive,
+            label: 'Diet plan',
+            summary: dietSummary(),
+            onTap: openDiet,
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildMembershipCard(BuildContext context, WidgetRef ref, Member m) {
     final due = ref.watch(_memberDueProvider(m.id)).valueOrNull ?? 0;
     final ms = m.currentMembership;
-    final npd = m.nextPaymentDate != null ? DateTime.tryParse(m.nextPaymentDate!) : null;
+    final npd = m.nextPaymentDate != null
+        ? DateTime.tryParse(m.nextPaymentDate!)
+        : null;
     final started = ms != null ? DateTime.tryParse(ms.startsAt) : null;
     int? daysLeft;
     double? progress;
@@ -527,7 +939,9 @@ class MemberDetailScreen extends ConsumerWidget {
       daysLeft = npd.difference(DateTime.now()).inDays;
       if (started != null && npd.isAfter(started)) {
         final total = npd.difference(started).inDays;
-        progress = total > 0 ? ((total - daysLeft) / total).clamp(0.0, 1.0) : null;
+        progress = total > 0
+            ? ((total - daysLeft) / total).clamp(0.0, 1.0)
+            : null;
       }
     }
     final planTitle = ms?.plan != null
@@ -543,33 +957,63 @@ class MemberDetailScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Current plan',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkSoft)),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(
-                  child: Text(planTitle,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              const Text(
+                'Current plan',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.inkSoft,
                 ),
-                const SizedBox(width: 8),
-                _StatusChip(status: m.status),
-              ]),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      planTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusChip(status: m.status),
+                ],
+              ),
               if (ms?.hasDiscount ?? false) ...[
                 const SizedBox(height: 4),
-                Text('− ${formatCurrency(ms!.discountAmount)} per invoice',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.statusActive)),
+                Text(
+                  '− ${formatCurrency(ms!.discountAmount)} per invoice',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusActive,
+                  ),
+                ),
               ],
               if (due > 0) ...[
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.statusDangerBg,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text('Due ${formatCurrency(due)}',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.statusDanger)),
+                  child: Text(
+                    'Due ${formatCurrency(due)}',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.statusDanger,
+                    ),
+                  ),
                 ),
               ],
               if (progress != null) ...[
@@ -580,31 +1024,49 @@ class MemberDetailScreen extends ConsumerWidget {
                     value: progress,
                     minHeight: 6,
                     backgroundColor: AppTheme.surface2,
-                    valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.statusActive),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      AppTheme.statusActive,
+                    ),
                   ),
                 ),
               ],
               if (started != null) ...[
                 const SizedBox(height: 10),
-                Text('Started ${formatDateFromString(ms!.startsAt)}',
-                  style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+                Text(
+                  'Started ${formatDateFromString(ms!.startsAt)}',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
               ],
               if (npd != null) ...[
                 const SizedBox(height: 6),
-                Row(children: [
-                  Text('Renews ${formatDateFromString(m.nextPaymentDate)}',
-                    style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
-                  const Spacer(),
-                  Text(
-                    daysLeft != null && daysLeft >= 0 ? '$daysLeft days left'
-                        : '${daysLeft!.abs()} days overdue',
-                    style: TextStyle(
-                      fontSize: 12.5, fontWeight: FontWeight.w800,
-                      color: daysLeft >= 0 ? AppTheme.ink : AppTheme.statusDanger,
-                      fontFeatures: AppTheme.tabularFigures,
+                Row(
+                  children: [
+                    Text(
+                      'Renews ${formatDateFromString(m.nextPaymentDate)}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppTheme.inkSoft,
+                      ),
                     ),
-                  ),
-                ]),
+                    const Spacer(),
+                    Text(
+                      daysLeft != null && daysLeft >= 0
+                          ? '$daysLeft days left'
+                          : '${daysLeft!.abs()} days overdue',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: daysLeft >= 0
+                            ? AppTheme.ink
+                            : AppTheme.statusDanger,
+                        fontFeatures: AppTheme.tabularFigures,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ],
           ),
@@ -613,7 +1075,12 @@ class MemberDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildContactInfo(BuildContext context, WidgetRef ref, Member m, {required bool canEdit}) {
+  Widget _buildContactInfo(
+    BuildContext context,
+    WidgetRef ref,
+    Member m, {
+    required bool canEdit,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -634,7 +1101,9 @@ class MemberDetailScreen extends ConsumerWidget {
               _BiometricIdRow(
                 member: m,
                 canEdit: canEdit,
-                onTap: canEdit ? () => _showEditBiometricIdDialog(context, ref, m) : null,
+                onTap: canEdit
+                    ? () => _showEditBiometricIdDialog(context, ref, m)
+                    : null,
               ),
             ],
           ),
@@ -643,13 +1112,18 @@ class MemberDetailScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _showEditBiometricIdDialog(BuildContext context, WidgetRef ref, Member m) async {
+  Future<void> _showEditBiometricIdDialog(
+    BuildContext context,
+    WidgetRef ref,
+    Member m,
+  ) async {
     final ctrl = TextEditingController(text: m.biometricId ?? '');
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Biometric Device ID'),
-        content: TextFormField(
+    final saved = await showAppDialog<bool>(
+      context,
+      title: 'Biometric Device ID',
+      content: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: TextFormField(
           controller: ctrl,
           autofocus: true,
           maxLength: 20,
@@ -659,11 +1133,15 @@ class MemberDetailScreen extends ConsumerWidget {
             helperText: 'Employee number enrolled on fingerprint machine',
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
-        ],
       ),
+      actions: (ctx) => [
+        DialogButton(label: 'Cancel', onTap: () => Navigator.pop(ctx, false)),
+        DialogButton(
+          label: 'Save',
+          filled: true,
+          onTap: () => Navigator.pop(ctx, true),
+        ),
+      ],
     );
 
     if (saved != true) return;
@@ -676,7 +1154,9 @@ class MemberDetailScreen extends ConsumerWidget {
       ref.invalidate(_memberDetailProvider(m.id));
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not save: $e')));
       }
     }
   }
@@ -698,33 +1178,57 @@ class MemberDetailScreen extends ConsumerWidget {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => const SizedBox.shrink(),
                 data: (list) => list.isEmpty
-                    ? const Text('Not enrolled in any batch.', style: TextStyle(color: AppTheme.inkHint))
+                    ? const Text(
+                        'Not enrolled in any batch.',
+                        style: TextStyle(color: AppTheme.inkHint),
+                      )
                     : ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: list.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (_, i) {
-                          final cls = list[i]['classes'] as Map<String, dynamic>?;
+                          final cls =
+                              list[i]['classes'] as Map<String, dynamic>?;
                           if (cls == null) return const SizedBox.shrink();
                           final color = _parseColor(cls['color'] as String?);
-                          final startTime = cls['default_start_time'] as String?;
+                          final startTime =
+                              cls['default_start_time'] as String?;
                           final endTime = cls['default_end_time'] as String?;
-                          final timeStr = (startTime != null && endTime != null) ? '$startTime–$endTime' : null;
+                          final timeStr = (startTime != null && endTime != null)
+                              ? '$startTime–$endTime'
+                              : null;
                           return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
-                              border: Border(left: BorderSide(color: color, width: 3)),
+                              border: Border(
+                                left: BorderSide(color: color, width: 3),
+                              ),
                               color: color.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(cls['name'] as String? ?? '—',
-                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppTheme.ink)),
+                                Text(
+                                  cls['name'] as String? ?? '—',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: AppTheme.ink,
+                                  ),
+                                ),
                                 if (timeStr != null)
-                                  Text(timeStr, style: const TextStyle(fontSize: 11, color: AppTheme.inkHint)),
+                                  Text(
+                                    timeStr,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppTheme.inkHint,
+                                    ),
+                                  ),
                               ],
                             ),
                           );
@@ -755,12 +1259,16 @@ class MemberDetailScreen extends ConsumerWidget {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => const SizedBox.shrink(),
                 data: (list) => list.isEmpty
-                    ? const Text('No check-ins yet', style: TextStyle(color: AppTheme.inkHint))
+                    ? const Text(
+                        'No check-ins yet',
+                        style: TextStyle(color: AppTheme.inkHint),
+                      )
                     : ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: list.length,
-                        separatorBuilder: (_, __) => const Divider(color: AppTheme.border, height: 1),
+                        separatorBuilder: (_, __) =>
+                            const Divider(color: AppTheme.border, height: 1),
                         itemBuilder: (_, i) {
                           final ci = list[i];
                           final method = (ci['method'] as String? ?? 'manual');
@@ -775,25 +1283,42 @@ class MemberDetailScreen extends ConsumerWidget {
                                     color: AppTheme.statusActiveBg,
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.check, size: 16, color: AppTheme.statusActive),
+                                  child: const Icon(
+                                    AppIcons.check,
+                                    size: 16,
+                                    color: AppTheme.statusActive,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    formatDateTimeFromString(ci['checked_in_at'] as String?),
-                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppTheme.ink),
+                                    formatDateTimeFromString(
+                                      ci['checked_in_at'] as String?,
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppTheme.ink,
+                                    ),
                                   ),
                                 ),
                                 // Method badge
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppTheme.statusNeutralBg,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
                                     method.toUpperCase(),
-                                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusNeutral),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.statusNeutral,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -821,27 +1346,97 @@ class MemberDetailScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('MEMBER ID',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppTheme.inkHint, letterSpacing: 1.0)),
+                  const Text(
+                    'MEMBER ID',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.inkHint,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(m.id,
-                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppTheme.inkSoft),
-                      overflow: TextOverflow.ellipsis),
+                  Text(
+                    m.id,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: AppTheme.inkSoft,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.copy, size: 18, color: AppTheme.inkHint),
+              icon: const Icon(AppIcons.copy, size: 18, color: AppTheme.inkHint),
               onPressed: () {
                 // Copy to clipboard
                 final data = ClipboardData(text: m.id);
                 Clipboard.setData(data);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Member ID copied'), duration: Duration(seconds: 2)),
+                  const SnackBar(
+                    content: Text('Member ID copied'),
+                    duration: Duration(seconds: 2),
+                  ),
                 );
               },
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Dark-hero quick action tile (Collect / Renew / Check in / WhatsApp) ─────
+
+class _HeroAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool filled;
+  final VoidCallback? onTap;
+  const _HeroAction({
+    required this.icon,
+    required this.label,
+    this.filled = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: onTap == null ? 0.45 : 1,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+          decoration: BoxDecoration(
+            color: filled ? AppTheme.accent : AppTheme.darkCard2,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 19,
+                color: filled ? Colors.white : AppTheme.onDark,
+              ),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  color: filled ? Colors.white : AppTheme.onDark,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -857,7 +1452,8 @@ class _MemberQuickActions extends ConsumerStatefulWidget {
   const _MemberQuickActions({required this.member, required this.canPii});
 
   @override
-  ConsumerState<_MemberQuickActions> createState() => _MemberQuickActionsState();
+  ConsumerState<_MemberQuickActions> createState() =>
+      _MemberQuickActionsState();
 }
 
 class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
@@ -883,11 +1479,15 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     String msg = 'Hi ${m.firstName}, ';
 
     String defaultMsg(String t) => switch (t) {
-      'expiry'  => 'Hi ${m.firstName}! Your membership is expiring soon. Please renew to keep access. 💪',
-      'payment' => 'Hi ${m.firstName}, you have a pending payment. Please clear it at your earliest. Thank you!',
-      'welcome' => 'Welcome ${m.firstName}! 🎉 Excited to have you. See you at the gym soon!',
-      'checkin' => 'Hi ${m.firstName}! We miss you. Come back and keep your goals on track! 💪',
-      _         => 'Hi ${m.firstName}, ',
+      'expiry' =>
+        'Hi ${m.firstName}! Your membership is expiring soon. Please renew to keep access. 💪',
+      'payment' =>
+        'Hi ${m.firstName}, you have a pending payment. Please clear it at your earliest. Thank you!',
+      'welcome' =>
+        'Welcome ${m.firstName}! 🎉 Excited to have you. See you at the gym soon!',
+      'checkin' =>
+        'Hi ${m.firstName}! We miss you. Come back and keep your goals on track! 💪',
+      _ => 'Hi ${m.firstName}, ',
     };
 
     await showAdaptiveSheet(
@@ -903,23 +1503,46 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
             ('welcome', 'Welcome'),
             ('checkin', 'Renewal'),
           ];
-          final tplIndex = templates.indexWhere((t) => t.$1 == tpl).clamp(0, templates.length - 1);
+          final tplIndex = templates
+              .indexWhere((t) => t.$1 == tpl)
+              .clamp(0, templates.length - 1);
           return Padding(
-            padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 24),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(children: [
-                  Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(color: const Color(0xFF25D366), borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(Icons.chat_bubble, size: 18, color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  Text('Send WhatsApp',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: AppTheme.ink)),
-                ]),
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF25D366),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        AppIcons.chatActive,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Send WhatsApp',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   height: 40,
@@ -930,7 +1553,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                     itemBuilder: (_, i) => PillChip(
                       label: templates[i].$2,
                       selected: tplIndex == i,
-                      onTap: () => setS(() { tpl = templates[i].$1; msg = defaultMsg(templates[i].$1); }),
+                      onTap: () => setS(() {
+                        tpl = templates[i].$1;
+                        msg = defaultMsg(templates[i].$1);
+                      }),
                     ),
                   ),
                 ),
@@ -939,7 +1565,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                   initialValue: msg,
                   maxLines: 4,
                   onChanged: (v) => msg = v,
-                  decoration: const InputDecoration(hintText: 'Type a message…'),
+                  decoration: const InputDecoration(
+                    hintText: 'Type a message…',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
@@ -947,12 +1575,17 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                     Navigator.pop(ctx);
                     final clean = m.phone!.replaceAll(RegExp(r'\D'), '');
                     final number = clean.startsWith('91') ? clean : '91$clean';
-                    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(msg)}');
-                    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+                    final uri = Uri.parse(
+                      'https://wa.me/$number?text=${Uri.encodeComponent(msg)}',
+                    );
+                    if (!await launchUrl(
+                      uri,
+                      mode: LaunchMode.externalApplication,
+                    )) {
                       _toast('Could not open WhatsApp');
                     }
                   },
-                  icon: const Icon(Icons.send_outlined, size: 16),
+                  icon: const Icon(AppIcons.send, size: 16),
                   label: const Text('Send on WhatsApp'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF25D366),
@@ -971,7 +1604,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     final newStatus = m.status == 'frozen' ? 'active' : 'frozen';
     setState(() => _busy = true);
     try {
-      await _client.from('members').update({'status': newStatus}).eq('id', m.id);
+      await _client
+          .from('members')
+          .update({'status': newStatus})
+          .eq('id', m.id);
       ref.invalidate(_memberDetailProvider(m.id));
       _toast(newStatus == 'frozen' ? 'Membership put on hold' : 'Hold removed');
     } catch (e) {
@@ -986,7 +1622,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     setState(() => _busy = true);
     try {
       final auth = Supabase.instance.client.auth;
-      final session = auth.currentSession ?? (await auth.refreshSession()).session;
+      final session =
+          auth.currentSession ?? (await auth.refreshSession()).session;
       final token = session?.accessToken;
       if (token == null) {
         _toast('Session expired. Please sign in again.');
@@ -1019,17 +1656,21 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     final ok = await showConfirmDialog(
       context,
       title: 'Cancel membership?',
-      body: "${m.firstName}'s current plan will be cancelled. This can't be undone.",
+      body:
+          "${m.firstName}'s current plan will be cancelled. This can't be undone.",
       cancelLabel: 'Keep plan',
       confirmLabel: 'Cancel it',
     );
     if (ok != true) return;
     setState(() => _busy = true);
     try {
-      await _client.from('memberships').update({
-        'status': 'cancelled',
-        'cancelled_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', ms.id);
+      await _client
+          .from('memberships')
+          .update({
+            'status': 'cancelled',
+            'cancelled_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', ms.id);
       ref.invalidate(_memberDetailProvider(m.id));
       _toast('Membership cancelled');
     } catch (e) {
@@ -1049,7 +1690,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       return;
     }
     final currentPlanId = m.currentMembership?.plan?.id;
-    var picked = currentPlanId ?? (plans.isNotEmpty ? plans.first['id'] as String : null);
+    var picked =
+        currentPlanId ??
+        (plans.isNotEmpty ? plans.first['id'] as String : null);
     final selected = await showAdaptiveSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -1057,7 +1700,12 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       builder: (_) => StatefulBuilder(
         builder: (ctx, setS) {
           return Padding(
-            padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(ctx).viewInsets.bottom + 24),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1072,27 +1720,49 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                     child: GestureDetector(
                       onTap: () => setS(() => picked = id),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: selected ? AppTheme.accentSoft : AppTheme.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
                         ),
-                        child: Row(children: [
-                          Expanded(
-                            child: Text(p['name'] as String? ?? '',
-                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? AppTheme.accentSoft
+                              : AppTheme.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: selected ? AppTheme.accent : AppTheme.border,
+                            width: selected ? 1.5 : 1,
                           ),
-                          Text(formatCurrency((p['price'] as num?)?.toDouble() ?? 0),
-                            style: AppTheme.numberStyle(fontSize: 14.5)),
-                        ]),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                p['name'] as String? ?? '',
+                                style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.ink,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              formatCurrency(
+                                (p['price'] as num?)?.toDouble() ?? 0,
+                              ),
+                              style: AppTheme.numberStyle(fontSize: 14.5),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   );
                 }),
                 const SizedBox(height: 8),
                 ElevatedButton(
-                  onPressed: picked == null ? null : () => Navigator.pop(context, picked),
+                  onPressed: picked == null
+                      ? null
+                      : () => Navigator.pop(context, picked),
                   child: const Text('Switch plan'),
                 ),
               ],
@@ -1110,7 +1780,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
         title: 'Recurring Discount',
-        helperText: 'Fixed amount deducted from every auto-generated invoice for this member.',
+        helperText:
+            'Fixed amount deducted from every auto-generated invoice for this member.',
         controller: discountCtrl,
         confirmLabel: 'Confirm',
         skipLabel: 'No Discount',
@@ -1133,16 +1804,29 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       // matches how Collect Payment already advances dates (from the date
       // itself, not from today or from join date). Only members who never
       // had a next_payment_date fall back to join date + plan duration.
-      final plan = plans.firstWhere((p) => p['id'] == selected, orElse: () => {});
-      final months = (plan['billing_interval_months'] as int?) ??
-          const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']] ??
+      final plan = plans.firstWhere(
+        (p) => p['id'] == selected,
+        orElse: () => {},
+      );
+      final months =
+          (plan['billing_interval_months'] as int?) ??
+          const {
+            'monthly': 1,
+            'quarterly': 3,
+            'biannual': 6,
+            'annual': 12,
+          }[plan['billing_interval']] ??
           1;
       final currentNpd = m.nextPaymentDate;
       final today = DateTime.now().toUtc();
       final todayStr = today.toIso8601String().split('T').first;
-      final hasRemainingTime = currentNpd != null &&
+      final hasRemainingTime =
+          currentNpd != null &&
           currentNpd.isNotEmpty &&
-          (DateTime.tryParse(currentNpd)?.isAfter(DateTime(today.year, today.month, today.day)) ?? false);
+          (DateTime.tryParse(
+                currentNpd,
+              )?.isAfter(DateTime(today.year, today.month, today.day)) ??
+              false);
 
       String anchor;
       if (hasRemainingTime) {
@@ -1151,7 +1835,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
-          builder: (_) => _PlanStartChoiceSheet(todayStr: todayStr, currentNpd: currentNpd),
+          builder: (_) =>
+              _PlanStartChoiceSheet(todayStr: todayStr, currentNpd: currentNpd),
         );
         if (choice == null) {
           setState(() => _busy = false);
@@ -1168,15 +1853,19 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       // Cancel old membership + insert new one + update member row, atomically
       // (single DB transaction via RPC) so a mid-flow interruption can't leave
       // the member with an old-cancelled-but-no-new-active membership.
-      await _client.rpc('change_member_plan', params: {
-        'p_member_id': m.id,
-        'p_plan_id': selected,
-        'p_starts_at': startsAt.toIso8601String(),
-        'p_discount_amount': discount ?? 0.0,
-        'p_next_payment_date': derived,
-        'p_billing_interval_months': months,
-      });
+      await _client.rpc(
+        'change_member_plan',
+        params: {
+          'p_member_id': m.id,
+          'p_plan_id': selected,
+          'p_starts_at': startsAt.toIso8601String(),
+          'p_discount_amount': discount ?? 0.0,
+          'p_next_payment_date': derived,
+          'p_billing_interval_months': months,
+        },
+      );
       ref.invalidate(_memberDetailProvider(m.id));
+      notifyGymDataChanged();
       _toast('Plan assigned');
     } catch (e) {
       debugPrint('[GymCRM] Assign plan error: $e');
@@ -1198,7 +1887,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
         title: 'Edit Recurring Discount',
-        helperText: 'Fixed amount deducted from every auto-generated invoice. Set to 0 to remove.',
+        helperText:
+            'Fixed amount deducted from every auto-generated invoice. Set to 0 to remove.',
         controller: discountCtrl,
         confirmLabel: 'Save',
         skipLabel: 'Cancel',
@@ -1232,17 +1922,33 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   Widget build(BuildContext context) {
     final hasActivePlan = m.currentMembership?.status == 'active';
     final canPii = widget.canPii;
-    final canEdit = widget.canPii; // same gate: manager+ only
+    final canEdit = ref.watch(
+      gymPermissionProvider((GymModule.members, GymAction.edit)),
+    );
+    final canFreeze = ref.watch(
+      gymPermissionProvider((GymModule.members, GymAction.freeze)),
+    );
+    final canEditMembership = ref.watch(
+      gymPermissionProvider((GymModule.memberships, GymAction.edit)),
+    );
+    final canDeleteMembership = ref.watch(
+      gymPermissionProvider((GymModule.memberships, GymAction.delete)),
+    );
     final showWhatsApp = canPii && m.phone != null && m.phone!.isNotEmpty;
-    final showHold = canEdit && (m.status == 'active' || m.status == 'frozen');
+    final showHold =
+        canFreeze && (m.status == 'active' || m.status == 'frozen');
     final showInvite = canEdit && m.email.isNotEmpty && m.userId == null;
-    if (!canPii && !canEdit) {
+    if (!canPii &&
+        !canEdit &&
+        !canFreeze &&
+        !canEditMembership &&
+        !canDeleteMembership) {
       return const SizedBox.shrink();
     }
     final rows = <Widget>[
       if (showWhatsApp)
         _ActionRow(
-          icon: Icons.chat_bubble_outline,
+          icon: AppIcons.chat,
           iconBg: const Color(0xFFDDEFE2),
           iconColor: const Color(0xFF25D366),
           label: 'WhatsApp',
@@ -1250,23 +1956,23 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
         ),
       if (showHold)
         _ActionRow(
-          icon: m.status == 'frozen' ? Icons.play_arrow : Icons.pause,
+          icon: m.status == 'frozen' ? AppIcons.play : AppIcons.pause,
           iconBg: AppTheme.surface2,
           iconColor: AppTheme.inkSoft,
           label: m.status == 'frozen' ? 'Remove hold' : 'Hold membership',
           onTap: _busy ? null : _toggleHold,
         ),
-      if (canEdit)
+      if (canEditMembership)
         _ActionRow(
-          icon: Icons.credit_card,
+          icon: AppIcons.creditCardActive,
           iconBg: AppTheme.accentSoft,
           iconColor: AppTheme.accent,
           label: hasActivePlan ? 'Change plan' : 'Assign plan',
           onTap: _busy ? null : _managePlan,
         ),
-      if (canEdit && hasActivePlan)
+      if (canEditMembership && hasActivePlan)
         _ActionRow(
-          icon: Icons.edit_outlined,
+          icon: AppIcons.edit,
           iconBg: AppTheme.surface2,
           iconColor: AppTheme.inkSoft,
           label: m.currentMembership?.hasDiscount == true
@@ -1276,15 +1982,15 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
         ),
       if (showInvite)
         _ActionRow(
-          icon: Icons.mail_outline,
+          icon: AppIcons.mail,
           iconBg: AppTheme.surface2,
           iconColor: AppTheme.inkSoft,
           label: 'Send portal invite',
           onTap: _busy ? null : _sendInvite,
         ),
-      if (canEdit && hasActivePlan)
+      if (canDeleteMembership && hasActivePlan)
         _ActionRow(
-          icon: Icons.delete_outline,
+          icon: AppIcons.delete,
           iconBg: AppTheme.statusDangerBg,
           iconColor: AppTheme.statusDanger,
           label: 'Cancel plan',
@@ -1316,7 +2022,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
 class _PlanStartChoiceSheet extends StatefulWidget {
   final String todayStr;
   final String currentNpd;
-  const _PlanStartChoiceSheet({required this.todayStr, required this.currentNpd});
+  const _PlanStartChoiceSheet({
+    required this.todayStr,
+    required this.currentNpd,
+  });
 
   @override
   State<_PlanStartChoiceSheet> createState() => _PlanStartChoiceSheetState();
@@ -1325,7 +2034,11 @@ class _PlanStartChoiceSheet extends StatefulWidget {
 class _PlanStartChoiceSheetState extends State<_PlanStartChoiceSheet> {
   String _picked = 'today';
 
-  Widget _option({required String value, required String title, required String subtitle}) {
+  Widget _option({
+    required String value,
+    required String title,
+    required String subtitle,
+  }) {
     final selected = _picked == value;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -1336,14 +2049,27 @@ class _PlanStartChoiceSheetState extends State<_PlanStartChoiceSheet> {
           decoration: BoxDecoration(
             color: selected ? AppTheme.accentSoft : AppTheme.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
+            border: Border.all(
+              color: selected ? AppTheme.accent : AppTheme.border,
+              width: selected ? 1.5 : 1,
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.ink,
+                ),
+              ),
               const SizedBox(height: 3),
-              Text(subtitle, style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
+              ),
             ],
           ),
         ),
@@ -1354,25 +2080,33 @@ class _PlanStartChoiceSheetState extends State<_PlanStartChoiceSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SheetHeader(
             title: 'Start new plan from?',
-            subtitle: 'Their current plan is active till ${formatDateFromString(widget.currentNpd)}.',
+            subtitle:
+                'Their current plan is active till ${formatDateFromString(widget.currentNpd)}.',
           ),
           const SizedBox(height: 16),
           _option(
             value: 'today',
             title: 'Today (${formatDateFromString(widget.todayStr)})',
-            subtitle: 'New plan starts now. Remaining days on the old plan are dropped.',
+            subtitle:
+                'New plan starts now. Remaining days on the old plan are dropped.',
           ),
           _option(
             value: 'end',
             title: formatDateFromString(widget.currentNpd),
-            subtitle: 'New plan starts after the old one ends. Nothing dropped, no gap.',
+            subtitle:
+                'New plan starts after the old one ends. Nothing dropped, no gap.',
           ),
           const SizedBox(height: 8),
           ElevatedButton(
@@ -1411,7 +2145,9 @@ class _DiscountSheet extends StatelessWidget {
         final discount = double.tryParse(controller.text.trim()) ?? 0;
         return Padding(
           padding: EdgeInsets.only(
-            left: 16, right: 16, top: 20,
+            left: 16,
+            right: 16,
+            top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
           ),
           child: Column(
@@ -1423,34 +2159,54 @@ class _DiscountSheet extends StatelessWidget {
               const FieldLabel('Discount amount'),
               TextField(
                 controller: controller,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 autofocus: true,
                 onChanged: (_) => setS(() {}),
-                decoration: InputDecoration(hintText: '0', prefixText: '$currencySymbol '),
+                decoration: InputDecoration(
+                  hintText: '0',
+                  prefixText: '$currencySymbol ',
+                ),
               ),
               if (discount > 0) ...[
                 const SizedBox(height: 14),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: AppTheme.cardDecoration(),
-                  child: Row(children: [
-                    const Text('Discount applied', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
-                    const Spacer(),
-                    Text('− ${formatCurrency(discount)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.statusActive)),
-                  ]),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Discount applied',
+                        style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '− ${formatCurrency(discount)}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.statusActive,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
               const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: onConfirm,
-                child: Text(confirmLabel),
-              ),
+              ElevatedButton(onPressed: onConfirm, child: Text(confirmLabel)),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
                   onPressed: onSkip,
-                  child: Text(skipLabel, style: const TextStyle(color: AppTheme.inkSoft)),
+                  child: Text(
+                    skipLabel,
+                    style: const TextStyle(color: AppTheme.inkSoft),
+                  ),
                 ),
               ),
             ],
@@ -1487,7 +2243,11 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink),
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.ink,
+          ),
         ),
         const SizedBox(height: 8),
         const Divider(color: AppTheme.border, height: 1),
@@ -1506,22 +2266,25 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final (bg, fg) = _statusColors(status);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
       child: Text(
         status[0].toUpperCase() + status.substring(1),
-        style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13),
+        style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 11),
       ),
     );
   }
 
   static (Color, Color) _statusColors(String status) => switch (status) {
-        'active'    => (AppTheme.statusActiveBg, AppTheme.statusActive),
-        'frozen'    => (AppTheme.statusNeutralBg, AppTheme.statusNeutral),
-        'expired'   => (AppTheme.statusWarnBg, AppTheme.statusWarn),
-        'cancelled' => (AppTheme.statusDangerBg, AppTheme.statusDanger),
-        _           => (AppTheme.statusNeutralBg, AppTheme.statusNeutral),
-      };
+    'active' => (AppTheme.statusActiveBg, AppTheme.statusActive),
+    'frozen' => (AppTheme.statusNeutralBg, AppTheme.statusNeutral),
+    'expired' => (AppTheme.statusWarnBg, AppTheme.statusWarn),
+    'cancelled' => (AppTheme.statusDangerBg, AppTheme.statusDanger),
+    _ => (AppTheme.statusNeutralBg, AppTheme.statusNeutral),
+  };
 }
 
 // ── Info Row ──────────────────────────────────────────────────────────────────
@@ -1541,10 +2304,24 @@ class _InfoRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 100,
-            child: Text(label, style: const TextStyle(color: AppTheme.inkSoft, fontSize: 13, fontWeight: FontWeight.w500)),
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppTheme.inkSoft,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
           Expanded(
-            child: Text(value, style: TextStyle(fontWeight: FontWeight.w600, color: valueColor ?? AppTheme.ink, fontSize: 13)),
+            child: Text(
+              value,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: valueColor ?? AppTheme.ink,
+                fontSize: 13,
+              ),
+            ),
           ),
         ],
       ),
@@ -1556,7 +2333,11 @@ class _BiometricIdRow extends StatelessWidget {
   final Member member;
   final bool canEdit;
   final VoidCallback? onTap;
-  const _BiometricIdRow({required this.member, required this.canEdit, this.onTap});
+  const _BiometricIdRow({
+    required this.member,
+    required this.canEdit,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1568,14 +2349,23 @@ class _BiometricIdRow extends StatelessWidget {
         children: [
           const SizedBox(
             width: 100,
-            child: Text('Biometric ID', style: TextStyle(color: AppTheme.inkSoft, fontSize: 13, fontWeight: FontWeight.w500)),
+            child: Text(
+              'Biometric ID',
+              style: TextStyle(
+                color: AppTheme.inkSoft,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
           Expanded(
             child: Text(
               (value == null || value.isEmpty) ? 'Not set' : value,
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: (value == null || value.isEmpty) ? AppTheme.inkHint : AppTheme.ink,
+                color: (value == null || value.isEmpty)
+                    ? AppTheme.inkHint
+                    : AppTheme.ink,
                 fontSize: 13,
               ),
             ),
@@ -1583,7 +2373,11 @@ class _BiometricIdRow extends StatelessWidget {
           if (canEdit)
             GestureDetector(
               onTap: onTap,
-              child: const Icon(Icons.edit_outlined, size: 16, color: AppTheme.inkHint),
+              child: const Icon(
+                AppIcons.edit,
+                size: 16,
+                color: AppTheme.inkHint,
+              ),
             ),
         ],
       ),
@@ -1602,8 +2396,8 @@ class _EditMemberSheet extends StatefulWidget {
 }
 
 class _EditMemberSheetState extends State<_EditMemberSheet> {
-  late final TextEditingController _firstCtrl;
-  late final TextEditingController _lastCtrl;
+  // One name box, split back into first/last on save — same as Add member.
+  late final TextEditingController _nameCtrl;
   late final TextEditingController _emailCtrl;
   late final TextEditingController _phoneCtrl;
   late final TextEditingController _customIdCtrl;
@@ -1618,14 +2412,23 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   String? _joinedAt;
   File? _avatarFile;
   bool _loading = false;
+  bool _moreDetails = false;
+
+  // "Rohit Sharma" → ("Rohit", "Sharma"); a single word keeps last_name empty.
+  (String, String) get _splitName {
+    final parts = _nameCtrl.text.trim().split(RegExp(r'\s+'))
+      ..removeWhere((s) => s.isEmpty);
+    if (parts.isEmpty) return ('', '');
+    if (parts.length == 1) return (parts.first, '');
+    return (parts.first, parts.sublist(1).join(' '));
+  }
 
   @override
   void initState() {
     super.initState();
     final m = widget.member;
-    _firstCtrl = TextEditingController(text: m.firstName);
+    _nameCtrl = TextEditingController(text: m.fullName.trim());
     _emailCtrl = TextEditingController(text: m.email);
-    _lastCtrl = TextEditingController(text: m.lastName);
     _phoneCtrl = TextEditingController(text: m.phone ?? '');
     _customIdCtrl = TextEditingController(text: m.customId ?? '');
     _biometricIdCtrl = TextEditingController(text: m.biometricId ?? '');
@@ -1633,17 +2436,21 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     _status = m.status;
     _nextPaymentDate = m.nextPaymentDate;
     _billingIntervalMonths =
-        m.currentMembership?.plan?.resolvedIntervalMonths ?? m.billingIntervalMonths;
+        m.currentMembership?.plan?.resolvedIntervalMonths ??
+        m.billingIntervalMonths;
     _joinedAt = m.joinedAt;
   }
 
   @override
   void dispose() {
-    _firstCtrl.dispose(); _lastCtrl.dispose(); _emailCtrl.dispose(); _phoneCtrl.dispose();
-    _customIdCtrl.dispose(); _biometricIdCtrl.dispose(); _notesCtrl.dispose();
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _phoneCtrl.dispose();
+    _customIdCtrl.dispose();
+    _biometricIdCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
-
 
   Future<void> _pickAvatar() async {
     final source = await showAdaptiveSheet<ImageSource>(
@@ -1665,20 +2472,33 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
       ),
     );
     if (source == null) return;
-    final picked = await ImagePicker().pickImage(source: source, maxWidth: 800, imageQuality: 85);
-    if (picked != null && mounted) setState(() => _avatarFile = File(picked.path));
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 800,
+      imageQuality: 85,
+    );
+    if (picked != null && mounted)
+      setState(() => _avatarFile = File(picked.path));
   }
 
   Future<String?> _uploadAvatar() async {
     if (_avatarFile == null) return null;
     final gymId = widget.member.gymId;
     final ext = _avatarFile!.path.split('.').last.toLowerCase();
-    final mime = ext == 'png' ? 'image/png' : ext == 'webp' ? 'image/webp' : 'image/jpeg';
+    final mime = ext == 'png'
+        ? 'image/png'
+        : ext == 'webp'
+        ? 'image/webp'
+        : 'image/jpeg';
     // Stable per-member path: re-uploads overwrite the same object instead of
     // accumulating a new orphaned file (and egress cost) on every edit.
     final filename = '$gymId/${widget.member.id}.$ext';
     final bytes = await _avatarFile!.readAsBytes();
-    await MemberPhotoService.upload(path: filename, bytes: bytes, contentType: mime);
+    await MemberPhotoService.upload(
+      path: filename,
+      bytes: bytes,
+      contentType: mime,
+    );
     // Stored value is the bare path; display resolves it via the photo Worker.
     return filename;
   }
@@ -1702,33 +2522,47 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     final email = _emailCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
     if (email.isNotEmpty && !isValidEmail(email)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a valid email address')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid email address')),
+      );
       return;
     }
     if (phone.isNotEmpty && !isValidIndianMobile(phone)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a valid 10-digit mobile number')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid 10-digit mobile number')),
+      );
       return;
     }
     setState(() => _loading = true);
     try {
       final newAvatarUrl = await _uploadAvatar();
 
-      await Supabase.instance.client.from('members').update({
-        'first_name': _firstCtrl.text.trim(),
-        'last_name': _lastCtrl.text.trim(),
-        'email': _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
-        if (_phoneCtrl.text.trim().isNotEmpty) 'phone': _phoneCtrl.text.trim() else 'phone': null,
-        'custom_id': _customIdCtrl.text.trim().isEmpty ? null : _customIdCtrl.text.trim(),
-        'biometric_id': _normalizeBiometricId(_biometricIdCtrl.text),
-        'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-        'status': _status,
-        if (_joinedAt != null) 'joined_at': _joinedAt,
-        'next_payment_date': _nextPaymentDate,
-        'billing_interval_months': _billingIntervalMonths,
-        if (newAvatarUrl != null) 'avatar_url': newAvatarUrl,
-      }).eq('id', widget.member.id);
+      await Supabase.instance.client
+          .from('members')
+          .update({
+            'first_name': _splitName.$1,
+            'last_name': _splitName.$2,
+            'email': _emailCtrl.text.trim().isEmpty
+                ? null
+                : _emailCtrl.text.trim(),
+            if (_phoneCtrl.text.trim().isNotEmpty)
+              'phone': phoneWithCountryCode(_phoneCtrl.text)
+            else
+              'phone': null,
+            'custom_id': _customIdCtrl.text.trim().isEmpty
+                ? null
+                : _customIdCtrl.text.trim(),
+            'biometric_id': _normalizeBiometricId(_biometricIdCtrl.text),
+            'notes': _notesCtrl.text.trim().isEmpty
+                ? null
+                : _notesCtrl.text.trim(),
+            'status': _status,
+            if (_joinedAt != null) 'joined_at': _joinedAt,
+            'next_payment_date': _nextPaymentDate,
+            'billing_interval_months': _billingIntervalMonths,
+            if (newAvatarUrl != null) 'avatar_url': newAvatarUrl,
+          })
+          .eq('id', widget.member.id);
 
       if (mounted) Navigator.pop(context);
     } on PostgrestException catch (e) {
@@ -1736,13 +2570,16 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
         final msg = e.code == '23505'
             ? 'A member with this ID already exists.'
             : 'Failed to save. Please try again.';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
         setState(() => _loading = false);
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Failed to save. Please try again.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save. Please try again.')),
+        );
         setState(() => _loading = false);
       }
     }
@@ -1750,165 +2587,284 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SheetHeader(title: 'Edit member'),
-            const SizedBox(height: 12),
-            // Photo picker
-            Center(
-              child: GestureDetector(
-                onTap: _pickAvatar,
-                child: Stack(
-                  children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface2,
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: _avatarFile != null
-                          ? Image.file(_avatarFile!, fit: BoxFit.cover)
-                          : MemberPhoto(
-                              stored: widget.member.avatarUrl,
-                              fallback: Center(child: Text(initials(widget.member.firstName, widget.member.lastName),
-                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22, color: AppTheme.ink))),
-                            ),
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: Container(
-                        width: 26,
-                        height: 26,
-                        decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(9)),
-                        child: const Icon(Icons.edit_outlined, size: 14, color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SheetTopBar(title: 'Edit member'),
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('First name'),
-                    TextFormField(controller: _firstCtrl),
-                  ]),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('Last name'),
-                    TextFormField(controller: _lastCtrl),
-                  ]),
-                ),
+                const Text('1 · MEMBER', style: AppTheme.kicker),
+                const SizedBox(height: 8),
+                SheetCard(child: _memberSection()),
+                const SizedBox(height: 18),
+                const Text('2 · MEMBERSHIP', style: AppTheme.kicker),
+                const SizedBox(height: 8),
+                SheetCard(child: _membershipSection()),
+                const SizedBox(height: 16),
+                _moreDetailsSection(),
               ],
             ),
-            const SizedBox(height: 14),
-            const FieldLabel('Email (optional)'),
-            TextFormField(
-              controller: _emailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              onChanged: (_) => setState(() {}),
-            ),
-            if (_emailCtrl.text.trim().isEmpty) ...[
-              const SizedBox(height: 4),
-              const Text(
-                '⚠ Without email, the member portal won\'t be available and check-ins must be done manually.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
-              ),
-            ],
-            const SizedBox(height: 14),
-            const FieldLabel('Phone (optional)'),
-            TextFormField(
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 14),
-            const FieldLabel('Member ID (optional)'),
-            TextFormField(controller: _customIdCtrl, maxLength: 50, decoration: const InputDecoration(hintText: 'e.g. GYM-001', counterText: '')),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _biometricIdCtrl,
-              maxLength: 20,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Biometric Device ID (optional)',
-                hintText: 'e.g. 001',
-                counterText: '',
-                prefixIcon: Icon(Icons.qr_code_outlined),
-                helperText: 'Employee number enrolled on fingerprint machine',
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('Joining date'),
-                    InkWell(
-                      onTap: () => _pickDate(isJoined: true),
-                      borderRadius: BorderRadius.circular(14),
-                      child: InputDecorator(
-                        decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
-                        child: Text(
-                          _joinedAt != null ? formatDateFromString(_joinedAt) : 'Not set',
-                          style: TextStyle(color: _joinedAt != null ? AppTheme.ink : AppTheme.inkHint),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('Next payment'),
-                    InkWell(
-                      onTap: () => _pickDate(isJoined: false),
-                      borderRadius: BorderRadius.circular(14),
-                      child: InputDecorator(
-                        decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
-                        child: Text(
-                          _nextPaymentDate != null ? formatDateFromString(_nextPaymentDate) : 'Not set',
-                          style: TextStyle(color: _nextPaymentDate != null ? AppTheme.ink : AppTheme.inkHint),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            const FieldLabel('Status'),
-            DropdownButtonFormField<String>(
-              value: _status,
-              items: ['active', 'frozen', 'expired', 'cancelled']
-                  .map((s) => DropdownMenuItem(value: s, child: Text(s[0].toUpperCase() + s.substring(1))))
-                  .toList(),
-              onChanged: (v) => setState(() => _status = v!),
-            ),
-            const SizedBox(height: 14),
-            const FieldLabel('Notes'),
-            TextFormField(controller: _notesCtrl, maxLines: 2),
-            const SizedBox(height: 20),
-            ElevatedButton(
+          ),
+        ),
+        Container(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            12,
+            16,
+            MediaQuery.of(context).viewInsets.bottom + 16,
+          ),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            border: Border(top: BorderSide(color: AppTheme.border)),
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
               onPressed: _loading ? null : _save,
               child: _loading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
                   : const Text('Save changes'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _memberSection() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: _pickAvatar,
+          child: Stack(
+            children: [
+              Container(
+                width: 78,
+                height: 78,
+                decoration: BoxDecoration(
+                  color: AppTheme.surface2,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: _avatarFile != null
+                    ? Image.file(_avatarFile!, fit: BoxFit.cover)
+                    : MemberPhoto(
+                        stored: widget.member.avatarUrl,
+                        fallback: Center(
+                          child: Text(
+                            initials(
+                              widget.member.firstName,
+                              widget.member.lastName,
+                            ),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 22,
+                              color: AppTheme.ink,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    AppIcons.edit,
+                    size: 13,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            children: [
+              TextFormField(
+                controller: _nameCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(hintText: 'Full name'),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  prefixIcon: Padding(
+                    padding: EdgeInsets.only(left: 12, right: 4),
+                    child: Text(
+                      '+91',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                  ),
+                  prefixIconConstraints: BoxConstraints(minWidth: 0),
+                  hintText: 'Mobile number',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _membershipSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: BoxField(
+                label: 'Joining date',
+                value: _joinedAt != null
+                    ? formatDateFromString(_joinedAt)
+                    : 'Not set',
+                onTap: () => _pickDate(isJoined: true),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: BoxField(
+                label: 'Next payment',
+                value: _nextPaymentDate != null
+                    ? formatDateFromString(_nextPaymentDate)
+                    : 'Not set',
+                onTap: () => _pickDate(isJoined: false),
+              ),
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        const Text(
+          'Status',
+          style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final s in const [
+              ('active', 'Active'),
+              ('frozen', 'Frozen'),
+              ('expired', 'Expired'),
+              ('cancelled', 'Cancelled'),
+            ])
+              SelectChip(
+                label: s.$2,
+                selected: _status == s.$1,
+                onTap: () => setState(() => _status = s.$1),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _moreDetailsSection() {
+    if (!_moreDetails) {
+      return GestureDetector(
+        onTap: () => setState(() => _moreDetails = true),
+        behavior: HitTestBehavior.opaque,
+        child: Row(
+          children: const [
+            Icon(AppIcons.addCircle, size: 20, color: AppTheme.accent),
+            SizedBox(width: 8),
+            Text(
+              'More details',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.accent,
+              ),
+            ),
+            SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Email, member ID, biometric, notes',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return SheetCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextFormField(
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(labelText: 'Email'),
+          ),
+          if (_emailCtrl.text.trim().isEmpty) ...[
+            const SizedBox(height: 4),
+            const Text(
+              '⚠ Without email, the member portal won\'t be available and check-ins must be done manually.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _customIdCtrl,
+            maxLength: 50,
+            decoration: const InputDecoration(
+              labelText: 'Member ID',
+              hintText: 'e.g. GYM-001',
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _biometricIdCtrl,
+            maxLength: 20,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Biometric device ID',
+              hintText: 'e.g. 001',
+              counterText: '',
+              helperText: 'Employee number enrolled on fingerprint machine',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _notesCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(labelText: 'Notes'),
+          ),
+        ],
       ),
     );
   }
@@ -1939,25 +2895,33 @@ class _ActionRow extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        child: Row(children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(11)),
-            child: Icon(icon, size: 17, color: iconColor),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: onTap == null ? AppTheme.inkHint : (labelColor ?? AppTheme.ink),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: iconBg,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(icon, size: 17, color: iconColor),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: onTap == null
+                      ? AppTheme.inkHint
+                      : (labelColor ?? AppTheme.ink),
+                ),
               ),
             ),
-          ),
-          Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
-        ]),
+            Icon(AppIcons.chevronRight, size: 18, color: AppTheme.inkHint),
+          ],
+        ),
       ),
     );
   }
@@ -1986,26 +2950,41 @@ class _QuickLinkRow extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        child: Row(children: [
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
-            child: Icon(icon, size: 18, color: iconColor),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(label,
-              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(summary,
-              maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft)),
-          ),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right, size: 18, color: AppTheme.inkHint),
-        ]),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: iconBg,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, size: 18, color: iconColor),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.ink,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                summary,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(AppIcons.chevronRight, size: 18, color: AppTheme.inkHint),
+          ],
+        ),
       ),
     );
   }
@@ -2013,96 +2992,206 @@ class _QuickLinkRow extends StatelessWidget {
 
 // ── Payment history page ──────────────────────────────────────────────────────
 
-class _PaymentHistoryPage extends ConsumerWidget {
+class _MemberActivityBody extends ConsumerWidget {
+  final String memberId;
+  const _MemberActivityBody({required this.memberId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activity = ref.watch(_memberActivityProvider(memberId));
+
+    return activity.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, _) => const ErrorState(what: 'this member\'s activity'),
+      data: (list) {
+        if (list.isEmpty) {
+          return const StateMessage(
+            icon: AppIcons.historyToggleOff,
+            title: 'No activity yet',
+            body: 'Changes made to this member will show up here.',
+          );
+        }
+        return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: list.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (_, i) {
+            final item = list[i];
+            return ListTile(
+              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+              leading: const CircleAvatar(
+                backgroundColor: AppTheme.activeBg,
+                child: Icon(AppIcons.history, color: AppTheme.ink, size: 19),
+              ),
+              title: Text(
+                item.actionLabel,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: Text(
+                [
+                  item.actorRole != null
+                      ? '${item.actorName} (${item.actorRole![0].toUpperCase()}${item.actorRole!.substring(1)})'
+                      : item.actorName,
+                  DateFormat('d MMM, h:mm a').format(item.createdAt),
+                ].join(' · '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: item.amount == null
+                  ? const Icon(AppIcons.chevronRight, size: 18)
+                  : Text(
+                      formatCurrency(item.amount!),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+              onTap: () => context.push('/staff/activity-log/${item.id}'),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _PaymentHistoryBody extends ConsumerWidget {
   final String memberId;
   final String memberName;
-  const _PaymentHistoryPage({required this.memberId, required this.memberName});
+  const _PaymentHistoryBody({required this.memberId, required this.memberName});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final invoices = ref.watch(_memberInvoicesProvider(memberId));
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(title: Text(memberName, maxLines: 1, overflow: TextOverflow.ellipsis)),
-      body: invoices.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (list) {
-          if (list.isEmpty) {
-            return const Center(child: Text('No payments yet',
-              style: TextStyle(color: AppTheme.inkHint)));
-          }
-          return ListView(
-            padding: const EdgeInsets.all(14),
-            children: [
-              Container(
-                decoration: AppTheme.cardDecoration(),
-                child: Column(
-                  children: list.asMap().entries.map((e) {
-                    final inv = e.value;
-                    final status = inv['status'] as String? ?? 'open';
-                    final isPaid = status == 'paid';
-                    final isPartial = status == 'partial';
-                    final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
-                    final invPayments = (inv['payments'] as List?) ?? const [];
-                    final paidSoFar = invPayments
-                        .where((p) => (p as Map)['status'] == 'succeeded')
-                        .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
-                    final balanceDue = (amount - paidSoFar).clamp(0, amount);
-                    final dateStr = isPaid
-                        ? inv['paid_at'] as String?
-                        : inv['due_at'] as String?;
-                    return Container(
-                      decoration: BoxDecoration(
-                        border: e.key == list.length - 1
-                            ? null
-                            : const Border(bottom: BorderSide(color: AppTheme.border, width: 0.7)),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      child: Row(children: [
+    return invoices.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, _) => const ErrorState(what: 'payment history'),
+      data: (list) {
+        if (list.isEmpty) {
+          return const StateMessage(
+            icon: AppIcons.receipt,
+            title: 'No payments yet',
+            body: 'Payments you collect from this member will be listed here.',
+          );
+        }
+        return ListView(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          children: [
+            Container(
+              decoration: AppTheme.cardDecoration(),
+              child: Column(
+                children: list.asMap().entries.map((e) {
+                  final inv = e.value;
+                  final status = inv['status'] as String? ?? 'open';
+                  final isPaid = status == 'paid';
+                  final isPartial = status == 'partial';
+                  final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
+                  final invPayments = (inv['payments'] as List?) ?? const [];
+                  final paidSoFar = invPayments
+                      .where((p) => (p as Map)['status'] == 'succeeded')
+                      .fold<double>(
+                        0,
+                        (s, p) => s + ((p as Map)['amount'] as num).toDouble(),
+                      );
+                  final balanceDue = (amount - paidSoFar).clamp(0, amount);
+                  final dateStr = isPaid
+                      ? inv['paid_at'] as String?
+                      : inv['due_at'] as String?;
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: e.key == list.length - 1
+                          ? null
+                          : const Border(
+                              bottom: BorderSide(
+                                color: AppTheme.border,
+                                width: 0.7,
+                              ),
+                            ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
                         Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(
-                              inv['description'] as String? ?? 'Membership payment',
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                            if (dateStr != null) ...[
-                              const SizedBox(height: 2),
-                              Text('${isPaid ? 'Paid' : 'Due'} ${formatDateFromString(dateStr)}',
-                                style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                inv['description'] as String? ??
+                                    'Membership payment',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.ink,
+                                ),
+                              ),
+                              if (dateStr != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${isPaid ? 'Paid' : 'Due'} ${formatDateFromString(dateStr)}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.inkSoft,
+                                  ),
+                                ),
+                              ],
                             ],
-                          ]),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                          Text(
-                            isPartial
-                                ? '${formatCurrency(balanceDue)} due'
-                                : formatCurrency(amount),
-                            style: AppTheme.numberStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
-                          if (isPartial) ...[
-                            const SizedBox(height: 2),
-                            Text('${formatCurrency(paidSoFar)} of ${formatCurrency(amount)} paid',
-                              style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft)),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              isPartial
+                                  ? '${formatCurrency(balanceDue)} due'
+                                  : formatCurrency(amount),
+                              style: AppTheme.numberStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            if (isPartial) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '${formatCurrency(paidSoFar)} of ${formatCurrency(amount)} paid',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.inkSoft,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 3),
+                            if (isPaid)
+                              StatusPill.active(label: 'Paid')
+                            else if (isPartial)
+                              StatusPill.warn(label: 'Partial')
+                            else
+                              StatusPill.warn(
+                                label:
+                                    status[0].toUpperCase() +
+                                    status.substring(1),
+                              ),
                           ],
-                          const SizedBox(height: 3),
-                          if (isPaid)
-                            StatusPill.active(label: 'Paid')
-                          else if (isPartial)
-                            StatusPill.warn(label: 'Partial')
-                          else
-                            StatusPill.warn(label: status[0].toUpperCase() + status.substring(1)),
-                        ]),
-                      ]),
-                    );
-                  }).toList(),
-                ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
               ),
-            ],
-          );
-        },
-      ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

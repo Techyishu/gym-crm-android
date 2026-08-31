@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../core/access/role_access.dart';
+import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/billing/local_payment_guard.dart';
@@ -19,6 +19,7 @@ import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../members/upcoming_payments_screen.dart' show QuickCollectSheet;
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
@@ -96,7 +97,7 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     client
         .from('invoices')
         .select(
-          'id, amount, status, due_at, member_id, members(first_name, last_name, email, phone), payments(amount, status)',
+          'id, amount, status, due_at, member_id, members(first_name, last_name, email, phone, next_payment_date, memberships(status, membership_plans(name))), payments(amount, status)',
         )
         .eq('gym_id', gymId)
         .inFilter('status', ['open', 'partial'])
@@ -118,7 +119,7 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     client
         .from('members')
         .select(
-          'id, first_name, last_name, next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
+          'id, first_name, last_name, phone, next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
         )
         .eq('gym_id', gymId)
         .not('status', 'eq', 'cancelled')
@@ -275,6 +276,12 @@ class _TxnItem {
   final DateTime sortKey;
   final Map<String, dynamic> raw;
 
+  /// Dues-queue extras — the canvas row reads
+  /// "Monthly · overdue 15 days · exp 26 Sep".
+  final String planName;
+  final DateTime? expiry;
+  final String phone;
+
   const _TxnItem._({
     required this.isDue,
     required this.invoiceId,
@@ -285,7 +292,51 @@ class _TxnItem {
     required this.color,
     required this.sortKey,
     required this.raw,
+    this.planName = '',
+    this.expiry,
+    this.phone = '',
   });
+
+  // Days past the due date, 0 when not yet overdue.
+  int get overdueDays {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = DateTime(sortKey.year, sortKey.month, sortKey.day);
+    final diff = today.difference(date).inDays;
+    return diff > 0 ? diff : 0;
+  }
+
+  bool get isOverdue => isDue && !isUpcoming;
+
+  // "Monthly · overdue 15 days · exp 26 Sep" — every part optional, because
+  // a projected renewal and a partial invoice carry different fields.
+  String get duesLine {
+    final parts = <String>[
+      if (planName.isNotEmpty) planName,
+      if (isPartial) 'partially paid',
+      if (overdueDays > 0)
+        'overdue $overdueDays day${overdueDays == 1 ? '' : 's'}'
+      else if (isUpcoming)
+        'due ${DateFormat('d MMM').format(sortKey)}'
+      else
+        'due today',
+      if (expiry != null) 'exp ${DateFormat('d MMM').format(expiry!)}',
+    ];
+    return parts.join(' · ');
+  }
+
+  // Active plan name off a joined memberships list (invoice or member row).
+  static String _planNameOf(Map<String, dynamic>? source) {
+    final memberships = (source?['memberships'] as List?) ?? const [];
+    for (final m in memberships) {
+      final map = (m as Map).cast<String, dynamic>();
+      if (map['status'] != 'active') continue;
+      final plan = map['membership_plans'] as Map?;
+      final name = plan?['name'] as String?;
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return '';
+  }
 
   // No invoice exists yet for this due — Collect creates one on the spot.
   bool get needsInvoice => isDue && invoiceId.isEmpty;
@@ -354,6 +405,9 @@ class _TxnItem {
       color: s.color,
       sortKey: due ?? DateTime.now(),
       raw: inv,
+      planName: _planNameOf(member),
+      expiry: DateTime.tryParse(member?['next_payment_date'] as String? ?? ''),
+      phone: member?['phone'] as String? ?? '',
     );
   }
 
@@ -371,6 +425,9 @@ class _TxnItem {
       color: s.color,
       sortKey: due ?? DateTime.now(),
       raw: member,
+      planName: _planNameOf(member),
+      expiry: due,
+      phone: member['phone'] as String? ?? '',
     );
   }
 }
@@ -383,315 +440,247 @@ class BillingScreen extends ConsumerStatefulWidget {
 }
 
 class _BillingScreenState extends ConsumerState<BillingScreen> {
-  // 'all' | 'due' | 'collected'
-  String _filter = 'all';
+  // Dues · Payments · Invoices · Plans
+  static const _tabs = ['Dues', 'Payments', 'Invoices', 'Plans'];
+  int _tab = 0;
+
+  // Sub-filter inside the Dues tab: 'overdue' | 'week' | 'all'.
+  String _bucket = 'overdue';
 
   @override
   Widget build(BuildContext context) {
     final feed = ref.watch(_billingFeedProvider);
-    final isWide = ResponsiveContent.isWide(context);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: isWide ? _buildWide(context, feed) : _buildNarrow(context, feed),
+        child: ResponsiveContent(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Money',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.ink,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    feed.when(
+                      loading: () => const _BalanceCardSkeleton(),
+                      error: (_, _) => const _BalanceCardSkeleton(),
+                      data: (data) => _BalanceCard(
+                        dueTotal: data.dueTotal,
+                        dueMembers: data.dueMembers,
+                        collectedMonth:
+                            data.collected[BillingPeriod.month] ?? 0,
+                        onDue: () => setState(() {
+                          _tab = 0;
+                          _bucket = 'overdue';
+                        }),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    UnderlineTabs(
+                      tabs: _tabs,
+                      selectedIndex: _tab,
+                      onChanged: (i) => setState(() => _tab = i),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _tab == 3
+                    ? const _PlansBody()
+                    : RefreshIndicator(
+                        color: AppTheme.accent,
+                        onRefresh: () async =>
+                            ref.invalidate(_billingFeedProvider),
+                        child: feed.when(
+                          loading: _loadingList,
+                          error: (_, _) => ListView(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                            children: [
+                              StateMessage(
+                                icon: AppIcons.cloudOff,
+                                tint: AppTheme.statusDanger,
+                                tintBg: AppTheme.statusDangerBg,
+                                title: 'Could not load payments',
+                                body:
+                                    'Check your connection, then pull down to retry.',
+                                actionLabel: 'Retry',
+                                onAction: () =>
+                                    ref.invalidate(_billingFeedProvider),
+                              ),
+                            ],
+                          ),
+                          data: (data) => _tab == 0
+                              ? _duesTab(context, data)
+                              : _ledgerTab(context, data),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  // Wide screens: balance card + filters pinned on the left, transaction
-  // list scrolls independently on the right — two columns instead of one
-  // long vertical stack.
-  Widget _buildWide(BuildContext context, AsyncValue<_BillingFeed> feed) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _loadingList() => ListView.builder(
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+    itemCount: 6,
+    itemBuilder: (_, _) => Shimmer.fromColors(
+      baseColor: const Color(0xFFE8E8E8),
+      highlightColor: const Color(0xFFF5F5F5),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        height: 68,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    ),
+  );
+
+  // ── Dues queue ────────────────────────────────────────────────────────────
+
+  Widget _duesTab(BuildContext context, _BillingFeed data) {
+    final all = data.items.where((t) => t.isDue).toList()
+      ..sort((a, b) => a.sortKey.compareTo(b.sortKey));
+    final overdue = all.where((t) => t.isOverdue).toList();
+    final week = all.where((t) => t.isUpcoming).toList();
+    final rows = switch (_bucket) {
+      'overdue' => overdue,
+      'week' => week,
+      _ => all,
+    };
+
+    final canCollect = ref.watch(
+      gymPermissionProvider((GymModule.payments, GymAction.add)),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
-        SizedBox(
-          width: 340,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Billing',
-                  style: TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.ink,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                feed.when(
-                  loading: () => const _BalanceCardSkeleton(),
-                  error: (_, __) => const _BalanceCardSkeleton(),
-                  data: (data) => _BalanceCard(
-                    dueTotal: data.dueTotal,
-                    dueMembers: data.dueMembers,
-                    overdueCount: data.overdueCount,
-                    collectedMonth: data.collected[BillingPeriod.month] ?? 0,
-                    growthPct: data.growthPct[BillingPeriod.month],
-                    dueCount: data.dueCount,
-                    onRecord: () => setState(() => _filter = 'due'),
-                    onInvoice: () => _showCreateInvoiceSheet(context),
-                    onNewPlan: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const _PlansTab()),
-                    ),
-                    onDue: () => setState(() => _filter = 'due'),
-                  ),
-                ),
-              ],
+        Row(
+          children: [
+            PillChip(
+              label: 'Overdue ${overdue.length}',
+              selected: _bucket == 'overdue',
+              onTap: () => setState(() => _bucket = 'overdue'),
             ),
-          ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            color: AppTheme.accent,
-            onRefresh: () async => ref.invalidate(_billingFeedProvider),
-            child: CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(0, 10, 16, 4),
-                  sliver: SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Payment activity',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.ink,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            PillChip(
-                              label: 'All activity',
-                              selected: _filter == 'all',
-                              onTap: () => setState(() => _filter = 'all'),
-                            ),
-                            const SizedBox(width: 8),
-                            PillChip(
-                              label: 'To collect',
-                              selected: _filter == 'due',
-                              onTap: () => setState(() => _filter = 'due'),
-                            ),
-                            const SizedBox(width: 8),
-                            PillChip(
-                              label: 'Collected',
-                              selected: _filter == 'collected',
-                              onTap: () =>
-                                  setState(() => _filter = 'collected'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                ..._transactionSlivers(context, feed, leftPad: 0),
-              ],
+            const SizedBox(width: 8),
+            PillChip(
+              label: 'Due this week ${week.length}',
+              selected: _bucket == 'week',
+              onTap: () => setState(() => _bucket = 'week'),
             ),
-          ),
+            const SizedBox(width: 8),
+            PillChip(
+              label: 'All ${all.length}',
+              selected: _bucket == 'all',
+              onTap: () => setState(() => _bucket = 'all'),
+            ),
+          ],
         ),
+        const SizedBox(height: 10),
+        if (rows.isEmpty)
+          StateMessage(
+            icon: AppIcons.checkCircle,
+            tint: AppTheme.statusActive,
+            tintBg: AppTheme.statusActiveBg,
+            title: 'Everyone has paid',
+            body:
+                'No outstanding dues today. Renewals due this week will show '
+                'up here.',
+            actionLabel: 'See upcoming renewals',
+            onAction: () => context.push('/staff/upcoming-payments'),
+          )
+        else
+          CardList(
+            children: [
+              for (final item in rows)
+                _DueRow(
+                  item: item,
+                  onCollect: canCollect ? () => _collect(context, item) : null,
+                ),
+            ],
+          ),
       ],
     );
   }
 
-  Widget _buildNarrow(BuildContext context, AsyncValue<_BillingFeed> feed) {
-    return RefreshIndicator(
-      color: AppTheme.accent,
-      onRefresh: () async => ref.invalidate(_billingFeedProvider),
-      child: CustomScrollView(
-        slivers: [
-          const SliverPadding(
-            padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
-            sliver: SliverToBoxAdapter(
-              child: Text(
-                'Billing',
-                style: TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.ink,
-                  letterSpacing: -0.5,
-                ),
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            sliver: SliverToBoxAdapter(
-              child: feed.when(
-                loading: () => const _BalanceCardSkeleton(),
-                error: (_, __) => const _BalanceCardSkeleton(),
-                data: (data) => _BalanceCard(
-                  dueTotal: data.dueTotal,
-                  dueMembers: data.dueMembers,
-                  overdueCount: data.overdueCount,
-                  collectedMonth: data.collected[BillingPeriod.month] ?? 0,
-                  growthPct: data.growthPct[BillingPeriod.month],
-                  dueCount: data.dueCount,
-                  onRecord: () => setState(() => _filter = 'due'),
-                  onInvoice: () => _showCreateInvoiceSheet(context),
-                  onNewPlan: () => Navigator.of(
-                    context,
-                  ).push(MaterialPageRoute(builder: (_) => const _PlansTab())),
-                  onDue: () => setState(() => _filter = 'due'),
-                ),
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Payment activity',
+  // ── Payments / Invoices ledgers ───────────────────────────────────────────
+
+  Widget _ledgerTab(BuildContext context, _BillingFeed data) {
+    // Payments = money already collected. Invoices = the invoice records
+    // themselves, i.e. open/partial bills (projected renewals have no
+    // invoice row yet, so they only ever appear in Dues).
+    final items = _tab == 1
+        ? data.items.where((t) => !t.isDue).toList()
+        : data.items.where((t) => t.isDue && t.invoiceId.isNotEmpty).toList();
+
+    final canAdd = ref.watch(
+      gymPermissionProvider((GymModule.payments, GymAction.add)),
+    );
+    final canDelete = ref.watch(
+      gymPermissionProvider((GymModule.payments, GymAction.delete)),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      children: [
+        if (_tab == 2 && canAdd) ...[
+          GestureDetector(
+            onTap: () => _showCreateInvoiceSheet(context),
+            child: DottedBorderBox(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(AppIcons.add, size: 18, color: AppTheme.accent),
+                  SizedBox(width: 6),
+                  Text(
+                    'New invoice',
                     style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.ink,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.accent,
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      PillChip(
-                        label: 'All activity',
-                        selected: _filter == 'all',
-                        onTap: () => setState(() => _filter = 'all'),
-                      ),
-                      const SizedBox(width: 8),
-                      PillChip(
-                        label: 'To collect',
-                        selected: _filter == 'due',
-                        onTap: () => setState(() => _filter = 'due'),
-                      ),
-                      const SizedBox(width: 8),
-                      PillChip(
-                        label: 'Collected',
-                        selected: _filter == 'collected',
-                        onTap: () => setState(() => _filter = 'collected'),
-                      ),
-                    ],
                   ),
                 ],
               ),
             ),
           ),
-          ..._transactionSlivers(context, feed, leftPad: 16),
+          const SizedBox(height: 12),
         ],
-      ),
-    );
-  }
-
-  // Shared between narrow (single CustomScrollView) and wide (right column's
-  // own CustomScrollView) layouts — same data, same _TxnCard rendering.
-  List<Widget> _transactionSlivers(
-    BuildContext context,
-    AsyncValue<_BillingFeed> feed, {
-    required double leftPad,
-  }) {
-    return [
-      feed.when(
-        loading: () => SliverPadding(
-          padding: EdgeInsets.fromLTRB(leftPad, 4, 16, 24),
-          sliver: SliverList.builder(
-            itemCount: 6,
-            itemBuilder: (_, __) => Shimmer.fromColors(
-              baseColor: const Color(0xFFE8E8E8),
-              highlightColor: const Color(0xFFF5F5F5),
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                height: 68,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
+        if (items.isEmpty)
+          StateMessage(
+            icon: AppIcons.receipt,
+            title: 'Nothing here yet',
+            body: _tab == 1
+                ? 'Payments appear here as soon as you record the first one.'
+                : 'Invoices you raise appear here.',
+          )
+        else
+          for (final item in items)
+            _TxnCard(
+              item: item,
+              onTap: () => _openInvoice(context, item),
+              onCollect: canAdd ? () => _collect(context, item) : null,
+              onDelete: canDelete && item.invoiceId.isNotEmpty
+                  ? () => _deleteInvoice(context, item)
+                  : null,
             ),
-          ),
-        ),
-        error: (_, __) => const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 40),
-            child: Center(
-              child: Text(
-                'Could not load transactions. Pull to retry.',
-                style: TextStyle(color: AppTheme.inkSoft),
-              ),
-            ),
-          ),
-        ),
-        data: (data) {
-          final today = DateTime.now();
-          final todayDate = DateTime(today.year, today.month, today.day);
-          final items = data.items.where((t) {
-            if (_filter == 'due') {
-              if (!t.isDue) return false;
-              // A partial invoice is already a genuine balance due. Unlike a
-              // future renewal, it must not disappear just because its due
-              // date is outside the upcoming-renewal window.
-              if (t.isPartial) return true;
-              final dueDate = DateTime(
-                t.sortKey.year,
-                t.sortKey.month,
-                t.sortKey.day,
-              );
-              final daysUntil = dueDate.difference(todayDate).inDays;
-              // Overdue members plus anyone due within the next
-              // _collectWindowDays — the upcoming ones are gated behind
-              // the "Collect early" confirmation (see _TxnItem.isUpcoming).
-              return daysUntil <= _collectWindowDays;
-            }
-            if (_filter == 'collected') return !t.isDue;
-            return true;
-          }).toList();
-          return _transactionListSliver(context, items, leftPad);
-        },
-      ),
-    ];
-  }
-
-  Widget _transactionListSliver(
-    BuildContext context,
-    List<_TxnItem> items,
-    double leftPad,
-  ) {
-    if (items.isEmpty) {
-      return const SliverToBoxAdapter(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 40),
-          child: Center(
-            child: Text(
-              'No transactions',
-              style: TextStyle(color: AppTheme.inkHint, fontSize: 14),
-            ),
-          ),
-        ),
-      );
-    }
-    final canDelete = RoleAccess.canDeleteInvoice(
-      ref.watch(staffRoleProvider).valueOrNull,
-    );
-    return SliverPadding(
-      padding: EdgeInsets.fromLTRB(leftPad, 4, 16, 24),
-      sliver: SliverList.builder(
-        itemCount: items.length,
-        itemBuilder: (_, i) => _TxnCard(
-          item: items[i],
-          onTap: () => _openInvoice(context, items[i]),
-          onCollect: () => _collect(context, items[i]),
-          onDelete: canDelete && items[i].invoiceId.isNotEmpty
-              ? () => _deleteInvoice(context, items[i])
-              : null,
-        ),
-      ),
+      ],
     );
   }
 
@@ -707,7 +696,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
       body:
           'This invoice and its payment records will be permanently deleted. This cannot be undone.',
       confirmLabel: 'Delete',
-      icon: Icons.delete_outline,
+      icon: AppIcons.delete,
     );
     if (ok != true) return;
     await Supabase.instance.client
@@ -754,175 +743,106 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 class _BalanceCard extends StatelessWidget {
   final double dueTotal;
   final int dueMembers;
-  final int overdueCount;
   final double collectedMonth;
-  final int? growthPct;
-  final int dueCount;
-  final VoidCallback onRecord;
-  final VoidCallback onInvoice;
-  final VoidCallback onNewPlan;
   final VoidCallback onDue;
   const _BalanceCard({
     required this.dueTotal,
     required this.dueMembers,
-    required this.overdueCount,
     required this.collectedMonth,
-    required this.growthPct,
-    required this.dueCount,
-    required this.onRecord,
-    required this.onInvoice,
-    required this.onNewPlan,
     required this.onDue,
   });
 
   @override
   Widget build(BuildContext context) {
+    final collectionRate = (collectedMonth + dueTotal) > 0
+        ? (collectedMonth / (collectedMonth + dueTotal) * 100).round()
+        : null;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-      decoration: AppTheme.darkCardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            'Payments due',
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.statusWarn,
-            ),
-          ),
-          const SizedBox(height: 6),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              formatCurrency(dueTotal),
-              style: AppTheme.numberStyle(
-                fontSize: 38,
-                color: AppTheme.onDark,
-                height: 1.0,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '$dueMembers member${dueMembers == 1 ? '' : 's'} · $overdueCount overdue · next 30 days',
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.onDarkSoft,
-            ),
-          ),
-          const SizedBox(height: 18),
-          const Divider(height: 1, color: Color(0x1FFFFFFF)),
-          const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Collected this month',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.onDarkSoft,
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.darkCardDecoration(radius: 18),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: onDue,
+                behavior: HitTestBehavior.opaque,
+                child: _HeroFigure(
+                  label: 'TO COLLECT',
+                  value: formatCurrency(dueTotal),
+                  valueColor: AppTheme.onDark,
+                  caption: '$dueMembers member${dueMembers == 1 ? '' : 's'}',
                 ),
               ),
-              Row(
-                children: [
-                  Text(
-                    formatCurrency(collectedMonth),
-                    style: AppTheme.numberStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.onDark,
-                    ),
-                  ),
-                  if (growthPct != null) ...[
-                    const SizedBox(width: 6),
-                    Text(
-                      '${growthPct! >= 0 ? '↑' : '↓'}${growthPct!.abs()}% vs last month',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: growthPct! >= 0
-                            ? AppTheme.mintOnDark
-                            : AppTheme.statusDanger,
-                      ),
-                    ),
-                  ],
-                ],
+            ),
+            const VerticalDivider(width: 29, color: AppTheme.darkCard2),
+            Expanded(
+              child: _HeroFigure(
+                label:
+                    'COLLECTED · ${DateFormat('MMM').format(DateTime.now()).toUpperCase()}',
+                value: formatCurrency(collectedMonth),
+                valueColor: AppTheme.mintOnDark,
+                caption: collectionRate != null
+                    ? '$collectionRate% collection rate'
+                    : 'No dues outstanding',
               ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _DockAction(
-                icon: Icons.credit_card_outlined,
-                label: 'Find payment',
-                onTap: onRecord,
-              ),
-              _DockAction(
-                icon: Icons.receipt_outlined,
-                label: 'New invoice',
-                onTap: onInvoice,
-              ),
-              _DockAction(
-                icon: Icons.sell_outlined,
-                label: 'Plans',
-                onTap: onNewPlan,
-              ),
-              _DockAction(
-                icon: Icons.schedule_outlined,
-                label: '$dueCount due',
-                onTap: onDue,
-              ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _DockAction extends StatelessWidget {
-  final IconData icon;
+/// One side of the money hero: kicker, figure, one line of context.
+class _HeroFigure extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
-  const _DockAction({
-    required this.icon,
+  final String value;
+  final Color valueColor;
+  final String caption;
+  const _HeroFigure({
     required this.label,
-    required this.onTap,
+    required this.value,
+    required this.valueColor,
+    required this.caption,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: AppTheme.darkCard2,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 19, color: AppTheme.onDark),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+            color: AppTheme.onDarkSoft,
           ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.onDarkSoft,
-            ),
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: AppTheme.numberStyle(fontSize: 24, color: valueColor),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          caption,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 12, color: AppTheme.onDarkSoft),
+        ),
+      ],
     );
   }
 }
@@ -932,7 +852,10 @@ class _BalanceCardSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(height: 216, decoration: AppTheme.darkCardDecoration());
+    return Container(
+      height: 108,
+      decoration: AppTheme.darkCardDecoration(radius: 18),
+    );
   }
 }
 
@@ -941,7 +864,7 @@ class _BalanceCardSkeleton extends StatelessWidget {
 class _TxnCard extends StatelessWidget {
   final _TxnItem item;
   final VoidCallback onTap;
-  final VoidCallback onCollect;
+  final VoidCallback? onCollect;
   final VoidCallback? onDelete;
   const _TxnCard({
     required this.item,
@@ -959,69 +882,166 @@ class _TxnCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: AppTheme.cardDecoration(),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            InitialsAvatar(name: item.name, size: 44),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14.5,
-                      color: AppTheme.ink,
-                    ),
+            Row(
+              children: [
+                InitialsAvatar(name: item.name, size: 44),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        item.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: item.color,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: item.color,
-                    ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  item.isDue
+                      ? '${formatCurrency(item.amount)} ${item.isUpcoming ? 'upcoming' : 'due'}'
+                      : '+${formatCurrency(item.amount)}',
+                  style: AppTheme.numberStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: item.color,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            if (item.isDue)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${formatCurrency(item.amount)} ${item.isUpcoming ? 'upcoming' : 'due'}',
-                    style: AppTheme.numberStyle(
-                      fontSize: 15,
+            if (item.isDue && onCollect != null) ...[
+              const SizedBox(height: 11),
+              GestureDetector(
+                onTap: onCollect,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    item.isUpcoming ? 'Collect early' : 'Collect',
+                    style: const TextStyle(
+                      fontSize: 13,
                       fontWeight: FontWeight.w800,
-                      color: item.color,
+                      color: Colors.white,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  PillButton(
-                    label: item.isUpcoming ? 'Collect early' : 'Collect',
-                    onTap: onCollect,
-                  ),
-                ],
-              )
-            else
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Dues queue row (Collect) ────────────────────────────────────────────────
+
+class _DueRow extends StatelessWidget {
+  final _TxnItem item;
+  final VoidCallback? onCollect;
+  const _DueRow({required this.item, required this.onCollect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              InitialsAvatar(name: item.name, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.duesLine,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               Text(
-                '+${formatCurrency(item.amount)}',
+                formatCurrency(item.amount),
                 style: AppTheme.numberStyle(
-                  fontSize: 15,
+                  fontSize: 16,
                   fontWeight: FontWeight.w800,
                   color: item.color,
                 ),
               ),
+            ],
+          ),
+          if (onCollect != null) ...[
+            const SizedBox(height: 11),
+            GestureDetector(
+              onTap: onCollect,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.accent,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  item.isUpcoming ? 'Collect early' : 'Collect',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1047,10 +1067,10 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
   double? _due;
 
   static const _methods = [
-    ('cash', 'Cash', Icons.payments_outlined),
-    ('upi', 'UPI', Icons.qr_code_outlined),
-    ('bank_transfer', 'Bank Transfer', Icons.account_balance_outlined),
-    ('card', 'Card', Icons.credit_card_outlined),
+    ('cash', 'Cash', AppIcons.payments),
+    ('upi', 'UPI', AppIcons.qrCode),
+    ('bank_transfer', 'Bank Transfer', AppIcons.accountBalance),
+    ('card', 'Card', AppIcons.creditCard),
   ];
 
   @override
@@ -1089,32 +1109,28 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     final early = await confirmEarlyRenewalIfNeeded(
       context,
       nextPaymentDate: inv.dueAt,
+      settlingPartialInvoice: (_due ?? inv.amount) < inv.amount,
     );
     if (!early) return;
 
-    final prior = await LocalPaymentGuard.check(inv.memberId);
+    // Only a genuine duplicate is worth stopping. A balance still owed on this
+    // invoice means a second collection today is the rest of the same bill —
+    // an instalment, not an accidental re-tap.
+    final prior = (_due ?? 0) > 0
+        ? null
+        : await LocalPaymentGuard.check(inv.memberId);
     if (prior != null && mounted) {
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Already collected today'),
-          content: Text(
+      final proceed = await showConfirmDialog(
+        context,
+        title: 'Already collected today',
+        body:
             '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
             'from this member today at '
             '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}.\n\n'
             'Record $currencySymbol${amount.toStringAsFixed(0)} again?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Record anyway'),
-            ),
-          ],
-        ),
+        confirmLabel: 'Record anyway',
+        icon: AppIcons.history,
+        danger: false,
       );
       if (proceed != true) return;
     }
@@ -1300,6 +1316,7 @@ class _CreateInvoiceSheet extends ConsumerStatefulWidget {
 
 class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
   final _amountCtrl = TextEditingController();
+  final _admissionCtrl = TextEditingController();
   final _discountCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   String? _selectedMemberId;
@@ -1310,6 +1327,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
   @override
   void dispose() {
     _amountCtrl.dispose();
+    _admissionCtrl.dispose();
     _discountCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
@@ -1378,22 +1396,22 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
 
       final originalAmount = double.parse(_amountCtrl.text.trim());
       final discountAmount = double.tryParse(_discountCtrl.text.trim()) ?? 0.0;
-      final finalAmount = (originalAmount - discountAmount).clamp(
-        0.0,
-        double.infinity,
-      );
+      final admissionFee = double.tryParse(_admissionCtrl.text.trim()) ?? 0.0;
 
-      await client.from('invoices').insert({
-        'member_id': _selectedMemberId,
-        'gym_id': gymId,
-        'original_amount': originalAmount,
-        'discount_amount': discountAmount,
-        'amount': finalAmount,
-        if (_descCtrl.text.trim().isNotEmpty)
-          'description': _descCtrl.text.trim(),
-        if (_dueAt != null) 'due_at': _dueAt,
-        'status': 'open',
-      });
+      await client.rpc(
+        'create_invoice_secure',
+        params: {
+          'p_gym_id': gymId,
+          'p_member_id': _selectedMemberId,
+          'p_membership_amount': originalAmount,
+          'p_discount_amount': discountAmount,
+          'p_admission_fee': admissionFee,
+          'p_description': _descCtrl.text.trim().isEmpty
+              ? null
+              : _descCtrl.text.trim(),
+          'p_due_at': _dueAt,
+        },
+      );
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -1411,10 +1429,14 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
     final members = ref.watch(_membersListProvider);
 
     final originalAmount = double.tryParse(_amountCtrl.text.trim());
+    final admissionFee = double.tryParse(_admissionCtrl.text.trim()) ?? 0.0;
     final discountAmount = double.tryParse(_discountCtrl.text.trim()) ?? 0.0;
     final total = originalAmount == null
         ? null
-        : (originalAmount - discountAmount).clamp(0.0, double.infinity);
+        : (originalAmount + admissionFee - discountAmount).clamp(
+            0.0,
+            double.infinity,
+          );
 
     return Padding(
       padding: EdgeInsets.only(
@@ -1470,6 +1492,16 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               ),
             ],
             const SizedBox(height: 14),
+            const FieldLabel('Admission fee (optional)'),
+            TextFormField(
+              controller: _admissionCtrl,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(prefixText: '$currencySymbol '),
+            ),
+            const SizedBox(height: 14),
             const FieldLabel('Discount (optional)'),
             TextFormField(
               controller: _discountCtrl,
@@ -1511,6 +1543,28 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                         ),
                       ],
                     ),
+                    if (admissionFee > 0) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Text(
+                            'Admission fee',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.inkSoft,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '+ ${formatCurrency(admissionFee)}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.ink,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (discountAmount > 0) ...[
                       const SizedBox(height: 6),
                       Row(
@@ -1567,10 +1621,10 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                 decoration: InputDecoration(
                   suffixIcon: _dueAt != null
                       ? IconButton(
-                          icon: const Icon(Icons.clear, size: 16),
+                          icon: const Icon(AppIcons.clear, size: 16),
                           onPressed: () => setState(() => _dueAt = null),
                         )
-                      : const Icon(Icons.calendar_today_outlined, size: 16),
+                      : const Icon(AppIcons.calendarToday, size: 16),
                 ),
                 child: Text(
                   _dueAt != null ? formatDateFromString(_dueAt) : 'Select date',
@@ -1642,7 +1696,11 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
 
       // 2. Generate PDF bytes
       final bytes = await buildInvoicePdf(data);
-      final invNum = invoiceNumber(widget.invoice.id, widget.invoice.createdAt);
+      final invNum = invoiceNumber(
+        widget.invoice.id,
+        widget.invoice.createdAt,
+        issuedNumber: widget.invoice.invoiceNumber,
+      );
 
       // 3. Upload to Supabase Storage (upsert so same invoice never duplicates)
       await client.storage
@@ -1711,7 +1769,7 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
                 ),
               )
             : const Icon(
-                Icons.chat_bubble_outline,
+                AppIcons.chat,
                 size: 14,
                 color: Color(0xFF25D366),
               ),
@@ -1730,82 +1788,75 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
 
 // ── Plans Tab ─────────────────────────────────────────────────────────────────
 
-class _PlansTab extends ConsumerWidget {
-  const _PlansTab();
+class _PlansBody extends ConsumerWidget {
+  const _PlansBody();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final plans = ref.watch(_plansProvider);
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Plans & pricing'),
-        leading: const BackButton(),
-      ),
-      body: plans.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (list) => RefreshIndicator(
-          color: AppTheme.accent,
-          onRefresh: () async => ref.invalidate(_plansProvider),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            children: [
-              if (list.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Center(
-                    child: Text(
-                      'No plans yet',
-                      style: TextStyle(color: AppTheme.inkHint, fontSize: 14),
-                    ),
+    return plans.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, _) => const ErrorState(what: 'plans'),
+      data: (list) => RefreshIndicator(
+        color: AppTheme.accent,
+        onRefresh: () async => ref.invalidate(_plansProvider),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+          children: [
+            if (list.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: Text(
+                    'No plans yet',
+                    style: TextStyle(color: AppTheme.inkHint, fontSize: 14),
                   ),
-                )
-              else
-                CardList(
-                  children: list
-                      .map(
-                        (plan) => _PlanCard(
-                          plan: plan,
-                          onEdit: () => showAdaptiveSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            useSafeArea: true,
-                            builder: (_) => PlanFormSheet(plan: plan),
-                          ).then((_) => ref.invalidate(_plansProvider)),
-                        ),
-                      )
-                      .toList(),
                 ),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () => showAdaptiveSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => const PlanFormSheet(),
-                ).then((_) => ref.invalidate(_plansProvider)),
-                child: DottedBorderBox(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.add, size: 18, color: AppTheme.accent),
-                      SizedBox(width: 6),
-                      Text(
-                        'Add new plan',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.accent,
-                        ),
+              )
+            else
+              CardList(
+                children: list
+                    .map(
+                      (plan) => _PlanCard(
+                        plan: plan,
+                        onEdit: () => showAdaptiveSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          useSafeArea: true,
+                          builder: (_) => PlanFormSheet(plan: plan),
+                        ).then((_) => ref.invalidate(_plansProvider)),
                       ),
-                    ],
-                  ),
+                    )
+                    .toList(),
+              ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => showAdaptiveSheet(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                builder: (_) => const PlanFormSheet(),
+              ).then((_) => ref.invalidate(_plansProvider)),
+              child: DottedBorderBox(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(AppIcons.add, size: 18, color: AppTheme.accent),
+                    SizedBox(width: 6),
+                    Text(
+                      'Add new plan',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.accent,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1897,7 +1948,7 @@ class _PlanCard extends StatelessWidget {
                   child: Row(
                     children: [
                       const Icon(
-                        Icons.check,
+                        AppIcons.check,
                         size: 14,
                         color: AppTheme.statusActive,
                       ),
@@ -2013,14 +2064,22 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
             .update(data)
             .eq('id', widget.plan!['id']);
       } else {
-        data['gym_id'] = await ref.read(gymIdProvider.future);
-        created = await client
-            .from('membership_plans')
-            .insert(data)
-            .select(
-              'id, name, price, billing_interval, billing_interval_months',
-            )
-            .single();
+        created = Map<String, dynamic>.from(
+          await client.rpc(
+                'create_membership_plan_secure',
+                params: {
+                  'p_gym_id': await ref.read(gymIdProvider.future),
+                  'p_name': data['name'],
+                  'p_price': data['price'],
+                  'p_billing_interval': data['billing_interval'],
+                  'p_features': data['features'],
+                  'p_is_active': data['is_active'],
+                  'p_billing_interval_months': data['billing_interval_months'],
+                  'p_max_classes': data['max_classes'],
+                },
+              )
+              as Map,
+        );
       }
 
       if (created != null) unawaited(AppEvents.planCreated());
@@ -2197,7 +2256,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                   ),
                   const SizedBox(width: 8),
                   RoundIconButton(
-                    icon: Icons.add,
+                    icon: AppIcons.add,
                     onTap: _addFeature,
                     bg: AppTheme.accentSoft,
                     fg: AppTheme.accent,
@@ -2218,7 +2277,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                           child: Row(
                             children: [
                               const Icon(
-                                Icons.check,
+                                AppIcons.check,
                                 size: 15,
                                 color: AppTheme.statusActive,
                               ),
@@ -2236,7 +2295,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                                 onTap: () =>
                                     setState(() => _features.removeAt(e.key)),
                                 child: const Icon(
-                                  Icons.close,
+                                  AppIcons.close,
                                   size: 16,
                                   color: AppTheme.inkHint,
                                 ),
@@ -2262,7 +2321,6 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                   Switch(
                     value: _isActive,
                     onChanged: (v) => setState(() => _isActive = v),
-                    activeColor: AppTheme.accent,
                   ),
                 ],
               ),

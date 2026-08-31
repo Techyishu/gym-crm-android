@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 /// The code a gym owner hands to members so they can self-register in the
 /// member portal. Setup-once config, not a daily concern — lives in More
@@ -16,7 +17,9 @@ class GymCodeSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final gym = ref.watch(staffProfileProvider).valueOrNull?['gyms'] as Map<String, dynamic>?;
+    final gym =
+        ref.watch(staffProfileProvider).valueOrNull?['gyms']
+            as Map<String, dynamic>?;
     final gymName = gym?['name'] as String? ?? 'your gym';
     final code = gym?['member_code'] as String?;
 
@@ -45,16 +48,29 @@ class GymCodeSheet extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Member signup code',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                  const Text(
+                    'Member signup code',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   const Text(
                     'Members enter this code — plus their phone number — to create their own portal account.',
-                    style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft, height: 1.5),
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: AppTheme.inkSoft,
+                      height: 1.5,
+                    ),
                   ),
                   const SizedBox(height: 20),
                   if (code == null || code.isEmpty)
-                    const Text('No code available yet.', style: TextStyle(color: AppTheme.inkHint, fontSize: 13))
+                    const Text(
+                      'No code available yet.',
+                      style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+                    )
                   else ...[
                     GestureDetector(
                       onTap: () {
@@ -84,8 +100,14 @@ class GymCodeSheet extends ConsumerWidget {
                     ),
                     const SizedBox(height: 6),
                     const Center(
-                      child: Text('Tap to copy',
-                          style: TextStyle(fontSize: 12, color: AppTheme.inkHint, fontWeight: FontWeight.w600)),
+                      child: Text(
+                        'Tap to copy',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.inkHint,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
@@ -97,10 +119,12 @@ class GymCodeSheet extends ConsumerWidget {
                           Share.share(
                             'Set up your $gymName member portal — open the GymCRM app, '
                             'tap Member, "Create your account", and enter gym code $code with your phone number.',
-                            sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
+                            sharePositionOrigin: box != null
+                                ? box.localToGlobal(Offset.zero) & box.size
+                                : null,
                           );
                         },
-                        icon: const Icon(Icons.share_outlined, size: 18),
+                        icon: const Icon(AppIcons.share, size: 18),
                         label: const Text('Share with members'),
                       ),
                     ),

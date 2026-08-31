@@ -5,6 +5,12 @@ import 'package:intl/intl.dart';
 // Defaults to INR for existing gyms that never picked one.
 String _currencyCode = 'INR';
 NumberFormat _currency = NumberFormat.currency(symbol: '₹', decimalDigits: 0);
+// Whole rupees read better everywhere else, but a tax line has to be exact:
+// rounding CGST 152.54 to 153 makes the invoice stop adding up.
+NumberFormat _currencyExact = NumberFormat.currency(
+  symbol: '₹',
+  decimalDigits: 2,
+);
 
 String get currencyCode => _currencyCode;
 String get currencySymbol => _currency.currencySymbol;
@@ -14,13 +20,19 @@ void setCurrency(String? code) {
   if (c == _currencyCode) return;
   _currencyCode = c;
   _currency = NumberFormat.simpleCurrency(name: c, decimalDigits: 0);
+  _currencyExact = NumberFormat.simpleCurrency(name: c, decimalDigits: 2);
 }
+
 final _date = DateFormat('d MMM yyyy');
 final _dateShort = DateFormat('d MMM');
 final _dateTime = DateFormat('d MMM yyyy, h:mm a');
 final _month = DateFormat('MMM yyyy');
 
 String formatCurrency(num amount) => _currency.format(amount);
+
+/// Money to the paisa. Only for GST lines on an invoice, where the parts must
+/// sum to the total.
+String formatCurrencyExact(num amount) => _currencyExact.format(amount);
 
 /// Compact money for dashboards/reports. INR keeps lakh notation (₹1.20L);
 /// other currencies use standard compact (e.g. $120K).
@@ -36,6 +48,7 @@ String formatCurrencyCompact(num amount) {
   }
   return NumberFormat.compactSimpleCurrency(name: _currencyCode).format(amount);
 }
+
 String formatDate(DateTime dt) => _date.format(dt);
 String formatDateShort(DateTime dt) => _dateShort.format(dt);
 String formatDateTime(DateTime dt) => _dateTime.format(dt);

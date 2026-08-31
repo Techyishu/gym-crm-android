@@ -32,21 +32,23 @@ class GymClass {
   });
 
   factory GymClass.fromJson(Map<String, dynamic> j) => GymClass(
-        id: j['id'] as String,
-        gymId: j['gym_id'] as String,
-        name: j['name'] as String,
-        description: j['description'] as String?,
-        instructorId: j['instructor_id'] as String?,
-        type: j['type'] as String,
-        capacity: j['capacity'] as int,
-        durationMin: j['duration_min'] as int,
-        color: j['color'] as String,
-        createdAt: j['created_at'] as String,
-        defaultStartTime: j['default_start_time'] as String?,
-        defaultEndTime: j['default_end_time'] as String?,
-        trainerName: j['trainer_name'] as String?,
-        scheduleDays: (j['schedule_days'] as List?)?.map((e) => e as int).toList() ?? const [],
-      );
+    id: j['id'] as String,
+    gymId: j['gym_id'] as String,
+    name: j['name'] as String,
+    description: j['description'] as String?,
+    instructorId: j['instructor_id'] as String?,
+    type: j['type'] as String,
+    capacity: j['capacity'] as int,
+    durationMin: j['duration_min'] as int,
+    color: j['color'] as String,
+    createdAt: j['created_at'] as String,
+    defaultStartTime: j['default_start_time'] as String?,
+    defaultEndTime: j['default_end_time'] as String?,
+    trainerName: j['trainer_name'] as String?,
+    scheduleDays:
+        (j['schedule_days'] as List?)?.map((e) => e as int).toList() ??
+        const [],
+  );
 }
 
 class ClassSession {
@@ -73,18 +75,18 @@ class ClassSession {
   });
 
   factory ClassSession.fromJson(Map<String, dynamic> j) => ClassSession(
-        id: j['id'] as String,
-        classId: j['class_id'] as String,
-        startsAt: j['starts_at'] as String,
-        endsAt: j['ends_at'] as String,
-        capacityOverride: j['capacity_override'] as int?,
-        status: j['status'] as String,
-        notes: j['notes'] as String?,
-        gymClass: j['classes'] != null
-            ? GymClass.fromJson(j['classes'] as Map<String, dynamic>)
-            : null,
-        bookingCount: j['booking_count'] as int?,
-      );
+    id: j['id'] as String,
+    classId: j['class_id'] as String,
+    startsAt: j['starts_at'] as String,
+    endsAt: j['ends_at'] as String,
+    capacityOverride: j['capacity_override'] as int?,
+    status: j['status'] as String,
+    notes: j['notes'] as String?,
+    gymClass: j['classes'] != null
+        ? GymClass.fromJson(j['classes'] as Map<String, dynamic>)
+        : null,
+    bookingCount: j['booking_count'] as int?,
+  );
 }
 
 class Booking {
@@ -105,13 +107,13 @@ class Booking {
   });
 
   factory Booking.fromJson(Map<String, dynamic> j) => Booking(
-        id: j['id'] as String,
-        sessionId: j['session_id'] as String,
-        memberId: j['member_id'] as String,
-        status: j['status'] as String,
-        bookedAt: j['booked_at'] as String,
-        session: j['class_sessions'] != null
-            ? ClassSession.fromJson(j['class_sessions'] as Map<String, dynamic>)
-            : null,
-      );
+    id: j['id'] as String,
+    sessionId: j['session_id'] as String,
+    memberId: j['member_id'] as String,
+    status: j['status'] as String,
+    bookedAt: j['booked_at'] as String,
+    session: j['class_sessions'] != null
+        ? ClassSession.fromJson(j['class_sessions'] as Map<String, dynamic>)
+        : null,
+  );
 }

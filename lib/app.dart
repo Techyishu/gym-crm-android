@@ -7,6 +7,7 @@ import 'core/router.dart';
 import 'core/services/app_events.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_provider.dart';
+import './core/theme/app_icons.dart';
 
 class GymCRMApp extends ConsumerStatefulWidget {
   const GymCRMApp({super.key});
@@ -40,7 +41,10 @@ class _GymCRMAppState extends ConsumerState<GymCRMApp> {
           final gym = profile?['gyms'] as Map<String, dynamic>?;
           final planPrice = gym?['plan_price'] as int?;
           if (planPrice != null) {
-            await AppEvents.purchase(amount: planPrice.toDouble(), plan: gym?['plan'] as String?);
+            await AppEvents.purchase(
+              amount: planPrice.toDouble(),
+              plan: gym?['plan'] as String?,
+            );
           }
         }());
       }
@@ -116,7 +120,7 @@ class _AppErrorWidget extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.error_outline, size: 48, color: Color(0xFFE53935)),
+              Icon(AppIcons.error, size: 48, color: Color(0xFFE53935)),
               SizedBox(height: 16),
               Text(
                 'Something went wrong',

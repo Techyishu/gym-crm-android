@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.2+47
+version: 1.0.3+50
 
 environment:
   sdk: ^3.10.7
@@ -75,6 +75,7 @@ dependencies:
   onesignal_flutter: ^5.3.3
   firebase_core: ^4.12.1
   firebase_analytics: ^12.4.5
+  phosphor_flutter: ^2.1.0
 
 dev_dependencies:
   flutter_test:

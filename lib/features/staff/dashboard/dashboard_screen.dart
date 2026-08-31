@@ -6,8 +6,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/billing/billing_access.dart';
+import '../settings/gym_branches_sheet.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/whats_new.dart';
+import '../../../core/services/data_refresh.dart';
+import '../../../core/services/offline_checkin_queue.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
@@ -16,6 +18,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../members/members_screen.dart' show showAddMemberSheet;
 import '../notifications/notifications_screen.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -93,7 +96,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .gte('created_at', startOfDay),
       client
           .from('invoices')
-          .select('amount, payments(amount, status)')
+          .select('amount, due_at, payments(amount, status)')
           .eq('gym_id', gymId)
           .inFilter('status', ['open', 'partial']),
       client
@@ -150,6 +153,15 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .eq('gym_id', gymId)
           .order('created_at', ascending: false)
           .limit(4),
+      // Leads whose follow-up date has already passed — the only lead signal
+      // that genuinely needs action today.
+      client
+          .from('leads')
+          .select('id')
+          .eq('gym_id', gymId)
+          .not('status', 'in', '(converted,lost)')
+          .not('follow_up_at', 'is', null)
+          .lt('follow_up_at', todayDate),
       // This month's logged expenses, for the profit figure below.
       client
           .from('expenses')
@@ -186,6 +198,15 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     return (amount - paid).clamp(0, amount);
   }
 
+  // "Overdue" = an unsettled invoice whose due date has already passed.
+  // Invoices with no due date are still owed, but they aren't late.
+  final todayMidnight = DateTime(now.year, now.month, now.day);
+  final overdue = dueInvoices.where((inv) {
+    if (remainingDue(inv) <= 0) return false;
+    final due = DateTime.tryParse((inv['due_at'] as String?) ?? '');
+    return due != null && due.isBefore(todayMidnight);
+  }).toList();
+
   final collectedToday = sum(todayPaid);
   final pendingRevenue = dueInvoices.fold<double>(
     0,
@@ -210,13 +231,13 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
   }).toList();
 
   return {
-    'activeMembers': counts[0].count ?? 0,
-    'todayCheckins': counts[1].count ?? 0,
-    'newMembersMonth': counts[2].count ?? 0,
-    'allTimeCheckins': counts[3].count ?? 0,
-    'planCount': counts[4].count ?? 0,
-    'leadsThisWeek': counts[5].count ?? 0,
-    'memberCount': counts[6].count ?? 0,
+    'activeMembers': counts[0].count,
+    'todayCheckins': counts[1].count,
+    'newMembersMonth': counts[2].count,
+    'allTimeCheckins': counts[3].count,
+    'planCount': counts[4].count,
+    'leadsThisWeek': counts[5].count,
+    'memberCount': counts[6].count,
     'collectedToday': collectedToday,
     'todayPayments': todayPaid.length,
     'pendingRevenue': pendingRevenue,
@@ -226,18 +247,45 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'recentPaid': recentPaid,
     'todayCheckinsList': rows[6],
     'recentLeads': rows[7],
-    'monthExpenses': sum(rows[8]),
-    'profit': monthRevenue - sum(rows[8]),
+    'monthExpenses': sum(rows[9]),
+    'profit': monthRevenue - sum(rows[9]),
+    'dueCount': dueInvoices.where((i) => remainingDue(i) > 0).length,
+    'overdueCount': overdue.length,
+    'overdueAmount': overdue.fold<double>(0, (s, i) => s + remainingDue(i)),
+    'leadsToFollowUp': rows[8].length,
   };
 });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // These totals are cached, so a payment or check-in recorded on any other
+    // screen used to leave stale numbers here until the app restarted.
+    gymDataChanged.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    gymDataChanged.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) ref.invalidate(_dashboardDataProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final data = ref.watch(_dashboardDataProvider);
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -294,7 +342,7 @@ class _ErrorBody extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(
-              Icons.cloud_off_outlined,
+              AppIcons.cloudOff,
               size: 52,
               color: AppTheme.inkHint,
             ),
@@ -317,7 +365,7 @@ class _ErrorBody extends ConsumerWidget {
                   ref.invalidate(_dashboardDataProvider);
                   ref.invalidate(gymIdProvider);
                 },
-                icon: const Icon(Icons.refresh, size: 16),
+                icon: const Icon(AppIcons.refresh, size: 16),
                 label: const Text('Retry'),
               ),
             ),
@@ -340,17 +388,10 @@ class _DashboardBody extends ConsumerWidget {
     final canBilling = RoleAccess.canSeeBilling(role);
     final canCollect = RoleAccess.canRecordPayment(role);
     final canLeads = RoleAccess.canSeeLeads(role);
-    final canExpenses = RoleAccess.canSeeExpenses(role);
 
     final profile = ref.watch(staffProfileProvider).valueOrNull;
     final gym = profile?['gyms'] as Map<String, dynamic>?;
     final gymName = gym?['name'] as String? ?? 'My Gym';
-    final ownerName =
-        (profile?['full_name'] as String?) ??
-        (Supabase.instance.client.auth.currentUser?.email ?? '');
-
-    final renewals = data['renewals'] as List<dynamic>;
-
     final memberCount = (data['memberCount'] as int?) ?? 0;
     final planCount = (data['planCount'] as int?) ?? 0;
     final allTimeCheckins = (data['allTimeCheckins'] as int?) ?? 0;
@@ -364,12 +405,7 @@ class _DashboardBody extends ConsumerWidget {
       // gym's dashboard. The member-signup code moved to the Members screen,
       // where it's contextually relevant (inviting members) instead of
       // permanently occupying the home screen.
-      _Header(
-        gymName: gymName,
-        ownerName: ownerName,
-        gym: gym,
-        showBilling: canBilling,
-      ),
+      _Header(gymName: gymName, gym: gym, showBilling: canBilling),
       const SizedBox(height: 12),
       if (showChecklist) ...[
         _SetupChecklist(
@@ -382,24 +418,34 @@ class _DashboardBody extends ConsumerWidget {
       ],
     ];
 
+    // Action first, then the numbers. Anything that needs a decision today
+    // (money owed, memberships about to lapse, leads past their follow-up,
+    // check-ins still queued offline) sits above the passive "Today" counts.
     final leftColumn = [
       if (canBilling) ...[
-        _CollectedHero(data: data, canExpenses: canExpenses),
+        _CollectedHero(data: data),
         const SizedBox(height: 10),
       ],
-      _StatRow(
-        active: (data['activeMembers'] as int?) ?? 0,
-        checkins: (data['todayCheckins'] as int?) ?? 0,
-        renewals: renewals.length,
-      ),
-      const SizedBox(height: 10),
       _QuickActions(canCollect: canCollect, canLeads: canLeads),
+      const SizedBox(height: 16),
+      _NeedsAttention(
+        data: data,
+        canBilling: canBilling,
+        canLeads: canLeads,
+        canCheckIn: RoleAccess.canCheckIn(role),
+      ),
+      const SizedBox(height: 16),
+      _TodayStats(
+        checkins: (data['todayCheckins'] as int?) ?? 0,
+        payments: (data['todayPayments'] as int?) ?? 0,
+        active: (data['activeMembers'] as int?) ?? 0,
+        joined: (data['newMembersMonth'] as int?) ?? 0,
+        canReports: RoleAccess.canSeeReports(role),
+      ),
     ];
 
     final rightColumn = [
       _PaymentDueToday(data: data, canCollect: canCollect),
-      const SizedBox(height: 16),
-      _UpcomingPayments(data: data, canCollect: canCollect),
       const SizedBox(height: 16),
       _TodayCheckins(
         checkins: (data['todayCheckinsList'] as List<dynamic>? ?? [])
@@ -567,7 +613,7 @@ class _SetupChecklist extends ConsumerWidget {
                       ),
                       child: s.done
                           ? const Icon(
-                              Icons.check,
+                              AppIcons.check,
                               size: 14,
                               color: Colors.white,
                             )
@@ -589,7 +635,7 @@ class _SetupChecklist extends ConsumerWidget {
                     ),
                     if (!s.done)
                       const Icon(
-                        Icons.chevron_right,
+                        AppIcons.chevronRight,
                         size: 18,
                         color: AppTheme.inkHint,
                       ),
@@ -613,93 +659,108 @@ class _QuickActions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final role = ref.watch(staffRoleProvider).valueOrNull;
     final items = [
       // Opens the add-member sheet directly instead of routing to the
       // members list first — same shortcut the dashboard checklist uses.
       (
-        icon: Icons.person_add_outlined,
-        label: 'Add member',
-        accent: !canCollect,
+        icon: AppIcons.personAdd,
+        label: 'Add\nmember',
+        accent: true,
         onTap: () => showAddMemberSheet(
           context,
         ).then((_) => ref.invalidate(_dashboardDataProvider)),
       ),
       if (canCollect)
         (
-          icon: Icons.payments_outlined,
-          label: 'Collect payment',
-          accent: true,
+          icon: AppIcons.payments,
+          label: 'Collect\npayment',
+          accent: false,
           onTap: () => context.push('/staff/billing'),
+        ),
+      if (RoleAccess.canCheckIn(role))
+        (
+          icon: AppIcons.qrScanner,
+          label: 'Check\nin',
+          accent: false,
+          onTap: () => context.push('/staff/check-in'),
         ),
       if (canLeads)
         (
-          icon: Icons.person_outline,
-          label: 'Add lead',
+          icon: AppIcons.personSearch,
+          label: 'Add\nlead',
           accent: false,
           onTap: () => context.push('/staff/leads'),
         ),
-      (
-        icon: Icons.qr_code_scanner,
-        label: 'Check in',
-        accent: false,
-        onTap: () => context.push('/staff/check-in'),
-      ),
     ];
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: AppTheme.cardDecoration(),
-      child: Row(
-        children: items
-            .map(
-              (item) => Expanded(
-                child: GestureDetector(
-                  onTap: item.onTap,
-                  behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: item.accent
-                              ? AppTheme.accent
-                              : AppTheme.surface2,
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: Icon(
-                          item.icon,
-                          size: 18,
-                          color: item.accent ? Colors.white : AppTheme.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            item.label,
-                            maxLines: 1,
-                            style: const TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.inkSoft,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+    // One teal tile — the action a front desk reaches for most — and the rest
+    // on white, so the row has a clear first choice instead of four equals.
+    // A 2-column grid (rather than squeezing every tile into one row) gives
+    // each tile enough width for icon + label side by side without wrapping.
+    Widget tile(_QuickAction item) => GestureDetector(
+      onTap: item.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+        decoration: item.accent
+            ? BoxDecoration(
+                color: AppTheme.accent,
+                borderRadius: BorderRadius.circular(14),
+              )
+            : AppTheme.cardDecoration(radius: 14),
+        child: Row(
+          children: [
+            Icon(
+              item.icon,
+              size: 20,
+              color: item.accent ? Colors.white : AppTheme.accent,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                item.label.replaceAll('\n', ' '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.2,
+                  fontWeight: FontWeight.w800,
+                  color: item.accent ? Colors.white : AppTheme.ink,
                 ),
               ),
-            )
-            .toList(),
+            ),
+          ],
+        ),
       ),
     );
+
+    final rows = <Widget>[];
+    for (var i = 0; i < items.length; i += 2) {
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
+      final second = i + 1 < items.length;
+      rows.add(
+        Row(
+          children: [
+            Expanded(child: tile(items[i])),
+            if (second) ...[
+              const SizedBox(width: 8),
+              Expanded(child: tile(items[i + 1])),
+            ],
+          ],
+        ),
+      );
+    }
+    return Column(children: rows);
   }
 }
+
+typedef _QuickAction = ({
+  IconData icon,
+  String label,
+  bool accent,
+  VoidCallback onTap,
+});
 
 // ─── Today's check-ins ────────────────────────────────────────────────────────
 
@@ -816,7 +877,7 @@ class _TodayCheckins extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
-                        Icons.check,
+                        AppIcons.check,
                         size: 14,
                         color: AppTheme.statusActive,
                       ),
@@ -1065,7 +1126,7 @@ class _NewLeads extends StatelessWidget {
                     if (phone != null && phone.isNotEmpty) ...[
                       const SizedBox(width: 8),
                       RoundIconButton(
-                        icon: Icons.call_outlined,
+                        icon: AppIcons.call,
                         size: 36,
                         onTap: () => _call(phone),
                       ),
@@ -1084,31 +1145,9 @@ class _NewLeads extends StatelessWidget {
 
 class _Header extends ConsumerWidget {
   final String gymName;
-  final String ownerName;
   final Map<String, dynamic>? gym;
   final bool showBilling;
-  const _Header({
-    required this.gymName,
-    required this.ownerName,
-    this.gym,
-    this.showBilling = false,
-  });
-
-  static const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  static const _months = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
+  const _Header({required this.gymName, this.gym, this.showBilling = false});
 
   // Same label logic the old full-width _SubscriptionBanner card used —
   // just rendered as a compact pill under the gym name instead of a
@@ -1137,9 +1176,6 @@ class _Header extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final now = DateTime.now();
-    final dateLabel =
-        '${_weekdays[now.weekday - 1]} · ${now.day} ${_months[now.month - 1]}';
     final unreadCount =
         ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
 
@@ -1150,24 +1186,38 @@ class _Header extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                dateLabel,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.inkSoft,
+              // The chevron is the branch switcher the canvas draws — it opens
+              // the same sheet the shell's branch control uses.
+              GestureDetector(
+                onTap: () => showAdaptiveSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  builder: (_) => const GymBranchesSheet(),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                gymName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.ink,
-                  letterSpacing: -0.4,
+                behavior: HitTestBehavior.opaque,
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        gymName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.ink,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      AppIcons.expandMore,
+                      size: 20,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ],
                 ),
               ),
               if (showBilling && gym != null) ...[
@@ -1178,7 +1228,7 @@ class _Header extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
-                        Icons.sell_outlined,
+                        AppIcons.sell,
                         size: 13,
                         color: AppTheme.accent,
                       ),
@@ -1196,7 +1246,7 @@ class _Header extends ConsumerWidget {
                         ),
                       ),
                       const Icon(
-                        Icons.chevron_right,
+                        AppIcons.chevronRight,
                         size: 14,
                         color: AppTheme.accent,
                       ),
@@ -1207,38 +1257,23 @@ class _Header extends ConsumerWidget {
             ],
           ),
         ),
-        GestureDetector(
-          onTap: () => showWhatsNewSheet(context),
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(13),
-            ),
-            child: const Icon(
-              Icons.campaign_outlined,
-              size: 19,
-              color: AppTheme.ink,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
+        // Canvas 1a keeps one control up here. What's-new moved into Settings,
+        // and the profile avatar is redundant with More → Settings.
         GestureDetector(
           onTap: () => context.push('/staff/notifications'),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(15),
                 ),
                 child: const Icon(
-                  Icons.notifications_none,
-                  size: 19,
+                  AppIcons.notifications,
+                  size: 21,
                   color: AppTheme.ink,
                 ),
               ),
@@ -1247,8 +1282,8 @@ class _Header extends ConsumerWidget {
                   top: -2,
                   right: -2,
                   child: Container(
-                    width: 10,
-                    height: 10,
+                    width: 11,
+                    height: 11,
                     decoration: BoxDecoration(
                       color: AppTheme.statusDanger,
                       shape: BoxShape.circle,
@@ -1260,27 +1295,6 @@ class _Header extends ConsumerWidget {
                   ),
                 ),
             ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: () => context.push('/staff/settings'),
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: AppTheme.darkCard,
-              borderRadius: BorderRadius.circular(13),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              initialsOf(ownerName.isEmpty ? gymName : ownerName),
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-              ),
-            ),
           ),
         ),
       ],
@@ -1306,74 +1320,113 @@ String _rupees(double v) {
   return '$currencySymbol${buf.toString()}';
 }
 
+/// Canvas 1a hero: one kicker, one big figure with a trend pill, a rule, and
+/// the single row that asks for an action. Collected-today, expenses and
+/// profit deliberately live in Reports now — the artboard keeps this card to
+/// one decision.
 class _CollectedHero extends StatelessWidget {
   final Map<String, dynamic> data;
-  final bool canExpenses;
-  const _CollectedHero({required this.data, required this.canExpenses});
+  const _CollectedHero({required this.data});
+
+  static const _months = [
+    'JANUARY',
+    'FEBRUARY',
+    'MARCH',
+    'APRIL',
+    'MAY',
+    'JUNE',
+    'JULY',
+    'AUGUST',
+    'SEPTEMBER',
+    'OCTOBER',
+    'NOVEMBER',
+    'DECEMBER',
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final collected = (data['collectedToday'] as double?) ?? 0;
     final month = (data['monthRevenue'] as double?) ?? 0;
     final growth = data['growthPct'] as int?;
-    final renewals = (data['renewals'] as List<dynamic>? ?? const []).length;
-    final expenses = (data['monthExpenses'] as double?) ?? 0;
-    final profit = (data['profit'] as double?) ?? 0;
+    final pending = (data['pendingRevenue'] as double?) ?? 0;
+    final dueCount = (data['dueCount'] as int?) ?? 0;
+    final up = growth == null || growth >= 0;
 
     return GestureDetector(
       onTap: () => context.push('/staff/billing'),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        decoration: AppTheme.darkCardDecoration(),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        decoration: AppTheme.darkCardDecoration(radius: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Collected this month',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+            Text(
+              'COLLECTED IN ${_months[DateTime.now().month - 1]}',
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
                 color: AppTheme.onDarkSoft,
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Flexible(
+                Expanded(
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
                     child: Text(
                       _rupees(month),
                       style: AppTheme.numberStyle(
-                        fontSize: 32,
+                        fontSize: 34,
                         color: AppTheme.onDark,
                         height: 1.0,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    growth == null
-                        ? 'this month so far'
-                        : '${growth >= 0 ? '↑' : '↓'} ${growth.abs()}% vs last month',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: growth == null || growth >= 0
-                          ? AppTheme.mintOnDark
-                          : AppTheme.statusDanger,
+                if (growth != null) ...[
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.darkCard2,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          up ? AppIcons.trendingUp : AppIcons.trendingDown,
+                          size: 14,
+                          color: up
+                              ? AppTheme.mintOnDark
+                              : AppTheme.statusDanger,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          '${growth.abs()}%',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: up
+                                ? AppTheme.mintOnDark
+                                : AppTheme.statusDanger,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
+                ],
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
@@ -1381,17 +1434,21 @@ class _CollectedHero extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Collected today',
+                        'Outstanding dues',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
                           color: AppTheme.onDarkSoft,
                         ),
                       ),
                       const SizedBox(height: 4),
                       FittedBox(
                         fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
                         child: Text(
-                          _rupees(collected),
+                          dueCount > 0
+                              ? '${_rupees(pending)} · $dueCount member${dueCount == 1 ? '' : 's'}'
+                              : _rupees(pending),
                           style: AppTheme.numberStyle(
                             fontSize: 18,
                             color: AppTheme.onDark,
@@ -1401,101 +1458,38 @@ class _CollectedHero extends StatelessWidget {
                     ],
                   ),
                 ),
+                const SizedBox(width: 12),
                 Container(
-                  width: 1,
-                  height: 36,
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkCard2,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        'Memberships due in 7 days',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.onDarkSoft,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
                       Text(
-                        '$renewals',
-                        style: AppTheme.numberStyle(
-                          fontSize: 18,
+                        'Collect',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
                           color: AppTheme.onDark,
                         ),
+                      ),
+                      SizedBox(width: 2),
+                      Icon(
+                        AppIcons.chevronRight,
+                        size: 16,
+                        color: AppTheme.onDark,
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            if (canExpenses) ...[
-              const SizedBox(height: 12),
-              Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
-              const SizedBox(height: 10),
-              GestureDetector(
-                onTap: () => context.push('/staff/expenses'),
-                behavior: HitTestBehavior.opaque,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Expenses this month',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.onDarkSoft,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            formatCurrency(expenses),
-                            style: AppTheme.numberStyle(
-                              fontSize: 16,
-                              color: AppTheme.onDark,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 32,
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Profit',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.onDarkSoft,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            formatCurrency(profit),
-                            style: AppTheme.numberStyle(
-                              fontSize: 16,
-                              color: profit >= 0
-                                  ? AppTheme.mintOnDark
-                                  : AppTheme.statusDanger,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -1503,42 +1497,166 @@ class _CollectedHero extends StatelessWidget {
   }
 }
 
-// ─── Stat tiles row ───────────────────────────────────────────────────────────
+// ─── Needs attention ──────────────────────────────────────────────────────────
 
-class _StatRow extends StatelessWidget {
-  final int active, checkins, renewals;
-  const _StatRow({
-    required this.active,
+/// Check-ins recorded while offline and still waiting to sync. Read straight
+/// from the same queue the check-in screen flushes; QR check-ins are the only
+/// thing this app queues offline.
+final _pendingSyncProvider = FutureProvider<int>(
+  (_) => OfflineCheckInQueue.pendingCount(),
+);
+
+/// One card holding everything that needs a decision today. Each row is only
+/// built from data the backend already returns, and the whole card disappears
+/// when there is nothing to act on.
+class _NeedsAttention extends ConsumerWidget {
+  final Map<String, dynamic> data;
+  final bool canBilling;
+  final bool canLeads;
+  final bool canCheckIn;
+  const _NeedsAttention({
+    required this.data,
+    required this.canBilling,
+    required this.canLeads,
+    required this.canCheckIn,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final overdueCount = (data['overdueCount'] as int?) ?? 0;
+    final overdueAmount = (data['overdueAmount'] as double?) ?? 0;
+    final renewals = (data['renewals'] as List<dynamic>? ?? const []).length;
+    final leads = (data['leadsToFollowUp'] as int?) ?? 0;
+    final pendingSync = canCheckIn
+        ? (ref.watch(_pendingSyncProvider).valueOrNull ?? 0)
+        : 0;
+
+    final rows = <Widget>[
+      if (canBilling && overdueCount > 0)
+        AttentionTile.danger(
+          icon: AppIcons.error,
+          title: '$overdueCount overdue payment${overdueCount == 1 ? '' : 's'}',
+          subtitle: '${formatCurrency(overdueAmount)} pending',
+          // Expiring soon opens on its Overdue tab — the per-member list with
+          // Collect and WhatsApp on each row, not the Money ledger.
+          onTap: () => context.push('/staff/upcoming-payments'),
+        ),
+      if (renewals > 0)
+        AttentionTile.warn(
+          icon: AppIcons.schedule,
+          title:
+              '$renewals membership${renewals == 1 ? '' : 's'} due in 7 days',
+          subtitle: 'Renew before they lapse',
+          onTap: () => context.push('/staff/upcoming-payments?tab=expiring'),
+        ),
+      if (canLeads && leads > 0)
+        AttentionTile.info(
+          icon: AppIcons.personSearch,
+          title: '$leads lead${leads == 1 ? '' : 's'} need follow-up',
+          subtitle: 'Follow-up date has passed',
+          onTap: () => context.push('/staff/leads'),
+        ),
+      if (pendingSync > 0)
+        AttentionTile.neutral(
+          icon: AppIcons.cloudOff,
+          title:
+              '$pendingSync check-in${pendingSync == 1 ? '' : 's'} waiting to sync',
+          subtitle: 'Saved offline · syncs when back online',
+          onTap: () => context.push('/staff/check-in'),
+        ),
+    ];
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('Needs attention', style: AppTheme.sectionTitle),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.statusDangerBg,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '${rows.length}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.statusDanger,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        CardList(children: rows),
+      ],
+    );
+  }
+}
+
+// ─── Today ────────────────────────────────────────────────────────────────────
+
+class _TodayStats extends StatelessWidget {
+  final int checkins, payments, active, joined;
+  final bool canReports;
+  const _TodayStats({
     required this.checkins,
-    required this.renewals,
+    required this.payments,
+    required this.active,
+    required this.joined,
+    required this.canReports,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: StatTileLight(
-            label: 'Active members',
-            value: '$active',
-            onTap: () => context.push('/staff/members'),
-          ),
+        SectionHeader(
+          title: 'Today',
+          actionLabel: canReports ? 'Reports' : null,
+          onAction: canReports ? () => context.push('/staff/reports') : null,
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: StatTileLight(
-            label: 'Checked in today',
-            value: '$checkins',
-            onTap: () => context.push('/staff/check-in'),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: StatTileLight(
-            label: 'Due in 7 days',
-            value: '$renewals',
-            onTap: () => context.push('/staff/upcoming-payments'),
-          ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: MiniStat(
+                label: 'Check-ins',
+                value: '$checkins',
+                onTap: () => context.push('/staff/check-in'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: MiniStat(
+                label: 'Payments',
+                value: '$payments',
+                onTap: () => context.push('/staff/billing'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: MiniStat(
+                label: 'Active',
+                value: '$active',
+                onTap: () => context.push('/staff/members'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: MiniStat(
+                label: 'Joined',
+                value: '$joined',
+                onTap: () => context.push('/staff/members'),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1645,76 +1763,6 @@ class _PaymentDueToday extends ConsumerWidget {
   }
 }
 
-// ─── Upcoming payments ─────────────────────────────────────────────────────────
-
-class _UpcomingPayments extends ConsumerWidget {
-  final Map<String, dynamic> data;
-  final bool canCollect;
-  const _UpcomingPayments({required this.data, required this.canCollect});
-
-  Future<void> _showCollect(
-    BuildContext ctx,
-    WidgetRef ref,
-    Map<String, dynamic> member,
-  ) async {
-    await showAdaptiveSheet(
-      context: ctx,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _CollectPaymentSheet(
-        member: member,
-        onPaid: () => ref.invalidate(_dashboardDataProvider),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    // Exclude today's dues — those surface in the "Payment due today" section.
-    final renewals = (data['renewals'] as List<dynamic>)
-        .cast<Map<String, dynamic>>()
-        .where((m) {
-          final npd = m['next_payment_date'] as String?;
-          if (npd == null) return false;
-          final d = DateTime.parse(npd);
-          return DateTime(d.year, d.month, d.day).isAfter(today);
-        })
-        .toList();
-    if (renewals.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(
-          title: 'Upcoming payments',
-          actionLabel: 'See all',
-          onAction: () => context.push('/staff/upcoming-payments'),
-        ),
-        const SizedBox(height: 10),
-        CardList(
-          children: renewals.map((m) {
-            final npd = m['next_payment_date'] as String?;
-            final days = npd != null
-                ? DateTime.parse(npd).difference(now).inDays
-                : 0;
-            final subtitle = 'Upcoming in $days day${days == 1 ? '' : 's'}';
-            return _AttentionRow(
-              member: m,
-              subtitle: subtitle,
-              subColor: AppTheme.statusWarn,
-              canCollect: canCollect,
-              collectLabel: 'Collect early',
-              onCollect: () => _showCollect(context, ref, m),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-}
-
 // ─── Shared attention/upcoming row ─────────────────────────────────────────────
 
 class _AttentionRow extends StatelessWidget {
@@ -1808,12 +1856,19 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
   String? _planHint;
   String? _nextPaymentDate;
   double? _due;
+  bool _partlyPaid = false;
+
+  /// Balance still owed on a real open/partial invoice — 0 when there is no
+  /// such invoice. Deliberately not `_due`, which falls back to the plan price
+  /// when nothing is invoiced yet; that fallback would disable the duplicate
+  /// guard on the very retry it exists to catch.
+  double _outstanding = 0;
 
   static const _methods = [
-    ('cash', 'Cash', Icons.payments_outlined),
-    ('upi', 'UPI', Icons.qr_code_outlined),
-    ('bank_transfer', 'Bank Transfer', Icons.account_balance_outlined),
-    ('card', 'Card', Icons.credit_card_outlined),
+    ('cash', 'Cash', AppIcons.payments),
+    ('upi', 'UPI', AppIcons.qrCode),
+    ('bank_transfer', 'Bank Transfer', AppIcons.accountBalance),
+    ('card', 'Card', AppIcons.creditCard),
   ];
 
   @override
@@ -1884,10 +1939,13 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         if (!mounted) return;
         setState(() {
           _due = due;
+          _partlyPaid = due < invoiceAmount;
+          _outstanding = due;
           _amountCtrl.text = due.toStringAsFixed(0);
         });
       } else {
         _due = finalPrice;
+        _outstanding = 0;
       }
     } catch (e) {
       debugPrint('[GymCRM] autofill error: $e');
@@ -1911,28 +1969,25 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     }
 
     final memberIdForCheck = widget.member['id'] as String;
-    final prior = await LocalPaymentGuard.check(memberIdForCheck);
+    // Only a genuine duplicate is worth stopping. If the member still owes
+    // money on an open bill, a second collection today is the rest of that
+    // bill, not an accidental re-tap.
+    final prior = _outstanding > 0
+        ? null
+        : await LocalPaymentGuard.check(memberIdForCheck);
     if (prior != null && mounted) {
       final firstName = widget.member['first_name'] as String? ?? '';
       final lastName = widget.member['last_name'] as String? ?? '';
       final name = '$firstName $lastName'.trim();
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Already collected today'),
-          content: Text(
+      await showInfoDialog(
+        context,
+        title: 'Already collected today',
+        body:
             '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
             'from $name today at '
             '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}. '
             'Refresh the member before collecting another renewal.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+        icon: AppIcons.history,
       );
       return;
     }
@@ -1941,6 +1996,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     final early = await confirmEarlyRenewalIfNeeded(
       context,
       nextPaymentDate: _nextPaymentDate,
+      settlingPartialInvoice: _partlyPaid,
     );
     if (!early) return;
     if (_nextPaymentDate == null) {
@@ -2026,7 +2082,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(AppIcons.close),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -2041,7 +2097,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
               child: Row(
                 children: [
                   const Icon(
-                    Icons.person_outline,
+                    AppIcons.person,
                     size: 16,
                     color: AppTheme.inkSoft,
                   ),

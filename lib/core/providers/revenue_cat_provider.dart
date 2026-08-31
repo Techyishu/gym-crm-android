@@ -15,8 +15,12 @@ final customerInfoProvider = StreamProvider<CustomerInfo?>((ref) {
 
   // Fetch current value immediately so UI doesn't wait for the first update.
   Purchases.getCustomerInfo().then(
-    (info) { if (!controller.isClosed) controller.add(info); },
-    onError: (_) { if (!controller.isClosed) controller.add(null); },
+    (info) {
+      if (!controller.isClosed) controller.add(info);
+    },
+    onError: (_) {
+      if (!controller.isClosed) controller.add(null);
+    },
   );
 
   void listener(CustomerInfo info) {

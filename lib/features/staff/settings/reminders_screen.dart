@@ -12,9 +12,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/services/coachmark_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 // pack key → (Dodo checkout key [Android], App Store product ID [iOS]).
 const _kCreditPacks = [
@@ -106,89 +108,94 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
         title: const Text('Reminders'),
         leading: const BackButton(),
       ),
-      body: ResponsiveContent(child: gymAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (gym) {
-          if (gym == null) return const Center(child: Text('Gym not found'));
-          void onChanged() => ref.invalidate(_remindersGymProvider);
-          final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
-          final showInvoiceBadge =
-              coachmark?.shouldShow('feature_invoice_whatsapp') ?? false;
+      body: ResponsiveContent(
+        child: gymAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => const ErrorState(what: 'your message settings'),
+          data: (gym) {
+            if (gym == null) return const Center(child: Text('Gym not found'));
+            void onChanged() => ref.invalidate(_remindersGymProvider);
+            final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
+            final showInvoiceBadge =
+                coachmark?.shouldShow('feature_invoice_whatsapp') ?? false;
 
-          final tabs = [
-            (
-              icon: Icons.notifications_outlined,
-              label: 'Push',
-              on: gym['push_reminder_enabled'] as bool? ?? false,
-              isNew: false,
-            ),
-            (
-              icon: Icons.chat_bubble_outline,
-              label: 'WhatsApp',
-              on: gym['whatsapp_reminder_enabled'] as bool? ?? false,
-              isNew: false,
-            ),
-            (
-              icon: Icons.receipt_long_outlined,
-              label: 'Invoices',
-              on: gym['whatsapp_invoice_enabled'] as bool? ?? false,
-              isNew: showInvoiceBadge,
-            ),
-          ];
+            final tabs = [
+              (
+                icon: AppIcons.notifications,
+                label: 'Push',
+                on: gym['push_reminder_enabled'] as bool? ?? false,
+                isNew: false,
+              ),
+              (
+                icon: AppIcons.chat,
+                label: 'WhatsApp',
+                on: gym['whatsapp_reminder_enabled'] as bool? ?? false,
+                isNew: false,
+              ),
+              (
+                icon: AppIcons.receipt,
+                label: 'Invoices',
+                on: gym['whatsapp_invoice_enabled'] as bool? ?? false,
+                isNew: showInvoiceBadge,
+              ),
+            ];
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
-                child: Text(
-                  'Automatic nudges before a membership expires',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.inkHint,
-                    fontWeight: FontWeight.w600,
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
+                  child: Text(
+                    'Automatic nudges before a membership expires',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.inkHint,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    for (var i = 0; i < tabs.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 8),
-                      Expanded(
-                        child: _ChannelTab(
-                          icon: tabs[i].icon,
-                          label: tabs[i].label,
-                          on: tabs[i].on,
-                          active: _tab == i,
-                          isNew: tabs[i].isNew,
-                          onTap: () {
-                            if (tabs[i].isNew)
-                              coachmark?.markSeen('feature_invoice_whatsapp');
-                            setState(() => _tab = i);
-                          },
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < tabs.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        Expanded(
+                          child: _ChannelTab(
+                            icon: tabs[i].icon,
+                            label: tabs[i].label,
+                            on: tabs[i].on,
+                            active: _tab == i,
+                            isNew: tabs[i].isNew,
+                            onTap: () {
+                              if (tabs[i].isNew)
+                                coachmark?.markSeen('feature_invoice_whatsapp');
+                              setState(() => _tab = i);
+                            },
+                          ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-                  child: switch (_tab) {
-                    0 => _PushReminderCard(gym: gym, onChanged: onChanged),
-                    1 => _WhatsAppReminderCard(gym: gym, onChanged: onChanged),
-                    _ => _InvoiceWhatsAppCard(gym: gym, onChanged: onChanged),
-                  },
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+                    child: switch (_tab) {
+                      0 => _PushReminderCard(gym: gym, onChanged: onChanged),
+                      1 => _WhatsAppReminderCard(
+                        gym: gym,
+                        onChanged: onChanged,
+                      ),
+                      _ => _InvoiceWhatsAppCard(gym: gym, onChanged: onChanged),
+                    },
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
-      )),
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -751,7 +758,8 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
 
   Future<void> _save({bool? enabled, Set<int>? days, String? template}) async {
     final gymId = widget.gym['id'] as String;
-    final wasEnabled = widget.gym['whatsapp_reminder_enabled'] as bool? ?? false;
+    final wasEnabled =
+        widget.gym['whatsapp_reminder_enabled'] as bool? ?? false;
     final nextEnabled = enabled ?? wasEnabled;
     final nextDays = days ?? _currentDays();
     setState(() => _saving = true);
@@ -764,7 +772,8 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
             'whatsapp_template': template ?? _currentTemplate(),
           })
           .eq('id', gymId);
-      if (nextEnabled && !wasEnabled) unawaited(AppEvents.whatsappRemindersEnabled());
+      if (nextEnabled && !wasEnabled)
+        unawaited(AppEvents.whatsappRemindersEnabled());
       widget.onChanged();
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -943,7 +952,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.send_outlined, size: 17),
+                  : const Icon(AppIcons.send, size: 17),
               label: Text(_sendingNow ? 'Sending…' : 'Send reminders now'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.accent,

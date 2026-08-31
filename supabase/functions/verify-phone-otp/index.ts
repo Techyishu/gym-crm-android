@@ -35,9 +35,13 @@ const supabase = createClient(
 
 const MSG91_AUTHKEY = Deno.env.get('MSG91_AUTHKEY')!
 
+// Canonical form is always 91 + the 10 national digits. Deciding by prefix
+// instead (`startsWith('91')`) silently breaks every Indian number that
+// itself begins with 91 — e.g. 9116669678, a valid 10-digit mobile — which
+// then never matched its own members row.
 function normalizePhone(raw: string) {
-  const digits = raw.replace(/\D/g, '')
-  return digits.startsWith('91') ? digits : `91${digits}`
+  const digits = raw.replace(/\D/g, '').replace(/^0+/, '')
+  return `91${digits.slice(-10)}`
 }
 
 async function verifyMsg91AccessToken(accessToken: string): Promise<string> {

@@ -4,26 +4,156 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
-final _memberCheckInsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _memberCheckInsProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final client = Supabase.instance.client;
   final user = client.auth.currentUser;
   if (user == null) return [];
 
-  final member = await client.from('members').select('id').eq('user_id', user.id).maybeSingle();
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
   if (member == null) return [];
 
   final memberId = member['id'] as String;
 
+  // Last 30 days rather than the last 10 rows — the attendance card needs a
+  // full fortnight of days to draw the strip and count the streak.
+  final since = DateTime.now().subtract(const Duration(days: 30));
   return await client
       .from('check_ins')
       .select('id, checked_in_at')
       .eq('member_id', memberId)
-      .order('checked_in_at', ascending: false)
-      .limit(10);
+      .gte('checked_in_at', since.toIso8601String())
+      .order('checked_in_at', ascending: false);
+});
+
+/// Today's booked session, if the member has one — the first row of the
+/// canvas "Today" card.
+final _todayBookingProvider = FutureProvider<Map<String, dynamic>?>((
+  ref,
+) async {
+  final client = Supabase.instance.client;
+  final user = client.auth.currentUser;
+  if (user == null) return null;
+
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+  if (member == null) return null;
+
+  final now = DateTime.now();
+  final startOfDay = DateTime(now.year, now.month, now.day);
+  final endOfDay = startOfDay.add(const Duration(days: 1));
+
+  final rows = await client
+      .from('bookings')
+      .select(
+        'status, class_sessions!inner(starts_at, capacity, classes(name))',
+      )
+      .eq('member_id', member['id'] as String)
+      .neq('status', 'cancelled')
+      .gte('class_sessions.starts_at', startOfDay.toIso8601String())
+      .lt('class_sessions.starts_at', endOfDay.toIso8601String())
+      .limit(1);
+
+  final list = (rows as List).cast<Map<String, dynamic>>();
+  return list.isEmpty ? null : list.first;
+});
+
+/// Active workout plan (first row) — summarised as "N exercises".
+final _portalWorkoutProvider = FutureProvider<Map<String, dynamic>?>((
+  ref,
+) async {
+  final client = Supabase.instance.client;
+  final user = client.auth.currentUser;
+  if (user == null) return null;
+
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+  if (member == null) return null;
+
+  final rows = await client
+      .from('workout_plans')
+      .select()
+      .eq('member_id', member['id'] as String)
+      .order('created_at', ascending: false)
+      .limit(1);
+
+  final list = (rows as List).cast<Map<String, dynamic>>();
+  return list.isEmpty ? null : list.first;
+});
+
+/// Active diet plan — summarised as "N kcal · M meals planned".
+final _portalDietProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
+  final client = Supabase.instance.client;
+  final user = client.auth.currentUser;
+  if (user == null) return null;
+
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+  if (member == null) return null;
+
+  final rows = await client
+      .from('diet_plans')
+      .select()
+      .eq('member_id', member['id'] as String)
+      .eq('is_active', true)
+      .order('created_at', ascending: false)
+      .limit(1);
+
+  final list = (rows as List).cast<Map<String, dynamic>>();
+  return list.isEmpty ? null : list.first;
+});
+
+/// Remaining balance across the member's open/partial invoices.
+final _memberOutstandingProvider = FutureProvider<double>((ref) async {
+  final client = Supabase.instance.client;
+  final user = client.auth.currentUser;
+  if (user == null) return 0;
+
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+  if (member == null) return 0;
+
+  final rows = await client
+      .from('invoices')
+      .select('amount, payments(amount, status)')
+      .eq('member_id', member['id'] as String)
+      .inFilter('status', ['open', 'partial']);
+
+  var total = 0.0;
+  for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+    final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+    final paid = ((row['payments'] as List?) ?? const [])
+        .where((p) => (p as Map)['status'] == 'succeeded')
+        .fold<double>(
+          0,
+          (s, p) => s + ((p as Map)['amount'] as num).toDouble(),
+        );
+    total += (amount - paid).clamp(0, amount);
+  }
+  return total;
 });
 
 final _memberMonthCheckInsCountProvider = FutureProvider<int>((ref) async {
@@ -31,7 +161,11 @@ final _memberMonthCheckInsCountProvider = FutureProvider<int>((ref) async {
   final user = client.auth.currentUser;
   if (user == null) return 0;
 
-  final member = await client.from('members').select('id').eq('user_id', user.id).maybeSingle();
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
   if (member == null) return 0;
 
   final memberId = member['id'] as String;
@@ -45,7 +179,7 @@ final _memberMonthCheckInsCountProvider = FutureProvider<int>((ref) async {
       .gte('checked_in_at', startOfMonth.toIso8601String())
       .count(CountOption.exact);
 
-  return result.count ?? 0;
+  return result.count;
 });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -61,92 +195,107 @@ class PortalHomeScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('My Gym'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_outlined),
-            onPressed: () => context.push('/portal/qr'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (c) => AlertDialog(
-                  title: const Text('Sign out?'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-                    TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sign out')),
-                  ],
-                ),
-              );
-              if (ok == true) {
-                await ref.read(authNotifierProvider.notifier).signOut();
-              }
-            },
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        color: AppTheme.accent,
-        onRefresh: () async {
-          ref.invalidate(memberRecordProvider);
-          ref.invalidate(_memberCheckInsProvider);
-          ref.invalidate(_memberMonthCheckInsCountProvider);
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          child: member.when(
-            loading: () => const _LoadingSkeleton(),
-            error: (e, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('Error loading profile', style: const TextStyle(color: AppTheme.inkHint, fontSize: 14)),
+      body: SafeArea(
+        bottom: false,
+        child: RefreshIndicator(
+          color: AppTheme.accent,
+          onRefresh: () async {
+            ref.invalidate(memberRecordProvider);
+            ref.invalidate(_memberCheckInsProvider);
+            ref.invalidate(_memberMonthCheckInsCountProvider);
+            ref.invalidate(_todayBookingProvider);
+            ref.invalidate(_portalWorkoutProvider);
+            ref.invalidate(_portalDietProvider);
+            ref.invalidate(_memberOutstandingProvider);
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: member.when(
+              loading: () => const _LoadingSkeleton(),
+              error: (_, _) => StateMessage(
+                icon: AppIcons.cloudOff,
+                tint: AppTheme.statusDanger,
+                tintBg: AppTheme.statusDangerBg,
+                title: 'Could not load your profile',
+                body: 'Check your connection, then pull down to retry.',
+                actionLabel: 'Retry',
+                onAction: () => ref.invalidate(memberRecordProvider),
               ),
-            ),
-            data: (m) {
-              if (m == null) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text('Profile not found', style: TextStyle(color: AppTheme.inkHint)),
-                  ),
+              data: (m) {
+                if (m == null) {
+                  return const StateMessage(
+                    icon: AppIcons.personOff,
+                    title: 'Profile not found',
+                    body:
+                        'Your gym has not linked this login to a member record '
+                        'yet. Ask the front desk to check your details.',
+                  );
+                }
+
+                final firstName = m['first_name'] as String? ?? 'Member';
+                final status = m['status'] as String? ?? 'active';
+                final memberships = (m['memberships'] as List?) ?? [];
+                final currentMs = memberships.isNotEmpty
+                    ? memberships.first as Map<String, dynamic>
+                    : null;
+                final plan =
+                    currentMs?['membership_plans'] as Map<String, dynamic>?;
+
+                final gymName =
+                    (m['gyms'] as Map<String, dynamic>?)?['name'] as String? ??
+                    '';
+                final outstanding =
+                    ref.watch(_memberOutstandingProvider).valueOrNull ?? 0;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _GreetingHeader(
+                      firstName: firstName,
+                      gymName: gymName,
+                      onSignOut: () => _confirmSignOut(context, ref),
+                    ),
+                    const SizedBox(height: 16),
+                    _MembershipStatusCard(
+                      membership: currentMs,
+                      plan: plan,
+                      status: status,
+                      outstanding: outstanding,
+                    ),
+                    const SizedBox(height: 16),
+                    const _TodayCard(),
+                    const SizedBox(height: 16),
+                    _AttendanceCard(
+                      monthVisitsAsync: monthVisits,
+                      recentCheckinsAsync: recentCheckins,
+                    ),
+                    if (outstanding > 0) ...[
+                      const SizedBox(height: 16),
+                      _OutstandingAlert(amount: outstanding),
+                    ],
+                    const SizedBox(height: 24),
+                  ],
                 );
-              }
-
-              final firstName = m['first_name'] as String? ?? 'Member';
-              final lastName = m['last_name'] as String? ?? '';
-              final status = m['status'] as String? ?? 'active';
-              final memberships = (m['memberships'] as List?) ?? [];
-              final currentMs = memberships.isNotEmpty ? memberships.first as Map<String, dynamic> : null;
-              final plan = currentMs?['membership_plans'] as Map<String, dynamic>?;
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _GreetingHeader(firstName: firstName, status: status),
-                  const SizedBox(height: 16),
-                  _MembershipStatusCard(membership: currentMs, plan: plan),
-                  const SizedBox(height: 16),
-                  _QuickStatsRow(
-                    monthVisitsAsync: monthVisits,
-                    recentCheckinsAsync: recentCheckins,
-                  ),
-                  const SizedBox(height: 16),
-                  _QuickLinksGrid(),
-                  const SizedBox(height: 16),
-                  _RecentCheckInsCard(recentCheckinsAsync: recentCheckins),
-                  const SizedBox(height: 24),
-                ],
-              );
-            },
+              },
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Sign out?',
+      body: 'You can sign back in anytime.',
+      confirmLabel: 'Sign out',
+      icon: AppIcons.logout,
+    );
+    if (ok == true) {
+      await ref.read(authNotifierProvider.notifier).signOut();
+    }
   }
 }
 
@@ -158,11 +307,17 @@ class _LoadingSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      children: List.generate(4, (i) => Container(
-        height: i == 0 ? 80 : 100,
-        margin: const EdgeInsets.only(bottom: 16),
-        decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(12)),
-      )),
+      children: List.generate(
+        4,
+        (i) => Container(
+          height: i == 0 ? 80 : 100,
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: AppTheme.surface2,
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -171,58 +326,55 @@ class _LoadingSkeleton extends StatelessWidget {
 
 class _GreetingHeader extends StatelessWidget {
   final String firstName;
-  final String status;
+  final String gymName;
+  final VoidCallback onSignOut;
 
-  const _GreetingHeader({required this.firstName, required this.status});
+  const _GreetingHeader({
+    required this.firstName,
+    required this.gymName,
+    required this.onSignOut,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final hour = DateTime.now().hour;
-    final greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-
-    Color statusBg;
-    Color statusFg;
-    switch (status.toLowerCase()) {
-      case 'active':
-        statusBg = AppTheme.statusActiveBg;
-        statusFg = AppTheme.statusActive;
-        break;
-      case 'expired':
-        statusBg = AppTheme.statusDangerBg;
-        statusFg = AppTheme.statusDanger;
-        break;
-      default:
-        statusBg = AppTheme.statusNeutralBg;
-        statusFg = AppTheme.statusNeutral;
-    }
-
     return Row(
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '$greeting,',
-                style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, fontWeight: FontWeight.w600),
-              ),
+              if (gymName.isNotEmpty)
+                Text(
+                  gymName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.inkSoft,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               const SizedBox(height: 2),
               Text(
-                firstName,
+                'Hi $firstName',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.4),
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                  letterSpacing: -0.4,
+                ),
               ),
             ],
           ),
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(999)),
-          child: Text(
-            status[0].toUpperCase() + status.substring(1),
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusFg),
-          ),
+        const SizedBox(width: 12),
+        // The member shell has no Account tab, so the avatar carries sign-out.
+        GestureDetector(
+          onTap: onSignOut,
+          behavior: HitTestBehavior.opaque,
+          child: InitialsAvatar(name: firstName, size: 40),
         ),
       ],
     );
@@ -234,326 +386,305 @@ class _GreetingHeader extends StatelessWidget {
 class _MembershipStatusCard extends StatelessWidget {
   final Map<String, dynamic>? membership;
   final Map<String, dynamic>? plan;
+  final String status;
+  final double outstanding;
 
-  const _MembershipStatusCard({required this.membership, required this.plan});
+  const _MembershipStatusCard({
+    required this.membership,
+    required this.plan,
+    required this.status,
+    required this.outstanding,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (membership == null) {
-      return Container(
-        decoration: AppTheme.cardDecoration(),
-        padding: const EdgeInsets.all(20),
-        child: const Center(
-          child: Text('No active membership', style: TextStyle(fontSize: 14, color: AppTheme.inkHint)),
+    final planName = plan?['name'] as String? ?? 'Membership';
+    final endsAt = membership?['ends_at'] as String?;
+    final expiry = endsAt != null ? DateTime.tryParse(endsAt) : null;
+    final daysLeft = expiry?.difference(DateTime.now()).inDays;
+
+    final (pillBg, pillFg) = switch (status.toLowerCase()) {
+      'active' => (AppTheme.darkCard2, AppTheme.mintOnDark),
+      'expired' => (AppTheme.statusDangerBg, AppTheme.statusDanger),
+      _ => (AppTheme.darkCard2, AppTheme.onDarkSoft),
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: AppTheme.darkCardDecoration(radius: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: pillBg,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    status[0].toUpperCase() + status.substring(1),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: pillFg,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  membership == null ? 'No active membership' : planName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.onDark,
+                  ),
+                ),
+                if (expiry != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    daysLeft != null && daysLeft >= 0
+                        ? 'Valid till ${formatDateFromString(endsAt!)} · $daysLeft days left'
+                        : 'Expired ${formatDateFromString(endsAt!)}',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.onDarkSoft,
+                    ),
+                  ),
+                ],
+                if (outstanding > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '${formatCurrency(outstanding)} outstanding',
+                    style: AppTheme.numberStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.onDark,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          GestureDetector(
+            onTap: () => context.push('/portal/qr'),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: AppTheme.onDark,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(AppIcons.qrCode, size: 46, color: AppTheme.darkCard),
+                  SizedBox(height: 4),
+                  Text(
+                    'Show QR',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.darkCard,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Today card (booking · workout · diet) ────────────────────────────────────
+
+class _TodayCard extends ConsumerWidget {
+  const _TodayCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final booking = ref.watch(_todayBookingProvider).valueOrNull;
+    final workout = ref.watch(_portalWorkoutProvider).valueOrNull;
+    final diet = ref.watch(_portalDietProvider).valueOrNull;
+
+    final rows = <Widget>[];
+
+    if (booking != null) {
+      final session = booking['class_sessions'] as Map<String, dynamic>?;
+      final cls = session?['classes'] as Map<String, dynamic>?;
+      final startsAt = DateTime.tryParse(
+        session?['starts_at'] as String? ?? '',
+      );
+      rows.add(
+        _TodayRow(
+          icon: AppIcons.eventActive,
+          iconBg: AppTheme.accentSoft,
+          iconColor: AppTheme.accent,
+          title: [
+            cls?['name'] as String? ?? 'Class',
+            if (startsAt != null)
+              TimeOfDay.fromDateTime(startsAt.toLocal()).format(context),
+          ].join(' · '),
+          subtitle: 'Booked for today',
+          trailing: const Text(
+            'Booked',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.accent,
+            ),
+          ),
+          // Informational only — the Bookings tab and its route are gone, so
+          // there is nowhere for this to lead.
         ),
       );
     }
 
-    final status = membership!['status'] as String? ?? 'active';
-    final startsAt = membership!['starts_at'] as String?;
-    final endsAt = membership!['ends_at'] as String?;
-    final planName = plan?['name'] as String? ?? 'Membership';
-    final price = plan?['price'];
-    final billingInterval = plan?['billing_interval'] as String?;
-
-    Color statusBg;
-    Color statusFg;
-    switch (status.toLowerCase()) {
-      case 'active':
-        statusBg = AppTheme.statusActiveBg;
-        statusFg = AppTheme.statusActive;
-        break;
-      case 'expired':
-        statusBg = AppTheme.statusDangerBg;
-        statusFg = AppTheme.statusDanger;
-        break;
-      default:
-        statusBg = AppTheme.statusNeutralBg;
-        statusFg = AppTheme.statusNeutral;
+    if (workout != null) {
+      final exercises = (workout['exercises'] as List?)?.length;
+      rows.add(
+        _TodayRow(
+          icon: AppIcons.fitnessActive,
+          iconBg: AppTheme.statusActiveBg,
+          iconColor: AppTheme.statusActive,
+          title: workout['name'] as String? ?? 'Workout plan',
+          subtitle: exercises != null
+              ? '$exercises exercise${exercises == 1 ? '' : 's'}'
+              : 'Your plan',
+          onTap: () => context.push('/portal/workout'),
+        ),
+      );
     }
 
-    // Days remaining
-    int? daysLeft;
-    if (endsAt != null) {
-      try {
-        final expiry = DateTime.parse(endsAt);
-        daysLeft = expiry.difference(DateTime.now()).inDays;
-      } catch (e) {
-        debugPrint('[GymCRM] Parse expiry date error: $e');
-      }
+    if (diet != null) {
+      final kcal = diet['calories'];
+      final protein = diet['protein_g'];
+      final meals = (diet['meals'] as List?)?.length;
+      final title = [
+        if (kcal != null) '$kcal kcal',
+        if (protein != null) '${protein}g protein',
+      ].join(' · ');
+      rows.add(
+        _TodayRow(
+          icon: AppIcons.restaurant,
+          iconBg: AppTheme.statusWarnBg,
+          iconColor: AppTheme.statusWarn,
+          title: title.isEmpty
+              ? (diet['name'] as String? ?? 'Diet plan')
+              : title,
+          subtitle: meals != null
+              ? '$meals meal${meals == 1 ? '' : 's'} planned'
+              : 'Your plan',
+          onTap: () => context.push('/portal/diet'),
+        ),
+      );
     }
 
-    return Container(
-      decoration: AppTheme.darkCardDecoration(),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-            child: Row(
-              children: [
-                const Text('Your membership', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.onDarkSoft)),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: statusBg, borderRadius: BorderRadius.circular(20)),
-                  child: Text(
-                    status[0].toUpperCase() + status.substring(1),
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: statusFg),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 16), color: Colors.white.withValues(alpha: 0.08)),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(planName, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.onDark)),
-                    if (price != null && billingInterval != null)
-                      Text(
-                        '${formatCurrency(price is num ? price : num.tryParse(price.toString()) ?? 0)} / $billingInterval',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    if (startsAt != null)
-                      Expanded(
-                        child: _MsDetailCell(label: 'Started', value: formatDateFromString(startsAt)),
-                      ),
-                    if (endsAt != null)
-                      Expanded(
-                        child: _MsDetailCell(label: 'Expires', value: formatDateFromString(endsAt)),
-                      ),
-                    if (daysLeft != null)
-                      Expanded(
-                        child: _MsDetailCell(
-                          label: 'Days left',
-                          value: daysLeft > 0 ? '$daysLeft' : 'Expired',
-                          valueColor: daysLeft <= 7 ? const Color(0xFFF2A08B) : daysLeft <= 14 ? const Color(0xFFE7C77C) : AppTheme.mintOnDark,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+    if (rows.isEmpty) return const SizedBox.shrink();
 
-class _MsDetailCell extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? valueColor;
-
-  const _MsDetailCell({required this.label, required this.value, this.valueColor});
-
-  @override
-  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.onDarkSoft, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 2),
-        Text(
-          value,
+        const Text(
+          'Today',
           style: TextStyle(
-            fontSize: 13.5, fontWeight: FontWeight.w800,
-            fontFeatures: AppTheme.tabularFigures,
-            color: valueColor ?? AppTheme.onDark,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.ink,
           ),
         ),
+        const SizedBox(height: 10),
+        CardList(children: rows),
       ],
     );
   }
 }
 
-// ─── Quick Stats Row ──────────────────────────────────────────────────────────
-
-class _QuickStatsRow extends StatelessWidget {
-  final AsyncValue<int> monthVisitsAsync;
-  final AsyncValue<List<Map<String, dynamic>>> recentCheckinsAsync;
-
-  const _QuickStatsRow({required this.monthVisitsAsync, required this.recentCheckinsAsync});
-
-  int _calcStreak(List<Map<String, dynamic>> checkins) {
-    if (checkins.isEmpty) return 0;
-    final sorted = [...checkins]..sort((a, b) {
-        final da = DateTime.tryParse(a['checked_in_at'] as String? ?? '') ?? DateTime(1970);
-        final db = DateTime.tryParse(b['checked_in_at'] as String? ?? '') ?? DateTime(1970);
-        return db.compareTo(da);
-      });
-
-    int streak = 0;
-    DateTime? lastDay;
-    for (final ci in sorted) {
-      final dt = DateTime.tryParse(ci['checked_in_at'] as String? ?? '');
-      if (dt == null) continue;
-      final day = DateTime(dt.year, dt.month, dt.day);
-      if (lastDay == null) {
-        streak = 1;
-        lastDay = day;
-      } else if (lastDay.difference(day).inDays == 1) {
-        streak++;
-        lastDay = day;
-      } else {
-        break;
-      }
-    }
-    return streak;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final monthVisits = monthVisitsAsync.maybeWhen(data: (v) => v, orElse: () => 0);
-    final streak = recentCheckinsAsync.maybeWhen(
-      data: (list) => _calcStreak(list),
-      orElse: () => 0,
-    );
-
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: AppTheme.cardDecoration(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.calendar_today_outlined, size: 18, color: AppTheme.inkSoft),
-                ),
-                const SizedBox(height: 10),
-                Text('$monthVisits', style: AppTheme.numberStyle(fontSize: 24)),
-                const SizedBox(height: 2),
-                const Text('This month', style: TextStyle(fontSize: 12, color: AppTheme.inkHint, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: AppTheme.cardDecoration(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(color: AppTheme.accentSoft, borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.local_fire_department_outlined, size: 18, color: AppTheme.accent),
-                ),
-                const SizedBox(height: 10),
-                Text('$streak', style: AppTheme.numberStyle(fontSize: 24)),
-                const SizedBox(height: 2),
-                const Text('Day streak', style: TextStyle(fontSize: 12, color: AppTheme.inkHint, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Quick Links Grid ─────────────────────────────────────────────────────────
-
-class _QuickLinksGrid extends StatelessWidget {
-  const _QuickLinksGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    final links = [
-      _Link('Billing', Icons.receipt_outlined, '/portal/billing', false),
-      _Link('Bookings', Icons.calendar_today_outlined, '/portal/bookings', false),
-      _Link('My QR', Icons.qr_code_outlined, '/portal/qr', true),
-      _Link('Workout', Icons.fitness_center_outlined, '/portal/workout', false),
-      _Link('Attendance', Icons.trending_up, '/portal/heatmap', false),
-    ];
-
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 14),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Quick Access', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-            ),
-          ),
-          const Divider(height: 1, color: AppTheme.border),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: GridView.count(
-              shrinkWrap: true,
-              crossAxisCount: 2,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 2.2,
-              children: links.map((l) => _LinkTile(link: l)).toList(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Link {
-  final String label;
+class _TodayRow extends StatelessWidget {
   final IconData icon;
-  final String route;
-  final bool highlight;
-  const _Link(this.label, this.icon, this.route, this.highlight);
-}
+  final Color iconBg;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
 
-class _LinkTile extends StatelessWidget {
-  final _Link link;
-  const _LinkTile({required this.link});
+  /// Null for rows that are purely informational — InkWell renders them
+  /// unpressable rather than navigating somewhere that no longer exists.
+  final VoidCallback? onTap;
+  const _TodayRow({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.push(link.route),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: link.highlight ? AppTheme.accent.withValues(alpha: 0.12) : AppTheme.background,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: link.highlight ? AppTheme.accent.withValues(alpha: 0.3) : AppTheme.border),
-        ),
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Row(
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
-                color: link.highlight ? AppTheme.accent : AppTheme.activeBg,
-                shape: BoxShape.circle,
+                color: iconBg,
+                borderRadius: BorderRadius.circular(11),
               ),
-              child: Icon(link.icon, size: 16, color: link.highlight ? AppTheme.accentFg : AppTheme.inkSoft),
+              child: Icon(icon, size: 18, color: iconColor),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              child: Text(link.label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-            ),
+            trailing ??
+                const Icon(
+                  AppIcons.chevronRight,
+                  size: 20,
+                  color: AppTheme.inkHint,
+                ),
           ],
         ),
       ),
@@ -561,103 +692,200 @@ class _LinkTile extends StatelessWidget {
   }
 }
 
-// ─── Recent Check-ins Card ────────────────────────────────────────────────────
+// ─── Attendance card ──────────────────────────────────────────────────────────
 
-class _RecentCheckInsCard extends StatelessWidget {
+class _AttendanceCard extends StatelessWidget {
+  final AsyncValue<int> monthVisitsAsync;
   final AsyncValue<List<Map<String, dynamic>>> recentCheckinsAsync;
-  const _RecentCheckInsCard({required this.recentCheckinsAsync});
+  const _AttendanceCard({
+    required this.monthVisitsAsync,
+    required this.recentCheckinsAsync,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: AppTheme.cardDecoration(),
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 14),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Recent Check-ins', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-            ),
-          ),
-          const Divider(height: 1, color: AppTheme.border),
-          recentCheckinsAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.ink)),
-            ),
-            error: (_, __) => const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: Text('Failed to load check-ins', style: TextStyle(fontSize: 14, color: AppTheme.inkHint))),
-            ),
-            data: (checkins) {
-              if (checkins.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: Text('No check-ins yet', style: TextStyle(fontSize: 14, color: AppTheme.inkHint))),
-                );
-              }
-              return ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: checkins.length,
-                separatorBuilder: (_, __) => const Divider(height: 1, color: AppTheme.border),
-                itemBuilder: (_, i) {
-                  final ci = checkins[i];
-                  final checkedInAt = ci['checked_in_at'] as String?;
-                  String dateStr = '';
-                  String timeStr = '';
-                  if (checkedInAt != null) {
-                    try {
-                      final dt = DateTime.parse(checkedInAt).toLocal();
-                      dateStr = formatDateFromString(checkedInAt);
-                      final h = dt.hour;
-                      final m = dt.minute.toString().padLeft(2, '0');
-                      final period = h >= 12 ? 'PM' : 'AM';
-                      final displayH = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-                      timeStr = '$displayH:$m $period';
-                    } catch (e) {
-                      debugPrint('[GymCRM] Parse check-in time error: $e');
-                    }
-                  }
+    final visits = monthVisitsAsync.valueOrNull ?? 0;
+    final checkIns = recentCheckinsAsync.valueOrNull ?? const [];
 
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
+    // Distinct local days the member checked in, newest first.
+    final days = <DateTime>{};
+    for (final c in checkIns) {
+      final t = DateTime.tryParse(c['checked_in_at'] as String? ?? '');
+      if (t == null) continue;
+      final local = t.toLocal();
+      days.add(DateTime(local.year, local.month, local.day));
+    }
+
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+
+    // Streak counts back from today (or yesterday, so an early-morning visit
+    // gap doesn't look like a broken streak).
+    var streak = 0;
+    var cursor = days.contains(todayDate)
+        ? todayDate
+        : todayDate.subtract(const Duration(days: 1));
+    while (days.contains(cursor)) {
+      streak++;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+
+    final monthName = _monthNames[today.month - 1];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Your attendance',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
+            ),
+            GestureDetector(
+              onTap: () => context.push('/portal/heatmap'),
+              behavior: HitTestBehavior.opaque,
+              child: const Text(
+                'History',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.accent,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: AppTheme.cardDecoration(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    '$visits',
+                    style: AppTheme.numberStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      streak > 0
+                          ? 'visits in $monthName · $streak-day streak'
+                          : 'visits in $monthName',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.inkSoft,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Last 14 days, oldest on the left.
+              Row(
+                children: List.generate(14, (i) {
+                  final day = todayDate.subtract(Duration(days: 13 - i));
+                  final visited = days.contains(day);
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(right: i == 13 ? 0 : 4),
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: AppTheme.statusActiveBg,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(Icons.fitness_center_outlined, size: 18, color: AppTheme.statusActive),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Gym Visit', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.ink)),
-                              if (dateStr.isNotEmpty)
-                                Text(dateStr, style: const TextStyle(fontSize: 12, color: AppTheme.inkHint)),
-                            ],
+                            color: visited
+                                ? AppTheme.statusActive
+                                : AppTheme.surface2,
+                            borderRadius: BorderRadius.circular(3),
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(color: AppTheme.statusActiveBg, borderRadius: BorderRadius.circular(20)),
-                          child: Text(timeStr.isNotEmpty ? timeStr : 'In', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.statusActive)),
-                        ),
-                      ],
+                      ),
                     ),
                   );
-                },
-              );
-            },
+                }),
+              ),
+            ],
           ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+const _monthNames = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+// ─── Outstanding alert ────────────────────────────────────────────────────────
+
+class _OutstandingAlert extends StatelessWidget {
+  final double amount;
+  const _OutstandingAlert({required this.amount});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => context.push('/portal/billing'),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppTheme.statusDangerBg,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              AppIcons.error,
+              size: 19,
+              color: AppTheme.statusDanger,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${formatCurrency(amount)} pending from your last payment',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF8E2F1B),
+                ),
+              ),
+            ),
+            const Text(
+              'View',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.statusDanger,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

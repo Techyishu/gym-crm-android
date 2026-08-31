@@ -8,21 +8,25 @@ import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import 'diet_plan_sheet.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
-final _gymDietPlansProvider =
-    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _gymDietPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('members')
       .select(
-          'id, first_name, last_name, diet_plans(id, name, goal, calories, meals, is_active, created_at)')
+        'id, first_name, last_name, diet_plans(id, name, goal, calories, meals, is_active, created_at)',
+      )
       .eq('gym_id', gymId)
       .order('first_name');
   return (data as List).cast<Map<String, dynamic>>();
 });
 
-final _gymMembersForDietProvider =
-    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _gymMembersForDietProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('members')
@@ -36,7 +40,8 @@ class StaffDietPlansScreen extends ConsumerStatefulWidget {
   const StaffDietPlansScreen({super.key});
 
   @override
-  ConsumerState<StaffDietPlansScreen> createState() => _StaffDietPlansScreenState();
+  ConsumerState<StaffDietPlansScreen> createState() =>
+      _StaffDietPlansScreenState();
 }
 
 class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
@@ -57,14 +62,14 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
     if (selected == null || !mounted) return;
 
     final memberId = selected['id'] as String;
-    final memberName = '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
+    final memberName =
+        '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
 
     final saved = await showAdaptiveSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) =>
-          DietPlanSheet(memberId: memberId, memberName: memberName),
+      builder: (_) => DietPlanSheet(memberId: memberId, memberName: memberName),
     );
     if (saved == true) ref.invalidate(_gymDietPlansProvider);
   }
@@ -75,78 +80,116 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: ResponsiveContent(child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Row(children: [
-                IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 18), onPressed: () => Navigator.of(context).maybePop()),
-                const Expanded(
-                  child: Text('Diet plans',
-                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
-                ),
-                GestureDetector(
-                  onTap: () => _pickMemberAndCreate(),
-                  child: Container(
-                    width: 38, height: 38,
-                    decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(13)),
-                    child: const Icon(Icons.add, size: 21, color: Colors.white),
-                  ),
-                ),
-              ]),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: TextField(
-                decoration: const InputDecoration(hintText: 'Search members', prefixIcon: Icon(Icons.search, size: 20)),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-            Expanded(
-              child: plansAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('Error: $e')),
-                data: (members) {
-                  final filtered = _query.trim().isEmpty
-                      ? members
-                      : members.where((m) =>
-                          '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase().contains(_query.toLowerCase())).toList();
-
-                  if (filtered.isEmpty) return const _EmptyState();
-
-                  return RefreshIndicator(
-                    color: AppTheme.accent,
-                    onRefresh: () async => ref.invalidate(_gymDietPlansProvider),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final m = filtered[i];
-                        final memberId = m['id'] as String;
-                        final memberName = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
-                        final plans = (m['diet_plans'] as List? ?? []).cast<Map<String, dynamic>>();
-                        if (plans.isEmpty) {
-                          return _NoPlanRow(
-                            name: memberName,
-                            onAssign: () => _pickMemberAndCreate(preselected: m),
-                          );
-                        }
-                        return _MemberPlanGroup(
-                          memberId: memberId,
-                          memberName: memberName,
-                          plans: plans,
-                          onChanged: () => ref.invalidate(_gymDietPlansProvider),
-                        );
-                      },
+      body: ResponsiveContent(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(AppIcons.arrowBackIosNew, size: 18),
+                      onPressed: () => Navigator.of(context).maybePop(),
                     ),
-                  );
-                },
+                    const Expanded(
+                      child: Text(
+                        'Diet plans',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.ink,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => _pickMemberAndCreate(),
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent,
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: const Icon(
+                          AppIcons.add,
+                          size: 21,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'Search members',
+                    prefixIcon: Icon(AppIcons.search, size: 20),
+                  ),
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+              Expanded(
+                child: plansAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (_, _) => const ErrorState(what: 'diet plans'),
+                  data: (members) {
+                    final filtered = _query.trim().isEmpty
+                        ? members
+                        : members
+                              .where(
+                                (m) =>
+                                    '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                                        .toLowerCase()
+                                        .contains(_query.toLowerCase()),
+                              )
+                              .toList();
+
+                    if (filtered.isEmpty) return const _EmptyState();
+
+                    return RefreshIndicator(
+                      color: AppTheme.accent,
+                      onRefresh: () async =>
+                          ref.invalidate(_gymDietPlansProvider),
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final m = filtered[i];
+                          final memberId = m['id'] as String;
+                          final memberName =
+                              '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                                  .trim();
+                          final plans = (m['diet_plans'] as List? ?? [])
+                              .cast<Map<String, dynamic>>();
+                          if (plans.isEmpty) {
+                            return _NoPlanRow(
+                              name: memberName,
+                              onAssign: () =>
+                                  _pickMemberAndCreate(preselected: m),
+                            );
+                          }
+                          return _MemberPlanGroup(
+                            memberId: memberId,
+                            memberName: memberName,
+                            plans: plans,
+                            onChanged: () =>
+                                ref.invalidate(_gymDietPlansProvider),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 }
@@ -164,19 +207,38 @@ class _NoPlanRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: AppTheme.cardDecoration(),
-      child: Row(children: [
-        InitialsAvatar(name: name, size: 40),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-            const Text('No plan assigned',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.statusDanger)),
-          ]),
-        ),
-        PillButton(label: 'Assign', onTap: onAssign),
-      ]),
+      child: Row(
+        children: [
+          InitialsAvatar(name: name, size: 40),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.ink,
+                  ),
+                ),
+                const Text(
+                  'No plan assigned',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusDanger,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PillButton(label: 'Assign', onTap: onAssign),
+        ],
+      ),
     );
   }
 }
@@ -205,15 +267,20 @@ class _MemberPlanGroup extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 8, top: 4),
           child: Row(
             children: [
-              const Icon(Icons.person_outline, size: 14, color: AppTheme.inkHint),
+              const Icon(
+                AppIcons.person,
+                size: 14,
+                color: AppTheme.inkHint,
+              ),
               const SizedBox(width: 6),
               Text(
                 memberName,
                 style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.inkSoft,
-                    letterSpacing: 0.3),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.inkSoft,
+                  letterSpacing: 0.3,
+                ),
               ),
               const SizedBox(width: 6),
               Container(
@@ -225,20 +292,23 @@ class _MemberPlanGroup extends StatelessWidget {
                 child: Text(
                   '${plans.length}',
                   style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.inkSoft),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.inkSoft,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        ...plans.map((plan) => _StaffDietPlanCard(
-              plan: plan,
-              memberId: memberId,
-              memberName: memberName,
-              onChanged: onChanged,
-            )),
+        ...plans.map(
+          (plan) => _StaffDietPlanCard(
+            plan: plan,
+            memberId: memberId,
+            memberName: memberName,
+            onChanged: onChanged,
+          ),
+        ),
         const SizedBox(height: 8),
       ],
     );
@@ -271,14 +341,14 @@ class _StaffDietPlanCardState extends State<_StaffDietPlanCard> {
     'weight_loss': (Color(0xFFF8DFD7), Color(0xFFC2492F)),
     'muscle_gain': (Color(0xFFDDEFE2), Color(0xFF2E7D4F)),
     'maintenance': (Color(0xFFF4E8CD), Color(0xFFB07C1F)),
-    'general':     (Color(0xFFE9E6DD), Color(0xFF6E6A60)),
+    'general': (Color(0xFFE9E6DD), Color(0xFF6E6A60)),
   };
 
   static const _goalLabels = {
     'weight_loss': 'Weight Loss',
     'muscle_gain': 'Muscle Gain',
     'maintenance': 'Maintenance',
-    'general':     'General',
+    'general': 'General',
   };
 
   Future<void> _delete(BuildContext context) async {
@@ -287,7 +357,7 @@ class _StaffDietPlanCardState extends State<_StaffDietPlanCard> {
       title: 'Delete plan?',
       body: 'Delete "${widget.plan['name']}"? This cannot be undone.',
       confirmLabel: 'Delete',
-      icon: Icons.delete_outline,
+      icon: AppIcons.delete,
     );
     if (ok != true) return;
     try {
@@ -299,9 +369,9 @@ class _StaffDietPlanCardState extends State<_StaffDietPlanCard> {
     } catch (e) {
       debugPrint('[GymCRM] Delete diet plan error: $e');
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to delete plan')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to delete plan')));
       }
     }
   }
@@ -347,57 +417,83 @@ class _StaffDietPlanCardState extends State<_StaffDietPlanCard> {
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
-                        color: goalBg, borderRadius: BorderRadius.circular(20)),
-                    child: Text(goalLabel.toUpperCase(),
-                        style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: goalFg,
-                            letterSpacing: 0.8)),
+                      color: goalBg,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      goalLabel.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: goalFg,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                color: AppTheme.ink)),
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: AppTheme.ink,
+                          ),
+                        ),
                         if (createdAt != null)
-                          Text('Created ${formatDateFromString(createdAt)}',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppTheme.inkHint)),
+                          Text(
+                            'Created ${formatDateFromString(createdAt)}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.inkHint,
+                            ),
+                          ),
                       ],
                     ),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('${meals.length} meals',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppTheme.inkHint)),
+                      Text(
+                        '${meals.length} meals',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.inkHint,
+                        ),
+                      ),
                       if (calories != null)
-                        Text('$calories kcal',
-                            style: const TextStyle(
-                                fontSize: 11, color: AppTheme.inkSoft)),
+                        Text(
+                          '$calories kcal',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.inkSoft,
+                          ),
+                        ),
                     ],
                   ),
                   Icon(
                     _expanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                        ? AppIcons.keyboardArrowUp
+                        : AppIcons.keyboardArrowDown,
                     size: 18,
                     color: AppTheme.inkHint,
                   ),
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert,
-                        size: 18, color: AppTheme.inkSoft),
+                    icon: const Icon(
+                      AppIcons.moreVert,
+                      size: 18,
+                      color: AppTheme.inkSoft,
+                    ),
                     padding: EdgeInsets.zero,
                     onSelected: (v) {
                       if (v == 'edit') _edit(context);
@@ -406,21 +502,30 @@ class _StaffDietPlanCardState extends State<_StaffDietPlanCard> {
                     itemBuilder: (_) => [
                       const PopupMenuItem(
                         value: 'edit',
-                        child: Row(children: [
-                          Icon(Icons.edit_outlined, size: 16),
-                          SizedBox(width: 10),
-                          Text('Edit'),
-                        ]),
+                        child: Row(
+                          children: [
+                            Icon(AppIcons.edit, size: 16),
+                            SizedBox(width: 10),
+                            Text('Edit'),
+                          ],
+                        ),
                       ),
                       const PopupMenuItem(
                         value: 'delete',
-                        child: Row(children: [
-                          Icon(Icons.delete_outline,
-                              size: 16, color: AppTheme.statusDanger),
-                          SizedBox(width: 10),
-                          Text('Delete',
-                              style: TextStyle(color: AppTheme.statusDanger)),
-                        ]),
+                        child: Row(
+                          children: [
+                            Icon(
+                              AppIcons.delete,
+                              size: 16,
+                              color: AppTheme.statusDanger,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Delete',
+                              style: TextStyle(color: AppTheme.statusDanger),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -471,24 +576,31 @@ class _MealView extends StatelessWidget {
               Text(
                 name.toUpperCase(),
                 style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.inkHint,
-                    letterSpacing: 0.8),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.inkHint,
+                  letterSpacing: 0.8,
+                ),
               ),
               if (time.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.surface2,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(time,
-                      style: const TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.inkSoft,
-                          fontWeight: FontWeight.w600)),
+                  child: Text(
+                    time,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.inkSoft,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ],
@@ -507,20 +619,31 @@ class _MealView extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 5),
               child: Row(
                 children: [
-                  Text('${e.key + 1}. ',
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.inkHint)),
+                  Text(
+                    '${e.key + 1}. ',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
                   Expanded(
-                    child: Text(food,
-                        style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.ink)),
+                    child: Text(
+                      food,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.ink,
+                      ),
+                    ),
                   ),
                   if (parts.isNotEmpty)
-                    Text(parts.join(' · '),
-                        style: const TextStyle(
-                            fontSize: 11, color: AppTheme.inkHint)),
+                    Text(
+                      parts.join(' · '),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.inkHint,
+                      ),
+                    ),
                 ],
               ),
             );
@@ -548,13 +671,16 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final filtered = widget.members.where((m) {
-      final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase();
+      final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+          .toLowerCase();
       return name.contains(_query.toLowerCase());
     }).toList();
 
     return Padding(
       padding: EdgeInsets.only(
-        left: 16, right: 16, top: 20,
+        left: 16,
+        right: 16,
+        top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
       child: Column(
@@ -565,7 +691,10 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
           const SizedBox(height: 14),
           TextFormField(
             autofocus: true,
-            decoration: const InputDecoration(hintText: 'Search members', prefixIcon: Icon(Icons.search, size: 18)),
+            decoration: const InputDecoration(
+              hintText: 'Search members',
+              prefixIcon: Icon(AppIcons.search, size: 18),
+            ),
             onChanged: (v) => setState(() => _query = v),
           ),
           const SizedBox(height: 12),
@@ -578,19 +707,32 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
               itemCount: filtered.length,
               itemBuilder: (_, i) {
                 final m = filtered[i];
-                final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
+                final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                    .trim();
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(14),
                     onTap: () => Navigator.pop(context, m),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                      child: Row(children: [
-                        InitialsAvatar(name: name, size: 38),
-                        const SizedBox(width: 12),
-                        Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
-                      ]),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          InitialsAvatar(name: name, size: 38),
+                          const SizedBox(width: 12),
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: AppTheme.ink,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -614,16 +756,21 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.restaurant_menu, size: 56, color: AppTheme.inkHint),
+          Icon(AppIcons.restaurant, size: 56, color: AppTheme.inkHint),
           SizedBox(height: 16),
-          Text('No diet plans yet',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.ink)),
+          Text(
+            'No diet plans yet',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.ink,
+            ),
+          ),
           SizedBox(height: 8),
-          Text('Tap + to create a plan for a member',
-              style: TextStyle(color: AppTheme.inkSoft)),
+          Text(
+            'Tap + to create a plan for a member',
+            style: TextStyle(color: AppTheme.inkSoft),
+          ),
         ],
       ),
     );

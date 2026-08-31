@@ -9,55 +9,79 @@ class AppTheme {
   // ── Brand palette ("calmer, more confident" redesign) ───────────────────
   // Warm neutrals, a single energetic orange accent, deep green-black hero
   // surfaces, tabular numbers.
-  static const Color ink        = Color(0xFF1D1B16); // primary text
-  static const Color inkDark    = Color(0xFF12110D); // hover/pressed
-  static const Color inkSoft    = Color(0xFF7A756A); // secondary text
-  static const Color inkHint    = Color(0xFFA39E93); // placeholder/hint
-  static const Color accent     = Color(0xFF2C6E7A); // teal accent
+  static const Color ink = Color(0xFF1D1B16); // primary text
+  static const Color inkDark = Color(0xFF12110D); // hover/pressed
+  static const Color inkSoft = Color(0xFF7A756A); // secondary text
+  static const Color inkHint = Color(0xFFA39E93); // placeholder/hint
+  static const Color accent = Color(0xFF2C6E7A); // teal accent
   static const Color accentDark = Color(0xFF255D68); // pressed teal
-  static const Color accentFg   = Color(0xFFFFFFFF); // text on teal
+  static const Color accentFg = Color(0xFFFFFFFF); // text on teal
   static const Color accentSoft = Color(0xFFE6EEEF); // soft teal tint bg
 
   // ── Surfaces ────────────────────────────────────────────────────────────
-  static const Color surface    = Color(0xFFFFFFFF); // card/modal
+  static const Color surface = Color(0xFFFFFFFF); // card/modal
   static const Color background = Color(0xFFEFECE4); // warm cream canvas
-  static const Color surface2   = Color(0xFFE7E3D9); // input fills, skeletons
-  static const Color activeBg   = Color(0xFFE7E3D9); // selected/active nav bg
-  static const Color darkCard   = Color(0xFF182720); // deep green-black hero card
-  static const Color darkCard2  = Color(0xFF223529); // raised element on darkCard
-  static const Color onDark     = Color(0xFFF4F2EC); // primary text on darkCard
-  static const Color onDarkSoft = Color(0xFF9DAA9F); // secondary text on darkCard
-  static const Color mintOnDark = Color(0xFF7FD6A2); // positive numbers on darkCard
+  static const Color surface2 = Color(0xFFE7E3D9); // input fills, skeletons
+  static const Color activeBg = Color(0xFFE7E3D9); // selected/active nav bg
+  static const Color darkCard = Color(0xFF182720); // deep green-black hero card
+  static const Color darkCard2 = Color(
+    0xFF223529,
+  ); // raised element on darkCard
+  static const Color darkInset = Color(
+    0xFF0F1A14,
+  ); // recessed well (scanner viewport)
+  static const Color onDark = Color(0xFFF4F2EC); // primary text on darkCard
+  static const Color onDarkSoft = Color(
+    0xFF9DAA9F,
+  ); // secondary text on darkCard
+  static const Color mintOnDark = Color(
+    0xFF7FD6A2,
+  ); // positive numbers on darkCard
 
   // ── Borders ─────────────────────────────────────────────────────────────
-  static const Color border     = Color(0xFFE2DED4);
+  static const Color border = Color(0xFFE2DED4);
+
+  // ── Elevation ───────────────────────────────────────────────────────────
+  /// The single card shadow used across the app — a barely-there lift that
+  /// separates white cards from the cream canvas without a border.
+  static const List<BoxShadow> cardShadow = [
+    BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
+  ];
+
+  /// Glow under teal primary actions (the raised check-in button, the
+  /// members "Add" pill).
+  static const List<BoxShadow> accentShadow = [
+    BoxShadow(color: Color(0x522C6E7A), blurRadius: 12, offset: Offset(0, 4)),
+  ];
 
   // ── Status ──────────────────────────────────────────────────────────────
-  static const Color statusActive   = Color(0xFF2E7D4F);
+  static const Color statusActive = Color(0xFF2E7D4F);
   static const Color statusActiveBg = Color(0xFFDDEFE2);
-  static const Color statusWarn     = Color(0xFFB07C1F);
-  static const Color statusWarnBg   = Color(0xFFF4E8CD);
-  static const Color statusDanger   = Color(0xFFC2492F);
+  static const Color statusWarn = Color(0xFFB07C1F);
+  static const Color statusWarnBg = Color(0xFFF4E8CD);
+  static const Color statusDanger = Color(0xFFC2492F);
   static const Color statusDangerBg = Color(0xFFF8DFD7);
-  static const Color statusNeutral  = Color(0xFF6E6A60);
-  static const Color statusNeutralBg= Color(0xFFE9E6DD);
+  static const Color statusNeutral = Color(0xFF6E6A60);
+  static const Color statusNeutralBg = Color(0xFFE9E6DD);
 
   // ── Legacy aliases (used throughout existing screens) ───────────────────
-  static const Color primary        = ink;
-  static const Color primaryDark    = inkDark;
-  static const Color primaryLight   = activeBg;
+  static const Color primary = ink;
+  static const Color primaryDark = inkDark;
+  static const Color primaryLight = activeBg;
   static const Color primarySurface = activeBg;
-  static const Color textPrimary    = ink;
-  static const Color textSecondary  = inkSoft;
-  static const Color textTertiary   = inkHint;
-  static const Color error          = statusDanger;
-  static const Color warning        = statusWarn;
-  static const Color success        = statusActive;
-  static const Color info           = Color(0xFF6E6A60);
+  static const Color textPrimary = ink;
+  static const Color textSecondary = inkSoft;
+  static const Color textTertiary = inkHint;
+  static const Color error = statusDanger;
+  static const Color warning = statusWarn;
+  static const Color success = statusActive;
+  static const Color info = Color(0xFF6E6A60);
 
   // ── Numbers ──────────────────────────────────────────────────────────────
   /// Tabular figures for all money/stat text so digits align.
-  static const List<FontFeature> tabularFigures = [FontFeature.tabularFigures()];
+  static const List<FontFeature> tabularFigures = [
+    FontFeature.tabularFigures(),
+  ];
 
   static TextStyle numberStyle({
     double fontSize = 28,
@@ -78,13 +102,31 @@ class AppTheme {
   static BoxDecoration cardDecoration({double radius = 16}) => BoxDecoration(
     color: surface,
     borderRadius: BorderRadius.circular(radius),
-    boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2))],
+    boxShadow: cardShadow,
   );
 
-  static BoxDecoration darkCardDecoration({double radius = 20}) => BoxDecoration(
-    color: darkCard,
-    borderRadius: BorderRadius.circular(radius),
+  /// Uppercase group label above a section ("NEEDS ATTENTION", "SETUP").
+  static const TextStyle kicker = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 11,
+    fontWeight: FontWeight.w800,
+    letterSpacing: 0.8,
+    color: inkHint,
   );
+
+  /// Section heading over a group of cards.
+  static const TextStyle sectionTitle = TextStyle(
+    fontFamily: _fontFamily,
+    fontSize: 16,
+    fontWeight: FontWeight.w800,
+    color: ink,
+  );
+
+  static BoxDecoration darkCardDecoration({double radius = 20}) =>
+      BoxDecoration(
+        color: darkCard,
+        borderRadius: BorderRadius.circular(radius),
+      );
 
   static ThemeData get light {
     final base = ThemeData(useMaterial3: true);
@@ -98,7 +140,11 @@ class AppTheme {
         surface: surface,
         error: error,
       ),
-      textTheme: base.textTheme.apply(fontFamily: _fontFamily, bodyColor: ink, displayColor: ink),
+      textTheme: base.textTheme.apply(
+        fontFamily: _fontFamily,
+        bodyColor: ink,
+        displayColor: ink,
+      ),
       scaffoldBackgroundColor: background,
       appBarTheme: const AppBarTheme(
         backgroundColor: background,
@@ -126,11 +172,26 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: border, width: 1)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: border, width: 1)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: ink, width: 1.5)),
-        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: error)),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: border, width: 1),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: border, width: 1),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: ink, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: error),
+        ),
         labelStyle: const TextStyle(color: inkSoft, fontSize: 14),
         floatingLabelStyle: const TextStyle(color: ink, fontSize: 12),
         hintStyle: const TextStyle(color: inkHint, fontSize: 14),
@@ -140,24 +201,73 @@ class AppTheme {
           backgroundColor: accent,
           foregroundColor: accentFg,
           minimumSize: const Size(double.infinity, 52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          textStyle: const TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.w700, fontSize: 15),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: _fontFamily,
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+          ),
           elevation: 0,
+        ),
+      ),
+      // FilledButton is Material's default-styled button, so without this it
+      // fell back to colorScheme.primary — which is `ink`, i.e. a black CTA on
+      // the handful of screens that reach for it (invoice settings, data
+      // export, attendance calendar…). Same paint as ElevatedButton, except
+      // the width: one FilledButton lives inline in a Row, so a
+      // double.infinity minimum here would crush its Expanded sibling to zero.
+      // Full-width callers already wrap in a SizedBox or bottomNavigationBar.
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: accent,
+          foregroundColor: accentFg,
+          minimumSize: const Size(0, 52),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: _fontFamily,
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+          ),
+        ),
+      ),
+      // Switches default to colorScheme.primary too — black. Every screen that
+      // cared used to re-state the accent locally; this makes teal the default
+      // so a bare Switch/SwitchListTile is already on-brand.
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) =>
+              states.contains(WidgetState.selected) ? accentFg : null,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? accent : null,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: ink,
           minimumSize: const Size(double.infinity, 52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           side: const BorderSide(color: border),
-          textStyle: const TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.w600, fontSize: 15),
+          textStyle: const TextStyle(
+            fontFamily: _fontFamily,
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+          ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: accent,
-          textStyle: const TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.w700),
+          textStyle: const TextStyle(
+            fontFamily: _fontFamily,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
@@ -169,9 +279,19 @@ class AppTheme {
         height: 60,
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const TextStyle(fontFamily: _fontFamily, fontSize: 10, fontWeight: FontWeight.w700, color: accent);
+            return const TextStyle(
+              fontFamily: _fontFamily,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: accent,
+            );
           }
-          return const TextStyle(fontFamily: _fontFamily, fontSize: 10, fontWeight: FontWeight.w600, color: inkHint);
+          return const TextStyle(
+            fontFamily: _fontFamily,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: inkHint,
+          );
         }),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
@@ -180,11 +300,19 @@ class AppTheme {
           return const IconThemeData(color: inkHint, size: 22);
         }),
       ),
-      dividerTheme: const DividerThemeData(color: border, space: 1, thickness: 1),
+      dividerTheme: const DividerThemeData(
+        color: border,
+        space: 1,
+        thickness: 1,
+      ),
       chipTheme: ChipThemeData(
         backgroundColor: surface,
         selectedColor: ink,
-        labelStyle: const TextStyle(color: ink, fontSize: 13, fontWeight: FontWeight.w600),
+        labelStyle: const TextStyle(
+          color: ink,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         side: BorderSide.none,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -192,7 +320,9 @@ class AppTheme {
       listTileTheme: const ListTileThemeData(iconColor: inkSoft),
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         elevation: 0,
       ),
       tabBarTheme: TabBarThemeData(
@@ -200,8 +330,16 @@ class AppTheme {
         unselectedLabelColor: inkHint,
         indicatorColor: accent,
         dividerColor: Colors.transparent,
-        labelStyle: const TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.w700, fontSize: 13),
-        unselectedLabelStyle: const TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.w500, fontSize: 13),
+        labelStyle: const TextStyle(
+          fontFamily: _fontFamily,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontFamily: _fontFamily,
+          fontWeight: FontWeight.w500,
+          fontSize: 13,
+        ),
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: accent,

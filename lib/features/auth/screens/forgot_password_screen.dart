@@ -1,14 +1,21 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/auth_canvas_kit.dart';
 import '../providers/auth_provider.dart';
 
+/// Canvas `forgot` / `forgotSent`. There's no `reset` (set-new-password)
+/// counterpart here — Supabase's reset-link email opens the web app, not
+/// this one, so a Flutter screen for it would have nothing to deep-link
+/// into. See [[canvas-auth-gym-setup]].
 class ForgotPasswordScreen extends ConsumerStatefulWidget {
   const ForgotPasswordScreen({super.key});
 
   @override
-  ConsumerState<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+  ConsumerState<ForgotPasswordScreen> createState() =>
+      _ForgotPasswordScreenState();
 }
 
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
@@ -18,42 +25,63 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   bool _sent = false;
   String? _error;
 
+  int _resendCooldown = 0;
+  Timer? _resendTimer;
+
   @override
   void dispose() {
     _emailCtrl.dispose();
+    _resendTimer?.cancel();
     super.dispose();
+  }
+
+  void _startResendTimer() {
+    _resendTimer?.cancel();
+    setState(() => _resendCooldown = 45);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (_resendCooldown <= 1) {
+        t.cancel();
+        if (mounted) setState(() => _resendCooldown = 0);
+      } else {
+        if (mounted) setState(() => _resendCooldown--);
+      }
+    });
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
-    final error = await ref.read(authNotifierProvider.notifier).resetPassword(_emailCtrl.text.trim());
+    final error = await ref
+        .read(authNotifierProvider.notifier)
+        .resetPassword(_emailCtrl.text.trim());
 
     if (!mounted) return;
     setState(() {
       _loading = false;
-      if (error != null) _error = error;
-      else _sent = true;
+      if (error != null) {
+        _error = error;
+      } else {
+        _sent = true;
+        _startResendTimer();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
-        ),
-      ),
+      backgroundColor: AppTheme.background,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 400),
-              child: _sent ? _buildSuccess() : _buildForm(),
+              child: _sent ? _buildSent() : _buildForm(),
             ),
           ),
         ),
@@ -65,51 +93,146 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     return Form(
       key: _formKey,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Reset password', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text("Enter your email and we'll send a reset link.", style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary)),
-          const SizedBox(height: 32),
+          CanvasBack(onTap: () => context.pop()),
+          const SizedBox(height: 16),
+          const CanvasHeading(
+            title: 'Reset your password',
+            subtitle:
+                'Enter the email you signed up with. We will send a reset '
+                'link.',
+          ),
+          const SizedBox(height: 18),
           if (_error != null) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFF8DFD7), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFEBC0B2))),
-              child: Text(_error!, style: const TextStyle(color: AppTheme.error)),
-            ),
+            CanvasBanner(message: _error!),
             const SizedBox(height: 16),
           ],
-          TextFormField(
-            controller: _emailCtrl,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(labelText: 'Email address', prefixIcon: Icon(Icons.email_outlined)),
-            validator: (v) => (v == null || !v.contains('@')) ? 'Enter a valid email' : null,
+          CanvasField(
+            label: 'Email',
+            child: TextFormField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: canvasFieldDecoration(hint: 'rahul@ironhouse.in'),
+              validator: (v) => (v == null || !v.contains('@'))
+                  ? 'Enter a valid email'
+                  : null,
+            ),
           ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _loading ? null : _submit,
-            child: _loading
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Text('Send reset link'),
+          const SizedBox(height: 18),
+          CanvasButton(
+            label: 'Send reset link',
+            loading: _loading,
+            onPressed: _submit,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSuccess() {
+  Widget _buildSent() {
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(Icons.mark_email_read_outlined, size: 64, color: AppTheme.primary),
-        const SizedBox(height: 24),
-        Text('Check your email', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        Text('We sent a password reset link to ${_emailCtrl.text}', textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textSecondary)),
-        const SizedBox(height: 32),
-        OutlinedButton(
-          onPressed: () => context.pop(),
-          child: const Text('Back to sign in'),
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: AppTheme.accentSoft,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          alignment: Alignment.center,
+          child: const Text(
+            '✓',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.accent,
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Text.rich(
+          TextSpan(
+            style: const TextStyle(
+              fontSize: 27,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.8,
+              height: 1.2,
+              color: AppTheme.ink,
+            ),
+            text: 'Link sent',
+          ),
+        ),
+        const SizedBox(height: 7),
+        Text.rich(
+          TextSpan(
+            text: 'Check ',
+            style: const TextStyle(
+              fontSize: 14.5,
+              color: AppTheme.inkSoft,
+              height: 1.6,
+            ),
+            children: [
+              TextSpan(
+                text: _emailCtrl.text.trim(),
+                style: const TextStyle(
+                  color: AppTheme.ink,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const TextSpan(
+                text: ' and open the reset link. It expires in one hour.',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            border: Border.all(color: AppTheme.border),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text.rich(
+            TextSpan(
+              text: 'Not in your inbox? Check spam',
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.inkSoft,
+                height: 1.6,
+              ),
+              children: [
+                TextSpan(
+                  text: _resendCooldown > 0
+                      ? ', or send it again in ${_resendCooldown}s.'
+                      : '.',
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_resendCooldown == 0) ...[
+          const SizedBox(height: 10),
+          Center(
+            child: TextButton(
+              onPressed: _submit,
+              child: const Text(
+                'Send again',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.accent,
+                ),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        CanvasSecondaryButton(
+          label: 'Back to log in',
+          onPressed: () => context.go('/login'),
         ),
       ],
     );

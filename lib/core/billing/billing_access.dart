@@ -1,4 +1,7 @@
-bool hasActiveBillingAccess(Map<String, dynamic>? gym, {bool ignoreTrial = false}) {
+bool hasActiveBillingAccess(
+  Map<String, dynamic>? gym, {
+  bool ignoreTrial = false,
+}) {
   if (gym == null) return false;
 
   final now = DateTime.now().toUtc();
@@ -16,17 +19,20 @@ bool hasActiveBillingAccess(Map<String, dynamic>? gym, {bool ignoreTrial = false
 
   // Pro with active recurring subscription
   if (plan == 'pro' && dodoId != null && planExpiresAt != null) {
-    if (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false) return true;
+    if (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false)
+      return true;
   }
 
   // Any plan with a future expiry date (starter, one-time, etc.)
   if (planExpiresAt != null) {
-    if (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false) return true;
+    if (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false)
+      return true;
   }
 
   // Within trial period — iOS ignores this, must pay via StoreKit before use.
   if (!ignoreTrial && trialEndsAt != null) {
-    if (DateTime.tryParse(trialEndsAt)?.toUtc().isAfter(now) ?? false) return true;
+    if (DateTime.tryParse(trialEndsAt)?.toUtc().isAfter(now) ?? false)
+      return true;
   }
 
   return false;
@@ -53,7 +59,8 @@ int? trialDaysRemaining(Map<String, dynamic>? gym) {
 /// the instant any time passes after signup on a 24h trial).
 int? planExpiryDaysRemaining(Map<String, dynamic>? gym) {
   if (gym == null) return null;
-  final expiryStr = gym['plan_expires_at'] as String? ?? gym['trial_ends_at'] as String?;
+  final expiryStr =
+      gym['plan_expires_at'] as String? ?? gym['trial_ends_at'] as String?;
   if (expiryStr == null) return null;
   final expiry = DateTime.tryParse(expiryStr)?.toUtc();
   if (expiry == null) return null;

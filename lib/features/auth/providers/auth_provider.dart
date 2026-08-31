@@ -4,13 +4,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/router.dart'
+    show clearGymSetupResolution, kPendingFirstSetup;
 import '../../../core/services/activity_log_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
 import '../../../core/utils/formatters.dart';
 
 const _activeGymIdPrefsKey = 'active_gym_id';
 
-final supabaseProvider = Provider<SupabaseClient>((ref) => Supabase.instance.client);
+final supabaseProvider = Provider<SupabaseClient>(
+  (ref) => Supabase.instance.client,
+);
 
 // --dart-define=WEB_APP_BASE_URL=http://localhost:3000 to test Google
 // sign-in against a local gym-crm dev server instead of production.
@@ -24,7 +28,9 @@ const _webAppBaseUrl = String.fromEnvironment(
 /// resolve to the account created there.
 String memberSyntheticEmail(String phone) {
   final digits = phone.replaceAll(RegExp(r'\D'), '');
-  final last10 = digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+  final last10 = digits.length > 10
+      ? digits.substring(digits.length - 10)
+      : digits;
   return '$last10@member.gymcrm.internal';
 }
 
@@ -158,7 +164,9 @@ final gymIdProvider = FutureProvider<String>((ref) async {
 /// Every gym branch the current staff member is linked to (their primary
 /// gym plus any added via AuthNotifier.createGymBranch()), for the branch
 /// switcher UI.
-final myGymBranchesProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final myGymBranchesProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final client = ref.watch(supabaseProvider);
   final user = client.auth.currentUser;
   if (user == null) return [];
@@ -179,7 +187,7 @@ final memberRecordProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
 
   final member = await client
       .from('members')
-      .select('*, memberships(*, membership_plans(*)), gyms(settings)')
+      .select('*, memberships(*, membership_plans(*)), gyms(name, settings)')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -205,10 +213,18 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       _ref.invalidate(memberRecordProvider);
       state = const AsyncValue.data(null);
 
-      final profile = await _client.from('profiles').select('gym_id').eq('id', _client.auth.currentUser!.id).maybeSingle();
+      final profile = await _client
+          .from('profiles')
+          .select('gym_id')
+          .eq('id', _client.auth.currentUser!.id)
+          .maybeSingle();
       final gymId = profile?['gym_id'] as String?;
       if (gymId != null) {
-        ActivityLogService.logActivity(gymId: gymId, action: 'login', metadata: {'via': 'android'});
+        ActivityLogService.logActivity(
+          gymId: gymId,
+          action: 'login',
+          metadata: {'via': 'android'},
+        );
       }
 
       return null;
@@ -243,20 +259,13 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       await _client.auth.signUp(
         email: email,
         password: password,
-        data: {
-          'first_name': firstName,
-          'last_name': lastName,
-          'phone': phone,
-        },
+        data: {'first_name': firstName, 'last_name': lastName, 'phone': phone},
       );
       // With "Confirm email" OFF, signUp() creates an instant session which
       // would trigger the router redirect before the OTP screen shows.
       // Sign out to clear it — the session is granted only after OTP verify.
       await _client.auth.signOut();
-      await _client.auth.signInWithOtp(
-        email: email,
-        shouldCreateUser: false,
-      );
+      await _client.auth.signInWithOtp(email: email, shouldCreateUser: false);
       state = const AsyncValue.data(null);
       return null;
     } on AuthException catch (e) {
@@ -320,24 +329,50 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     required List<String> goals,
   }) async {
     try {
-      final gymId = await _client.rpc('setup_gym', params: {
-        'p_gym_name': gymName,
-        'p_city': city,
-        'p_phone': phone,
-        'p_gym_type': gymType,
-        'p_member_count': memberCount,
-        'p_goals': goals,
-      }) as String;
+      final gymId =
+          await _client.rpc(
+                'setup_gym',
+                params: {
+                  'p_gym_name': gymName,
+                  'p_city': city,
+                  'p_phone': phone,
+                  'p_gym_type': gymType,
+                  'p_member_count': memberCount,
+                  'p_goals': goals,
+                },
+              )
+              as String;
       // setup_gym doesn't take a currency param — set it via the same
       // gyms.settings JSONB path Settings > Gym Details uses.
       if (currency != null && currency.isNotEmpty) {
-        final gym = await _client.from('gyms').select('settings').eq('id', gymId).single();
+        final gym = await _client
+            .from('gyms')
+            .select('settings')
+            .eq('id', gymId)
+            .single();
         final settings = {
           ...Map<String, dynamic>.from(gym['settings'] as Map? ?? {}),
           'currency': currency,
         };
-        await _client.from('gyms').update({'settings': settings}).eq('id', gymId);
+        await _client
+            .from('gyms')
+            .update({'settings': settings})
+            .eq('id', gymId);
       }
+      // The gym exists now, so the router's "this user belongs on /gym-setup"
+      // decision is stale — drop it before anything navigates.
+      clearGymSetupResolution();
+      // Owed the one-time setup wizard. Recorded rather than navigated to,
+      // because the consent gate redirects over a plain go() on a first signup.
+      await (await SharedPreferences.getInstance())
+          .setBool(kPendingFirstSetup, true);
+      // The signedIn event (app.dart) already re-read gymIdProvider once, back
+      // when this account still had no profile row — so it cached the "No gym
+      // assigned" error. Every gym-scoped screen reads through that provider,
+      // so without this the whole app stays broken until a restart.
+      _ref.invalidate(gymIdProvider);
+      _ref.invalidate(staffProfileProvider);
+      _ref.invalidate(userTypeProvider);
       return null;
     } on PostgrestException catch (e) {
       return e.message;
@@ -401,8 +436,12 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       final email = data?['email'] as String?;
       final hashedToken = data?['hashedToken'] as String?;
       if (email == null || hashedToken == null) {
-        state = AsyncValue.error('Phone verification failed', StackTrace.current);
-        return (data?['error'] as String?) ?? 'Phone verification failed. Please try again.';
+        state = AsyncValue.error(
+          'Phone verification failed',
+          StackTrace.current,
+        );
+        return (data?['error'] as String?) ??
+            'Phone verification failed. Please try again.';
       }
 
       await _client.auth.verifyOTP(
@@ -427,10 +466,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<String?> resendEmailOtp(String email) async {
     try {
-      await _client.auth.signInWithOtp(
-        email: email,
-        shouldCreateUser: false,
-      );
+      await _client.auth.signInWithOtp(email: email, shouldCreateUser: false);
       return null;
     } on AuthException catch (e) {
       return e.message;
@@ -499,14 +535,19 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     List<String> goals = const [],
   }) async {
     try {
-      final gymId = await _client.rpc('create_gym_branch', params: {
-        'p_gym_name': gymName,
-        'p_city': city,
-        'p_phone': phone,
-        'p_gym_type': gymType,
-        'p_member_count': memberCount,
-        'p_goals': goals,
-      }) as String;
+      final gymId =
+          await _client.rpc(
+                'create_gym_branch',
+                params: {
+                  'p_gym_name': gymName,
+                  'p_city': city,
+                  'p_phone': phone,
+                  'p_gym_type': gymType,
+                  'p_member_count': memberCount,
+                  'p_goals': goals,
+                },
+              )
+              as String;
       _ref.invalidate(myGymBranchesProvider);
       return gymId;
     } on PostgrestException catch (e) {
@@ -517,6 +558,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
   }
 }
 
-final authNotifierProvider = StateNotifierProvider<AuthNotifier, AsyncValue<void>>((ref) {
-  return AuthNotifier(ref.watch(supabaseProvider), ref);
-});
+final authNotifierProvider =
+    StateNotifierProvider<AuthNotifier, AsyncValue<void>>((ref) {
+      return AuthNotifier(ref.watch(supabaseProvider), ref);
+    });

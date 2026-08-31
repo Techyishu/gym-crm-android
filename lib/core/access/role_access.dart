@@ -12,12 +12,17 @@ class RoleAccess {
   static bool _isManagerOrAbove(String? role) =>
       role == 'owner' || role == 'manager';
 
-  static bool canSeeBilling(String? role) => _isManagerOrAbove(role) || role == 'staff';
-  static bool canRecordPayment(String? role) => _isManagerOrAbove(role) || role == 'staff';
+  static bool canSeeBilling(String? role) =>
+      _isManagerOrAbove(role) || role == 'staff';
+  static bool canRecordPayment(String? role) =>
+      _isManagerOrAbove(role) || role == 'staff';
   static bool canCheckIn(String? role) =>
       role == 'owner' || role == 'manager' || role == 'staff';
   static bool canSeeBatches(String? role) =>
-      role == 'owner' || role == 'manager' || role == 'trainer' || role == 'staff';
+      role == 'owner' ||
+      role == 'manager' ||
+      role == 'trainer' ||
+      role == 'staff';
   static bool canSeeLeads(String? role) => _isManagerOrAbove(role);
   static bool canSeeCommunications(String? role) => _isManagerOrAbove(role);
   static bool canSeeStaff(String? role) => _isManagerOrAbove(role);
@@ -26,9 +31,15 @@ class RoleAccess {
   static bool canSeeMemberPii(String? role) => _isManagerOrAbove(role);
   static bool canEditMembers(String? role) => _isManagerOrAbove(role);
   static bool canManageWorkoutPlans(String? role) =>
-      role == 'owner' || role == 'manager' || role == 'trainer' || role == 'staff';
+      role == 'owner' ||
+      role == 'manager' ||
+      role == 'trainer' ||
+      role == 'staff';
   static bool canManageDietPlans(String? role) =>
-      role == 'owner' || role == 'manager' || role == 'trainer' || role == 'staff';
+      role == 'owner' ||
+      role == 'manager' ||
+      role == 'trainer' ||
+      role == 'staff';
   static bool canSeeExpenses(String? role) => _isManagerOrAbove(role);
   static bool canDeleteExpense(String? role) => role == 'owner';
   static bool canDeleteInvoice(String? role) => role == 'owner';

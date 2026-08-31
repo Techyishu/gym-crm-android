@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
 /// Lists every gym branch the current owner/staff member is linked to,
 /// lets them switch the active branch (every screen re-scopes to it), and
@@ -19,7 +20,9 @@ class GymBranchesSheet extends ConsumerWidget {
     final isOwner = role == 'owner';
 
     return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.75,
+      ),
       decoration: const BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -44,7 +47,11 @@ class GymBranchesSheet extends ConsumerWidget {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Gym Branches',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink),
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                  ),
                 ),
               ),
             ),
@@ -56,7 +63,10 @@ class GymBranchesSheet extends ConsumerWidget {
                 ),
                 error: (e, _) => Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text('Could not load branches: $e', style: const TextStyle(color: AppTheme.statusDanger)),
+                  child: Text(
+                    'Could not load branches: $e',
+                    style: const TextStyle(color: AppTheme.statusDanger),
+                  ),
                 ),
                 data: (branches) {
                   final activeGymId = activeGymIdAsync.valueOrNull;
@@ -72,13 +82,15 @@ class GymBranchesSheet extends ConsumerWidget {
                       final active = gymId == activeGymId;
                       return ListTile(
                         leading: Icon(
-                          active ? Icons.check_circle : Icons.business_outlined,
+                          active ? AppIcons.checkCircleActive : AppIcons.business,
                           color: active ? AppTheme.accent : AppTheme.inkHint,
                         ),
                         title: Text(
                           name,
                           style: TextStyle(
-                            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                            fontWeight: active
+                                ? FontWeight.w800
+                                : FontWeight.w600,
                             color: AppTheme.ink,
                           ),
                         ),
@@ -86,8 +98,11 @@ class GymBranchesSheet extends ConsumerWidget {
                         onTap: active
                             ? null
                             : () async {
-                                await ref.read(authNotifierProvider.notifier).switchActiveGym(gymId);
-                                if (context.mounted) Navigator.of(context).pop();
+                                await ref
+                                    .read(authNotifierProvider.notifier)
+                                    .switchActiveGym(gymId);
+                                if (context.mounted)
+                                  Navigator.of(context).pop();
                               },
                       );
                     },
@@ -110,7 +125,7 @@ class GymBranchesSheet extends ConsumerWidget {
                         builder: (_) => const _AddGymBranchSheet(),
                       );
                     },
-                    icon: const Icon(Icons.add),
+                    icon: const Icon(AppIcons.add),
                     label: const Text('Add Branch'),
                   ),
                 ),
@@ -152,7 +167,9 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
       _saving = true;
       _error = null;
     });
-    final result = await ref.read(authNotifierProvider.notifier).createGymBranch(
+    final result = await ref
+        .read(authNotifierProvider.notifier)
+        .createGymBranch(
           gymName: name,
           city: _cityCtrl.text.trim().isEmpty ? null : _cityCtrl.text.trim(),
         );
@@ -165,7 +182,9 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
       return;
     }
     // Switch straight into the newly created branch.
-    await ref.read(authNotifierProvider.notifier).switchActiveGym(result as String);
+    await ref
+        .read(authNotifierProvider.notifier)
+        .switchActiveGym(result as String);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -184,16 +203,29 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Add Gym Branch', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+          const Text(
+            'Add Gym Branch',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.ink,
+            ),
+          ),
           const SizedBox(height: 16),
           TextField(
             controller: _nameCtrl,
-            decoration: const InputDecoration(labelText: 'Branch name', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Branch name',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _cityCtrl,
-            decoration: const InputDecoration(labelText: 'City (optional)', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'City (optional)',
+              border: OutlineInputBorder(),
+            ),
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
@@ -206,7 +238,13 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
               onPressed: _saving ? null : _submit,
               child: _saving
                   ? const SizedBox(
-                      width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Text('Create Branch'),
             ),
           ),

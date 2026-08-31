@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:showcaseview/showcaseview.dart';
-import '../../core/access/role_access.dart';
+import '../../core/access/gym_permissions.dart';
 import '../../core/billing/billing_access.dart';
 import '../../core/providers/revenue_cat_provider.dart';
 import '../../core/services/coachmark_service.dart';
@@ -17,74 +17,98 @@ import '../../features/staff/paywall/paywall_screen.dart';
 import '../../features/staff/settings/gym_branches_sheet.dart';
 import '../../features/staff/settings/gym_code_sheet.dart';
 import '../../features/staff/settings/settings_screen.dart';
+import '../../shared/widgets/redesign.dart';
 import '../../shared/widgets/responsive_content.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../theme/app_icons.dart';
 
 // Sheet-opening items use a non-route key (never matches a real
 // GoRouterState.matchedLocation) so they're never highlighted as "active"
 // and never intercepted by the route-based visibility switch below.
 const _kMoreItems = [
   _MoreItem(
-    icon: Icons.person_add_outlined,
+    icon: AppIcons.personAdd,
     label: 'Leads',
     route: '/staff/leads',
   ),
   _MoreItem(
-    icon: Icons.calendar_today_outlined,
+    icon: AppIcons.calendarToday,
     label: 'Batches',
     route: '/staff/classes',
   ),
   _MoreItem(
-    icon: Icons.fitness_center_outlined,
+    icon: AppIcons.fitness,
     label: 'Workout plans',
     route: '/staff/workout-plans',
   ),
   _MoreItem(
-    icon: Icons.restaurant_menu_outlined,
+    icon: AppIcons.restaurant,
     label: 'Diet plans',
     route: '/staff/diet-plans',
   ),
   _MoreItem(
-    icon: Icons.notifications_outlined,
+    icon: AppIcons.campaign,
     label: 'Reminders',
     route: '/staff/reminders',
   ),
   _MoreItem(
-    icon: Icons.manage_accounts_outlined,
+    icon: AppIcons.manageAccounts,
     label: 'Staff & roles',
     route: '/staff/staff',
   ),
+  // Badge keys track whats_new.dart: a feature announced there gets one here,
+  // and the previous release's keys get `enabled = false` in coachmark_config
+  // at the same time. Retiring a badge is a SQL flip, never an app update —
+  // which is how the Expenses badge outlived the feature by months.
   _MoreItem(
-    icon: Icons.business_outlined,
-    label: 'Gym Branches',
+    icon: AppIcons.business,
+    label: 'Gym branches',
     route: '#gym-branches',
     sheetBuilder: _buildGymBranchesSheet,
+    newBadgeKey: 'feature_gym_branches',
   ),
   _MoreItem(
-    icon: Icons.fingerprint,
-    label: 'Biometric Device',
+    icon: AppIcons.fingerprint,
+    label: 'Biometric device',
     route: '#biometric-device',
     sheetBuilder: _buildBiometricDeviceSheet,
+    newBadgeKey: 'feature_biometric_device',
   ),
   _MoreItem(
-    icon: Icons.qr_code_2_outlined,
-    label: 'Member Signup Code',
+    icon: AppIcons.qrCode,
+    label: 'Member signup code',
     route: '#gym-code',
     sheetBuilder: _buildGymCodeSheet,
+    newBadgeKey: 'feature_member_signup_code',
   ),
   _MoreItem(
-    icon: Icons.bar_chart_outlined,
+    icon: AppIcons.barChart,
     label: 'Reports',
     route: '/staff/reports',
   ),
   _MoreItem(
-    icon: Icons.receipt_long_outlined,
+    icon: AppIcons.calendarMonth,
+    label: 'Attendance calendar',
+    route: '/staff/attendance-calendar',
+  ),
+  _MoreItem(
+    icon: AppIcons.download,
+    label: 'Export data',
+    route: '/staff/exports',
+  ),
+  _MoreItem(
+    icon: AppIcons.history,
+    label: 'Activity log',
+    route: '/staff/activity-log',
+  ),
+  _MoreItem(
+    icon: AppIcons.receipt,
     label: 'Expenses',
     route: '/staff/expenses',
     newBadgeKey: 'feature_expenses',
   ),
   _MoreItem(
-    icon: Icons.settings_outlined,
+    icon: AppIcons.settings,
     label: 'Settings',
     route: '/staff/settings',
   ),
@@ -95,22 +119,32 @@ Widget _buildBiometricDeviceSheet(BuildContext context) =>
     const BiometricDeviceSheet();
 Widget _buildGymCodeSheet(BuildContext context) => const GymCodeSheet();
 
-List<_MoreItem> _visibleMoreItemsFor(String? role) => _kMoreItems.where((item) {
-  if (item.route == '/staff/classes') return RoleAccess.canSeeBatches(role);
-  if (item.route == '/staff/leads') return RoleAccess.canSeeLeads(role);
-  if (item.route == '/staff/workout-plans')
-    return RoleAccess.canManageWorkoutPlans(role);
-  if (item.route == '/staff/diet-plans')
-    return RoleAccess.canManageDietPlans(role);
-  if (item.route == '/staff/reminders')
-    return RoleAccess.canSeeCommunications(role);
-  if (item.route == '/staff/staff') return RoleAccess.canSeeStaff(role);
-  if (item.route == '#gym-branches') return RoleAccess.canSeeSettings(role);
-  if (item.route == '#biometric-device') return RoleAccess.canSeeSettings(role);
-  if (item.route == '/staff/reports') return RoleAccess.canSeeReports(role);
-  if (item.route == '/staff/expenses') return RoleAccess.canSeeExpenses(role);
-  if (item.route == '/staff/settings') return RoleAccess.canSeeSettings(role);
-  return true;
+List<_MoreItem> _visibleMoreItemsFor(
+  GymPermissions permissions,
+  String? role,
+) => _kMoreItems.where((item) {
+  bool can(GymModule module, [GymAction action = GymAction.view]) =>
+      permissions.can(module, action);
+
+  return switch (item.route) {
+    '/staff/classes' => can(GymModule.batches),
+    '/staff/leads' => can(GymModule.leads),
+    '/staff/workout-plans' => can(GymModule.pt),
+    '/staff/diet-plans' => can(GymModule.services),
+    '/staff/reminders' => can(GymModule.settings),
+    '/staff/staff' => can(GymModule.staff),
+    '#gym-branches' ||
+    '#biometric-device' ||
+    '#gym-code' => can(GymModule.settings),
+    '/staff/reports' => can(GymModule.reports),
+    '/staff/attendance-calendar' => can(GymModule.attendance),
+    '/staff/exports' => can(GymModule.reports, GymAction.export),
+    '/staff/activity-log' =>
+      (role == 'owner' || role == 'manager') && can(GymModule.reports),
+    '/staff/expenses' => can(GymModule.expenses),
+    '/staff/settings' => can(GymModule.settings),
+    _ => true,
+  };
 }).toList();
 
 class StaffShell extends ConsumerStatefulWidget {
@@ -170,6 +204,10 @@ class _StaffShellState extends ConsumerState<StaffShell>
 
     final profile = profileAsync.valueOrNull;
     final gym = profile?['gyms'] as Map<String, dynamic>?;
+    final role = profile?['role'] as String?;
+    final permissions =
+        ref.watch(staffPermissionsProvider).valueOrNull ??
+        GymPermissions.roleDefaults(role);
 
     // Billing gate — iOS uses RevenueCat entitlement; Android uses Supabase plan data.
     if (profileAsync.hasValue) {
@@ -200,6 +238,7 @@ class _StaffShellState extends ConsumerState<StaffShell>
                     _StaffSideNav(
                       shell: shell,
                       profile: profile,
+                      permissions: permissions,
                       onSignOut: onSignOut,
                     ),
                     Expanded(child: content),
@@ -211,6 +250,7 @@ class _StaffShellState extends ConsumerState<StaffShell>
               : _StaffBottomNav(
                   shell: shell,
                   profile: profile,
+                  permissions: permissions,
                   onSignOut: onSignOut,
                 ),
         );
@@ -224,22 +264,26 @@ class _StaffShellState extends ConsumerState<StaffShell>
 class _StaffSideNav extends StatelessWidget {
   final StatefulNavigationShell shell;
   final Map<String, dynamic>? profile;
+  final GymPermissions permissions;
   final VoidCallback onSignOut;
   const _StaffSideNav({
     required this.shell,
     required this.profile,
+    required this.permissions,
     required this.onSignOut,
   });
 
   String? get role => profile?['role'] as String?;
-  bool get _showMoney => RoleAccess.canSeeBilling(role);
-  bool get _showCheckIn => RoleAccess.canCheckIn(role);
+  bool get _showMembers => permissions.can(GymModule.members, GymAction.view);
+  bool get _showMoney => permissions.can(GymModule.payments, GymAction.view);
+  bool get _showCheckIn =>
+      permissions.can(GymModule.attendance, GymAction.view);
 
   @override
   Widget build(BuildContext context) {
     final gym = profile?['gyms'] as Map<String, dynamic>?;
     final gymName = (gym?['name'] as String?) ?? 'Gym';
-    final moreItems = _visibleMoreItemsFor(role);
+    final moreItems = _visibleMoreItemsFor(permissions, role);
     final moreActive = moreItems.any(
       (m) => GoRouterState.of(context).matchedLocation.startsWith(m.route),
     );
@@ -272,8 +316,8 @@ class _StaffSideNav extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 children: [
                   _SideNavItem(
-                    icon: Icons.home_outlined,
-                    activeIcon: Icons.home,
+                    icon: AppIcons.home,
+                    activeIcon: AppIcons.homeActive,
                     label: 'Home',
                     active: shell.currentIndex == 0 && !moreActive,
                     onTap: () => shell.goBranch(
@@ -281,20 +325,21 @@ class _StaffSideNav extends StatelessWidget {
                       initialLocation: shell.currentIndex == 0,
                     ),
                   ),
-                  _SideNavItem(
-                    icon: Icons.people_outline,
-                    activeIcon: Icons.people,
-                    label: 'Members',
-                    active: shell.currentIndex == 1 && !moreActive,
-                    onTap: () => shell.goBranch(
-                      1,
-                      initialLocation: shell.currentIndex == 1,
+                  if (_showMembers)
+                    _SideNavItem(
+                      icon: AppIcons.people,
+                      activeIcon: AppIcons.peopleActive,
+                      label: 'Members',
+                      active: shell.currentIndex == 1 && !moreActive,
+                      onTap: () => shell.goBranch(
+                        1,
+                        initialLocation: shell.currentIndex == 1,
+                      ),
                     ),
-                  ),
                   if (_showCheckIn)
                     _SideNavItem(
-                      icon: Icons.qr_code_scanner,
-                      activeIcon: Icons.qr_code_scanner,
+                      icon: AppIcons.qrScanner,
+                      activeIcon: AppIcons.qrScanner,
                       label: 'Check-in',
                       active: shell.currentIndex == 3 && !moreActive,
                       onTap: () => shell.goBranch(
@@ -304,9 +349,9 @@ class _StaffSideNav extends StatelessWidget {
                     ),
                   if (_showMoney)
                     _SideNavItem(
-                      icon: Icons.credit_card_outlined,
-                      activeIcon: Icons.credit_card,
-                      label: 'Billing',
+                      icon: AppIcons.payments,
+                      activeIcon: AppIcons.paymentsActive,
+                      label: 'Money',
                       active: shell.currentIndex == 2 && !moreActive,
                       onTap: () => shell.goBranch(
                         2,
@@ -346,8 +391,8 @@ class _StaffSideNav extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(12),
               child: _SideNavItem(
-                icon: Icons.logout,
-                activeIcon: Icons.logout,
+                icon: AppIcons.logout,
+                activeIcon: AppIcons.logout,
                 label: 'Sign out',
                 active: false,
                 onTap: onSignOut,
@@ -413,10 +458,12 @@ class _SideNavItem extends StatelessWidget {
 class _StaffBottomNav extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
   final Map<String, dynamic>? profile;
+  final GymPermissions permissions;
   final VoidCallback onSignOut;
   const _StaffBottomNav({
     required this.shell,
     required this.profile,
+    required this.permissions,
     required this.onSignOut,
   });
 
@@ -436,30 +483,35 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
   // Branch indices stay tied to router branches (0 home, 1 members, 2 billing, 3 check-in).
   static const _leftTabs = [
     _Tab(
-      icon: Icons.home_outlined,
-      activeIcon: Icons.home,
+      icon: AppIcons.home,
+      activeIcon: AppIcons.homeActive,
       label: 'Home',
       index: 0,
     ),
     _Tab(
-      icon: Icons.people_outline,
-      activeIcon: Icons.people,
+      icon: AppIcons.people,
+      activeIcon: AppIcons.peopleActive,
       label: 'Members',
       index: 1,
     ),
   ];
   static const _moneyTab = _Tab(
-    icon: Icons.credit_card_outlined,
-    activeIcon: Icons.credit_card,
-    label: 'Billing',
+    icon: AppIcons.payments,
+    activeIcon: AppIcons.paymentsActive,
+    label: 'Money',
     index: 2,
   );
   static const int _checkInIndex = 3;
 
-  bool get _showMoney => RoleAccess.canSeeBilling(widget.role);
-  bool get _showCheckIn => RoleAccess.canCheckIn(widget.role);
+  bool get _showMembers =>
+      widget.permissions.can(GymModule.members, GymAction.view);
+  bool get _showMoney =>
+      widget.permissions.can(GymModule.payments, GymAction.view);
+  bool get _showCheckIn =>
+      widget.permissions.can(GymModule.attendance, GymAction.view);
 
-  List<_MoreItem> get _visibleMoreItems => _visibleMoreItemsFor(widget.role);
+  List<_MoreItem> get _visibleMoreItems =>
+      _visibleMoreItemsFor(widget.permissions, widget.role);
 
   // Shows the 3-step spotlight tour once per user, the first time this nav
   // bar builds after the coach-mark data has loaded. Marks steps as seen
@@ -476,6 +528,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
       ];
       final keys = <GlobalKey>[];
       for (final key in stepOrder) {
+        if (key == 'staff_nav_members' && !_showMembers) continue;
         if (key == 'staff_nav_checkin' && !_showCheckIn) continue;
         if (!service.shouldShow(key)) continue;
         if (key == 'staff_nav_members') keys.add(_membersTourKey);
@@ -498,30 +551,15 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
     }
   }
 
-  void _confirmSignOut(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              widget.onSignOut();
-            },
-            child: const Text(
-              'Sign Out',
-              style: TextStyle(color: AppTheme.statusDanger),
-            ),
-          ),
-        ],
-      ),
+  Future<void> _confirmSignOut(BuildContext context) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Sign out?',
+      body: 'You can sign back in anytime.',
+      confirmLabel: 'Sign out',
+      icon: AppIcons.logout,
     );
+    if (ok == true) widget.onSignOut();
   }
 
   bool _moreActive(BuildContext context) {
@@ -603,7 +641,9 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
         padding: EdgeInsets.only(bottom: bottomPadding),
         child: Row(
           children: [
-            ..._leftTabs.map((tab) => _branchTab(context, tab, moreActive)),
+            ..._leftTabs
+                .where((tab) => tab.index != 1 || _showMembers)
+                .map((tab) => _branchTab(context, tab, moreActive)),
             if (_showCheckIn)
               Expanded(
                 child: Showcase(
@@ -625,8 +665,8 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
               description:
                   'Find Leads, Classes, Staff, Reports and Settings here.',
               child: _NavTab(
-                icon: Icons.menu,
-                activeIcon: Icons.menu,
+                icon: AppIcons.menu,
+                activeIcon: AppIcons.menu,
                 label: 'More',
                 active: moreActive,
                 onTap: () => _openMoreSheet(context),
@@ -646,49 +686,52 @@ class _CheckInButton extends StatelessWidget {
   final VoidCallback onTap;
   const _CheckInButton({required this.active, required this.onTap});
 
+  /// It used to be a 54px disc raised out of the bar via an OverflowBox. That
+  /// looked like a bump sitting on the content behind it, and worse: Flutter
+  /// doesn't hit-test outside a parent's bounds, so the protruding top half was
+  /// dead to taps — on the most-used button in the app. It now sits inside the
+  /// bar and shares the row's width like every other tab.
+  // No Expanded here — the call site already wraps this in one (via Showcase),
+  // and a second would not be a direct child of a Flex.
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: OverflowBox(
-        maxHeight: 96,
-        alignment: Alignment.bottomCenter,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                color: active ? AppTheme.accentDark : AppTheme.accent,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x33DF5B34),
-                    blurRadius: 12,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.qr_code_scanner,
-                color: Colors.white,
-                size: 26,
-              ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 38,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? AppTheme.accentDark : AppTheme.accent,
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(height: 4),
-            const Text(
+            child: const Icon(
+              AppIcons.qrScanner,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(height: 3),
+          // The tile stays teal because check-in is a standing action, but
+          // the label follows the same active/inactive rule as every other
+          // tab — otherwise two tabs read as selected at once.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
               'Check-in',
+              maxLines: 1,
               style: TextStyle(
                 fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.accent,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                color: active ? AppTheme.accent : AppTheme.inkHint,
               ),
             ),
-            const SizedBox(height: 6),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -771,22 +814,28 @@ class _MoreSheet extends StatelessWidget {
         ? ''
         : role[0].toUpperCase() + role.substring(1);
     final initials = _initials(fullName.isEmpty ? gymName : fullName);
+    // Grouped by what the owner is trying to do, in the order they think
+    // about it — bring people in, run the day, program members, set up, look
+    // back — instead of one flat list of every feature.
     final groups = <String, List<_MoreItem>>{
-      'Grow your gym': [],
+      'Grow': [],
+      'Run the gym': [],
       'Member programs': [],
-      'Manage your gym': [],
+      'Setup': [],
       'Insights': [],
-      'Account': [],
     };
     for (final item in items) {
       final group = switch (item.route) {
-        '/staff/leads' || '/staff/classes' => 'Grow your gym',
-        '/staff/workout-plans' ||
-        '/staff/diet-plans' ||
-        '/staff/reminders' => 'Member programs',
-        '/staff/reports' || '/staff/expenses' => 'Insights',
-        '/staff/settings' => 'Account',
-        _ => 'Manage your gym',
+        '/staff/leads' || '/staff/reminders' => 'Grow',
+        '/staff/classes' ||
+        '/staff/staff' ||
+        '/staff/expenses' ||
+        '/staff/attendance-calendar' => 'Run the gym',
+        '/staff/workout-plans' || '/staff/diet-plans' => 'Member programs',
+        '/staff/reports' ||
+        '/staff/exports' ||
+        '/staff/activity-log' => 'Insights',
+        _ => 'Setup',
       };
       groups[group]!.add(item);
     }
@@ -872,7 +921,7 @@ class _MoreSheet extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(
-                      Icons.logout,
+                      AppIcons.logout,
                       size: 18,
                       color: AppTheme.ink,
                     ),
@@ -895,12 +944,7 @@ class _MoreSheet extends StatelessWidget {
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
                         child: Text(
                           entry.key.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.8,
-                            color: AppTheme.inkHint,
-                          ),
+                          style: AppTheme.kicker,
                         ),
                       ),
                       Container(
@@ -992,7 +1036,7 @@ class _MoreRow extends ConsumerWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, size: 20, color: AppTheme.inkHint),
+            const Icon(AppIcons.chevronRight, size: 20, color: AppTheme.inkHint),
           ],
         ),
       ),

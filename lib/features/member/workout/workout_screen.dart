@@ -3,12 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/theme/app_icons.dart';
 
-final _workoutPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _workoutPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final client = Supabase.instance.client;
   final user = client.auth.currentUser!;
 
-  final member = await client.from('members').select('id').eq('user_id', user.id).maybeSingle();
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
   if (member == null) return [];
 
   return await client
@@ -69,8 +76,12 @@ class _WorkoutScreenState extends ConsumerState<WorkoutScreen> {
                 if (days.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(32),
-                    child: Center(child: Text('No exercises in this plan yet',
-                      style: TextStyle(color: AppTheme.inkHint))),
+                    child: Center(
+                      child: Text(
+                        'No exercises in this plan yet',
+                        style: TextStyle(color: AppTheme.inkHint),
+                      ),
+                    ),
                   )
                 else ...[
                   // Day chips
@@ -81,23 +92,34 @@ class _WorkoutScreenState extends ConsumerState<WorkoutScreen> {
                       child: Row(
                         children: days.asMap().entries.map((e) {
                           final selected = e.key == dayIdx;
-                          final label = _shortLabel(e.value['label'] as String? ?? 'Day ${e.key + 1}');
+                          final label = _shortLabel(
+                            e.value['label'] as String? ?? 'Day ${e.key + 1}',
+                          );
                           return Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: GestureDetector(
                               onTap: () => setState(() => _dayIndex = e.key),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 15,
+                                  vertical: 10,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: selected ? AppTheme.accent : AppTheme.surface,
+                                  color: selected
+                                      ? AppTheme.accent
+                                      : AppTheme.surface,
                                   borderRadius: BorderRadius.circular(14),
                                 ),
-                                child: Text(label,
+                                child: Text(
+                                  label,
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
-                                    color: selected ? Colors.white : AppTheme.inkSoft,
-                                  )),
+                                    color: selected
+                                        ? Colors.white
+                                        : AppTheme.inkSoft,
+                                  ),
+                                ),
                               ),
                             ),
                           );
@@ -150,30 +172,56 @@ class _DarkHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Text('My workout',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
-            const Spacer(),
-            if (planCount > 1)
-              GestureDetector(
-                onTap: onSwitchPlan,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.darkCard2,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text('Plan ${planIndex + 1} / $planCount ›',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.onDark)),
+          Row(
+            children: [
+              const Text(
+                'My workout',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.onDarkSoft,
                 ),
               ),
-          ]),
+              const Spacer(),
+              if (planCount > 1)
+                GestureDetector(
+                  onTap: onSwitchPlan,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.darkCard2,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Plan ${planIndex + 1} / $planCount ›',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.onDark,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Text(name,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.onDark, letterSpacing: -0.4)),
+          Text(
+            name,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.onDark,
+              letterSpacing: -0.4,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text('${type[0].toUpperCase()}${type.substring(1)} plan · assigned $created',
-            style: const TextStyle(fontSize: 12.5, color: AppTheme.onDarkSoft)),
+          Text(
+            '${type[0].toUpperCase()}${type.substring(1)} plan · assigned $created',
+            style: const TextStyle(fontSize: 12.5, color: AppTheme.onDarkSoft),
+          ),
         ],
       ),
     );
@@ -196,8 +244,14 @@ class _DayContent extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.ink,
+            ),
+          ),
           const SizedBox(height: 10),
           Container(
             decoration: AppTheme.cardDecoration(),
@@ -215,35 +269,73 @@ class _DayContent extends StatelessWidget {
                   decoration: BoxDecoration(
                     border: i == exercises.length - 1
                         ? null
-                        : const Border(bottom: BorderSide(color: AppTheme.border, width: 0.7)),
+                        : const Border(
+                            bottom: BorderSide(
+                              color: AppTheme.border,
+                              width: 0.7,
+                            ),
+                          ),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                  child: Row(children: [
-                    Container(
-                      width: 30, height: 30,
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface2,
-                        borderRadius: BorderRadius.circular(10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 13,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface2,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          '${i + 1}',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.inkSoft,
+                          ),
+                        ),
                       ),
-                      alignment: Alignment.center,
-                      child: Text('${i + 1}',
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppTheme.inkSoft)),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(ex['name'] as String? ?? '—',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
-                        if (weight.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(weight, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                        ],
-                      ]),
-                    ),
-                    const SizedBox(width: 8),
-                    if (setsReps.isNotEmpty)
-                      Text(setsReps, style: AppTheme.numberStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
-                  ]),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              ex['name'] as String? ?? '—',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14.5,
+                                color: AppTheme.ink,
+                              ),
+                            ),
+                            if (weight.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                weight,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.inkSoft,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (setsReps.isNotEmpty)
+                        Text(
+                          setsReps,
+                          style: AppTheme.numberStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                    ],
+                  ),
                 );
               }).toList(),
             ),
@@ -263,13 +355,17 @@ class _EmptyWorkout extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.fitness_center, size: 64, color: AppTheme.inkHint),
+          Icon(AppIcons.fitnessActive, size: 64, color: AppTheme.inkHint),
           SizedBox(height: 16),
-          Text('No workout plans yet',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+          Text(
+            'No workout plans yet',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+          ),
           SizedBox(height: 8),
-          Text('Your trainer will assign workout plans here',
-              style: TextStyle(color: AppTheme.textSecondary)),
+          Text(
+            'Your trainer will assign workout plans here',
+            style: TextStyle(color: AppTheme.textSecondary),
+          ),
         ],
       ),
     );

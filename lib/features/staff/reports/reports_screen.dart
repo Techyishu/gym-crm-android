@@ -2,10 +2,12 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +41,8 @@ class _RevReport {
   });
 
   double get collectionRate => totalBilled > 0 ? totalRevenue / totalBilled : 0;
-  double get avgPerMember => activeMembers > 0 ? totalRevenue / activeMembers : 0;
+  double get avgPerMember =>
+      activeMembers > 0 ? totalRevenue / activeMembers : 0;
   double get trendPct {
     if (prevTotalRevenue <= 0) return totalRevenue > 0 ? 100 : 0;
     return ((totalRevenue - prevTotalRevenue) / prevTotalRevenue) * 100;
@@ -75,13 +78,16 @@ class _MemReport {
     required this.leadsConverted,
   });
 
-  double get leadConversionRate => leadsTotal > 0 ? leadsConverted / leadsTotal : 0;
+  double get leadConversionRate =>
+      leadsTotal > 0 ? leadsConverted / leadsTotal : 0;
 }
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
-final _revReportProvider =
-    FutureProvider.family<_RevReport, String>((ref, period) async {
+final _revReportProvider = FutureProvider.family<_RevReport, String>((
+  ref,
+  period,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final now = DateTime.now();
   final from = switch (period) {
@@ -91,22 +97,40 @@ final _revReportProvider =
   };
 
   const mon = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
-  final raw = await Supabase.instance.client.rpc('get_revenue_report', params: {
-    'p_gym_id': gymId,
-    'p_from': from.toIso8601String(),
-    'p_period': period,
-  }) as Map<String, dynamic>;
+  final raw =
+      await Supabase.instance.client.rpc(
+            'get_revenue_report',
+            params: {
+              'p_gym_id': gymId,
+              'p_from': from.toIso8601String(),
+              'p_period': period,
+            },
+          )
+          as Map<String, dynamic>;
 
   final chartData = ((raw['chart_data'] as List?) ?? []).map((e) {
     final key = e['key'] as String;
     final value = (e['value'] as num).toDouble();
     final parts = key.split('-');
-    final d = DateTime(int.parse(parts[0]), int.parse(parts[1]),
-        parts.length > 2 ? int.parse(parts[2]) : 1);
+    final d = DateTime(
+      int.parse(parts[0]),
+      int.parse(parts[1]),
+      parts.length > 2 ? int.parse(parts[2]) : 1,
+    );
     final label = period == 'year'
         ? mon[d.month - 1]
         : '${d.day} ${mon[d.month - 1]}';
@@ -141,13 +165,26 @@ final _memReportProvider = FutureProvider<_MemReport>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
 
   const mon = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
-  final raw = await Supabase.instance.client.rpc('get_member_stats', params: {
-    'p_gym_id': gymId,
-  }) as Map<String, dynamic>;
+  final raw =
+      await Supabase.instance.client.rpc(
+            'get_member_stats',
+            params: {'p_gym_id': gymId},
+          )
+          as Map<String, dynamic>;
 
   final growthData = ((raw['growth_data'] as List?) ?? []).map((e) {
     final key = e['key'] as String;
@@ -181,31 +218,41 @@ final _memReportProvider = FutureProvider<_MemReport>((ref) async {
 String _compactRev(double amount) => formatCurrencyCompact(amount);
 
 String _planLabel(int months) => switch (months) {
-      1 => 'Monthly',
-      3 => 'Quarterly',
-      6 => 'Half-yearly',
-      12 => 'Yearly',
-      _ => '$months mo',
-    };
+  1 => 'Monthly',
+  3 => 'Quarterly',
+  6 => 'Half-yearly',
+  12 => 'Yearly',
+  _ => '$months mo',
+};
 
 String _methodLabel(String method) => switch (method) {
-      'upi' => 'UPI',
-      'cash' => 'Cash',
-      'card' => 'Card',
-      'bank_transfer' => 'Bank transfer',
-      _ => method,
-    };
+  'upi' => 'UPI',
+  'cash' => 'Cash',
+  'card' => 'Card',
+  'bank_transfer' => 'Bank transfer',
+  _ => method,
+};
 
 Color _methodColor(int i) => const [
-      AppTheme.ink,
-      AppTheme.statusActive,
-      AppTheme.accent,
-      AppTheme.statusWarn,
-    ][i % 4];
+  AppTheme.ink,
+  AppTheme.statusActive,
+  AppTheme.accent,
+  AppTheme.statusWarn,
+][i % 4];
 
 const List<String> _monthNames = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -218,148 +265,122 @@ class ReportsScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
-  String _tab = 'revenue';
   String _period = 'month';
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: ResponsiveContent(child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back, size: 20, color: AppTheme.ink),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                  ),
-                  const SizedBox(width: 4),
-                  const Text('Reports',
-                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
-                ],
-              ),
-            ),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () async {
-                  ref.invalidate(_revReportProvider);
-                  ref.invalidate(_memReportProvider);
-                },
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _TabSwitcher(
-                        tab: _tab,
-                        onChanged: (t) => setState(() => _tab = t),
+      body: ResponsiveContent(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(
+                        AppIcons.arrowBack,
+                        size: 20,
+                        color: AppTheme.ink,
                       ),
-                      const SizedBox(height: 16),
-                      if (_tab == 'revenue')
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text(
+                      'Reports',
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.ink,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    ref.invalidate(_revReportProvider);
+                    ref.invalidate(_memReportProvider);
+                  },
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Canvas 1i is one continuous scroll: revenue and
+                        // collections first, then memberships, then expenses.
                         _RevenueTab(
                           period: _period,
                           onPeriodChanged: (p) => setState(() => _period = p),
-                        )
-                      else
+                        ),
+                        const SizedBox(height: 20),
                         const _MembersTab(),
-                    ],
+                        const SizedBox(height: 20),
+                        GestureDetector(
+                          onTap: () => context.push('/staff/expenses'),
+                          behavior: HitTestBehavior.opaque,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 14,
+                            ),
+                            decoration: AppTheme.cardDecoration(),
+                            child: Row(
+                              children: const [
+                                Icon(
+                                  AppIcons.receipt,
+                                  size: 20,
+                                  color: AppTheme.statusNeutral,
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    'Expenses',
+                                    style: TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.ink,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  AppIcons.chevronRight,
+                                  size: 20,
+                                  color: AppTheme.inkHint,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
-      )),
-    );
-  }
-}
-
-// ─── Tab switcher ─────────────────────────────────────────────────────────────
-
-class _TabSwitcher extends StatelessWidget {
-  final String tab;
-  final ValueChanged<String> onChanged;
-  const _TabSwitcher({required this.tab, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppTheme.activeBg,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          _TabBtn(label: 'Revenue', value: 'revenue', current: tab, onTap: onChanged),
-          _TabBtn(label: 'Members', value: 'members', current: tab, onTap: onChanged),
-        ],
-      ),
-    );
-  }
-}
-
-class _TabBtn extends StatelessWidget {
-  final String label;
-  final String value;
-  final String current;
-  final ValueChanged<String> onTap;
-  const _TabBtn({
-    required this.label,
-    required this.value,
-    required this.current,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final active = value == current;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => onTap(value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: active ? AppTheme.surface : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: active
-                ? const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 1))]
-                : null,
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-              color: active ? AppTheme.ink : AppTheme.inkHint,
-            ),
+            ],
           ),
         ),
       ),
     );
   }
 }
-
-// ─── Revenue tab ──────────────────────────────────────────────────────────────
 
 class _RevenueTab extends ConsumerWidget {
   final String period;
   final ValueChanged<String> onPeriodChanged;
   const _RevenueTab({required this.period, required this.onPeriodChanged});
 
-  static const _periods = [
-    ('week', '7d'),
-    ('month', '30d'),
-    ('year', '12m'),
-  ];
+  static const _periods = [('week', '7d'), ('month', '30d'), ('year', '12m')];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -379,37 +400,71 @@ class _RevenueTab extends ConsumerWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Collected · ${_monthNames[now.month - 1]}',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+                  Text(
+                    'Collected · ${_monthNames[now.month - 1]}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.onDarkSoft,
+                    ),
+                  ),
                   const Spacer(),
-                  ..._periods.map((p) => Padding(
-                        padding: const EdgeInsets.only(left: 6),
-                        child: _HeroPeriodChip(
-                          label: p.$2,
-                          active: period == p.$1,
-                          onTap: () => onPeriodChanged(p.$1),
-                        ),
-                      )),
+                  ..._periods.map(
+                    (p) => Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: _HeroPeriodChip(
+                        label: p.$2,
+                        active: period == p.$1,
+                        onTap: () => onPeriodChanged(p.$1),
+                      ),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 6),
               async.when(
                 loading: () => const SizedBox(height: 40),
-                error: (e, _) => Text('Error: $e', style: const TextStyle(color: AppTheme.statusDanger, fontSize: 12)),
+                error: (_, _) => const Text(
+                  'Could not load. Pull down to retry.',
+                  style: TextStyle(color: AppTheme.inkSoft, fontSize: 12),
+                ),
                 data: (r) => Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(_compactRev(r.totalRevenue),
-                      style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: AppTheme.onDark, letterSpacing: -0.5)),
+                    Text(
+                      _compactRev(r.totalRevenue),
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.onDark,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
                         children: [
-                          Text(r.trendPct >= 0 ? '↑' : '↓',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: r.trendPct >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger)),
-                          Text('${r.trendPct.abs().toStringAsFixed(0)}%',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: r.trendPct >= 0 ? AppTheme.mintOnDark : AppTheme.statusDanger)),
+                          Text(
+                            r.trendPct >= 0 ? '↑' : '↓',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: r.trendPct >= 0
+                                  ? AppTheme.mintOnDark
+                                  : AppTheme.statusDanger,
+                            ),
+                          ),
+                          Text(
+                            '${r.trendPct.abs().toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: r.trendPct >= 0
+                                  ? AppTheme.mintOnDark
+                                  : AppTheme.statusDanger,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -420,11 +475,22 @@ class _RevenueTab extends ConsumerWidget {
               SizedBox(
                 height: 130,
                 child: async.when(
-                  loading: () => const Center(child: CircularProgressIndicator(color: AppTheme.mintOnDark)),
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(
+                      color: AppTheme.mintOnDark,
+                    ),
+                  ),
                   error: (_, __) => const SizedBox.shrink(),
                   data: (r) => r.chartData.isEmpty
-                      ? const Center(child: Text('No revenue data for this period',
-                          style: TextStyle(fontSize: 11, color: AppTheme.onDarkSoft)))
+                      ? const Center(
+                          child: Text(
+                            'No revenue data for this period',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.onDarkSoft,
+                            ),
+                          ),
+                        )
                       : _HeroLineChart(data: r.chartData),
                 ),
               ),
@@ -436,14 +502,15 @@ class _RevenueTab extends ConsumerWidget {
         // Collection rate / Avg per member / Avg days to pay
         async.when(
           loading: () => _kpiShimmerRow3(),
-          error: (e, _) => _ErrorText('$e'),
+          error: (_, _) => const _ErrorText(),
           data: (r) => Row(
             children: [
               Expanded(
                 child: _MetricCard(
                   label: 'Collection rate',
                   value: '${(r.collectionRate * 100).toStringAsFixed(0)}%',
-                  sub: '${_compactRev(r.totalRevenue)} of ${_compactRev(r.totalBilled)} billed',
+                  sub:
+                      '${_compactRev(r.totalRevenue)} of ${_compactRev(r.totalBilled)} billed',
                   valueColor: AppTheme.statusActive,
                 ),
               ),
@@ -459,10 +526,14 @@ class _RevenueTab extends ConsumerWidget {
               Expanded(
                 child: _MetricCard(
                   label: 'Avg days to pay',
-                  value: r.avgDaysToPay == null ? '—' : r.avgDaysToPay!.abs().toStringAsFixed(1),
+                  value: r.avgDaysToPay == null
+                      ? '—'
+                      : r.avgDaysToPay!.abs().toStringAsFixed(1),
                   sub: r.avgDaysToPay == null
                       ? 'no paid invoices yet'
-                      : (r.avgDaysToPay! >= 0 ? 'after due date' : 'before due date'),
+                      : (r.avgDaysToPay! >= 0
+                            ? 'after due date'
+                            : 'before due date'),
                 ),
               ),
             ],
@@ -482,14 +553,26 @@ class _RevenueTab extends ConsumerWidget {
                     entries: r.paymentMethod
                         .asMap()
                         .entries
-                        .map((e) => (_methodLabel(e.value.$1), e.value.$2, _methodColor(e.key)))
+                        .map(
+                          (e) => (
+                            _methodLabel(e.value.$1),
+                            e.value.$2,
+                            _methodColor(e.key),
+                          ),
+                        )
                         .toList(),
                   );
-            final duesAging = r.duesAging.isEmpty ? null : _DuesAgingCard(entries: r.duesAging);
-            if (donut == null && duesAging == null) return const SizedBox.shrink();
+            final duesAging = r.duesAging.isEmpty
+                ? null
+                : _DuesAgingCard(entries: r.duesAging);
+            if (donut == null && duesAging == null)
+              return const SizedBox.shrink();
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
-              child: ResponsiveContent.isWide(context) && donut != null && duesAging != null
+              child:
+                  ResponsiveContent.isWide(context) &&
+                      donut != null &&
+                      duesAging != null
                   ? Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -498,11 +581,14 @@ class _RevenueTab extends ConsumerWidget {
                         Expanded(child: duesAging),
                       ],
                     )
-                  : Column(children: [
-                      if (donut != null) donut,
-                      if (donut != null && duesAging != null) const SizedBox(height: 14),
-                      if (duesAging != null) duesAging,
-                    ]),
+                  : Column(
+                      children: [
+                        if (donut != null) donut,
+                        if (donut != null && duesAging != null)
+                          const SizedBox(height: 14),
+                        if (duesAging != null) duesAging,
+                      ],
+                    ),
             );
           },
         ),
@@ -510,26 +596,48 @@ class _RevenueTab extends ConsumerWidget {
         // Invoice counts (existing ops data, not in the mockup — kept)
         async.when(
           loading: () => _kpiShimmerRow3(),
-          error: (e, _) => _ErrorText('$e'),
+          error: (_, _) => const _ErrorText(),
           data: (r) => Column(
             children: [
               Row(
                 children: [
-                  Expanded(child: _MetricCard(label: 'Invoices', value: '${r.totalInvoices}', sub: '${r.paidCount} paid')),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Invoices',
+                      value: '${r.totalInvoices}',
+                      sub: '${r.paidCount} paid',
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: _MetricCard(label: 'Paid', value: '${r.paidCount}', sub: 'of ${r.totalInvoices}')),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Paid',
+                      value: '${r.paidCount}',
+                      sub: 'of ${r.totalInvoices}',
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: _MetricCard(label: 'Partial', value: '${r.partialCount}', sub: 'still owing')),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Partial',
+                      value: '${r.partialCount}',
+                      sub: 'still owing',
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: _MetricCard(
-                    label: 'Failed',
-                    value: '${r.failedCount}',
-                    sub: r.totalInvoices > 0 ? '${((r.failedCount / r.totalInvoices) * 100).toStringAsFixed(1)}%' : '0%',
-                  )),
+                  Expanded(
+                    child: _MetricCard(
+                      label: 'Failed',
+                      value: '${r.failedCount}',
+                      sub: r.totalInvoices > 0
+                          ? '${((r.failedCount / r.totalInvoices) * 100).toStringAsFixed(1)}%'
+                          : '0%',
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -561,37 +669,75 @@ class _MembersTab extends ConsumerWidget {
             children: [
               Row(
                 children: [
-                  const Text('Active members',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+                  const Text(
+                    'Active members',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.onDarkSoft,
+                    ),
+                  ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(999),
                     ),
-                    child: const Text('6 months',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.onDark)),
+                    child: const Text(
+                      '6 months',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.onDark,
+                      ),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
               async.when(
                 loading: () => const SizedBox(height: 40),
-                error: (e, _) => Text('Error: $e', style: const TextStyle(color: AppTheme.statusDanger, fontSize: 12)),
+                error: (_, _) => const Text(
+                  'Could not load. Pull down to retry.',
+                  style: TextStyle(color: AppTheme.inkSoft, fontSize: 12),
+                ),
                 data: (r) => Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('${r.active}',
-                      style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: AppTheme.onDark, letterSpacing: -0.5)),
+                    Text(
+                      '${r.active}',
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.onDark,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
                         children: [
-                          const Text('↑', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark)),
-                          Text('${r.newLast30d} new',
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.mintOnDark)),
+                          const Text(
+                            '↑',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.mintOnDark,
+                            ),
+                          ),
+                          Text(
+                            '${r.newLast30d} new',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.mintOnDark,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -602,16 +748,29 @@ class _MembersTab extends ConsumerWidget {
               SizedBox(
                 height: 130,
                 child: async.when(
-                  loading: () => const Center(child: CircularProgressIndicator(color: AppTheme.mintOnDark)),
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(
+                      color: AppTheme.mintOnDark,
+                    ),
+                  ),
                   error: (_, __) => const SizedBox.shrink(),
                   data: (r) {
                     final last6 = r.growthData.length > 6
                         ? r.growthData.sublist(r.growthData.length - 6)
                         : r.growthData;
-                    final chartData = last6.map((e) => (e.$1, e.$2.toDouble())).toList();
+                    final chartData = last6
+                        .map((e) => (e.$1, e.$2.toDouble()))
+                        .toList();
                     return chartData.isEmpty
-                        ? const Center(child: Text('No member data yet',
-                            style: TextStyle(fontSize: 11, color: AppTheme.onDarkSoft)))
+                        ? const Center(
+                            child: Text(
+                              'No member data yet',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.onDarkSoft,
+                              ),
+                            ),
+                          )
                         : _HeroLineChart(data: chartData);
                   },
                 ),
@@ -624,13 +783,15 @@ class _MembersTab extends ConsumerWidget {
         // Avg tenure / new this month
         async.when(
           loading: () => _kpiShimmerRow3(),
-          error: (e, _) => _ErrorText('$e'),
+          error: (_, _) => const _ErrorText(),
           data: (r) => Row(
             children: [
               Expanded(
                 child: _MetricCard(
                   label: 'Avg tenure',
-                  value: r.avgTenureDays == null ? '—' : '${(r.avgTenureDays! / 30.44).toStringAsFixed(1)}mo',
+                  value: r.avgTenureDays == null
+                      ? '—'
+                      : '${(r.avgTenureDays! / 30.44).toStringAsFixed(1)}mo',
                   sub: 'per member',
                 ),
               ),
@@ -660,14 +821,26 @@ class _MembersTab extends ConsumerWidget {
                     entries: r.planMix
                         .asMap()
                         .entries
-                        .map((e) => (_planLabel(e.value.$1), e.value.$2.toDouble(), _methodColor(e.key)))
+                        .map(
+                          (e) => (
+                            _planLabel(e.value.$1),
+                            e.value.$2.toDouble(),
+                            _methodColor(e.key),
+                          ),
+                        )
                         .toList(),
                   );
-            final leadConversion = r.leadsTotal == 0 ? null : _LeadConversionCard(report: r);
-            if (donut == null && leadConversion == null) return const SizedBox.shrink();
+            final leadConversion = r.leadsTotal == 0
+                ? null
+                : _LeadConversionCard(report: r);
+            if (donut == null && leadConversion == null)
+              return const SizedBox.shrink();
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
-              child: ResponsiveContent.isWide(context) && donut != null && leadConversion != null
+              child:
+                  ResponsiveContent.isWide(context) &&
+                      donut != null &&
+                      leadConversion != null
                   ? Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -676,11 +849,14 @@ class _MembersTab extends ConsumerWidget {
                         Expanded(child: leadConversion),
                       ],
                     )
-                  : Column(children: [
-                      if (donut != null) donut,
-                      if (donut != null && leadConversion != null) const SizedBox(height: 14),
-                      if (leadConversion != null) leadConversion,
-                    ]),
+                  : Column(
+                      children: [
+                        if (donut != null) donut,
+                        if (donut != null && leadConversion != null)
+                          const SizedBox(height: 14),
+                        if (leadConversion != null) leadConversion,
+                      ],
+                    ),
             );
           },
         ),
@@ -692,14 +868,21 @@ class _MembersTab extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Status breakdown',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              const Text(
+                'Status breakdown',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
               const SizedBox(height: 16),
               async.when(
                 loading: () => const SizedBox(
-                    height: 180,
-                    child: Center(child: CircularProgressIndicator())),
-                error: (e, _) => _ErrorText('$e'),
+                  height: 180,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (_, _) => const _ErrorText(),
                 data: (r) => _StatusDonut(report: r),
               ),
             ],
@@ -743,7 +926,10 @@ class _HeroLineChart extends StatelessWidget {
             dotData: FlDotData(
               show: showDots,
               getDotPainter: (spot, pct, bar, i) => FlDotCirclePainter(
-                radius: 3, color: AppTheme.darkCard, strokeWidth: 2, strokeColor: AppTheme.mintOnDark,
+                radius: 3,
+                color: AppTheme.darkCard,
+                strokeWidth: 2,
+                strokeColor: AppTheme.mintOnDark,
               ),
             ),
             belowBarData: BarAreaData(
@@ -767,19 +953,33 @@ class _HeroLineChart extends StatelessWidget {
               interval: 1,
               getTitlesWidget: (value, _) {
                 final idx = value.toInt();
-                if (idx < 0 || idx >= data.length) return const SizedBox.shrink();
-                if (idx % step != 0 && idx != data.length - 1) return const SizedBox.shrink();
+                if (idx < 0 || idx >= data.length)
+                  return const SizedBox.shrink();
+                if (idx % step != 0 && idx != data.length - 1)
+                  return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Text(data[idx].$1,
-                    style: const TextStyle(fontSize: 9, color: AppTheme.onDarkSoft, fontWeight: FontWeight.w500)),
+                  child: Text(
+                    data[idx].$1,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: AppTheme.onDarkSoft,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 );
               },
             ),
           ),
-          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
         ),
         gridData: const FlGridData(show: false),
         borderData: FlBorderData(show: false),
@@ -788,10 +988,18 @@ class _HeroLineChart extends StatelessWidget {
             getTooltipColor: (_) => AppTheme.darkCard2,
             tooltipRoundedRadius: 6,
             getTooltipItems: (spots) => spots
-                .map((s) => LineTooltipItem(
-                      s.y == s.y.roundToDouble() ? s.y.toInt().toString() : formatCurrency(s.y),
-                      const TextStyle(color: AppTheme.onDark, fontWeight: FontWeight.w700, fontSize: 12),
-                    ))
+                .map(
+                  (s) => LineTooltipItem(
+                    s.y == s.y.roundToDouble()
+                        ? s.y.toInt().toString()
+                        : formatCurrency(s.y),
+                    const TextStyle(
+                      color: AppTheme.onDark,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                )
                 .toList(),
           ),
         ),
@@ -806,7 +1014,11 @@ class _HeroPeriodChip extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
-  const _HeroPeriodChip({required this.label, required this.active, required this.onTap});
+  const _HeroPeriodChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -816,16 +1028,22 @@ class _HeroPeriodChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: active ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
+          color: active
+              ? Colors.white.withValues(alpha: 0.14)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white.withValues(alpha: active ? 0.2 : 0.1)),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: active ? 0.2 : 0.1),
+          ),
         ),
-        child: Text(label,
+        child: Text(
+          label,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
             color: active ? AppTheme.onDark : AppTheme.onDarkSoft,
-          )),
+          ),
+        ),
       ),
     );
   }
@@ -838,7 +1056,12 @@ class _MetricCard extends StatelessWidget {
   final String value;
   final String sub;
   final Color? valueColor;
-  const _MetricCard({required this.label, required this.value, required this.sub, this.valueColor});
+  const _MetricCard({
+    required this.label,
+    required this.value,
+    required this.sub,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -848,12 +1071,30 @@ class _MetricCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 10.5, color: AppTheme.inkSoft, fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10.5,
+              color: AppTheme.inkSoft,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(value,
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: valueColor ?? AppTheme.ink, height: 1.1)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w800,
+              color: valueColor ?? AppTheme.ink,
+              height: 1.1,
+            ),
+          ),
           const SizedBox(height: 3),
-          Text(sub, style: const TextStyle(fontSize: 10, color: AppTheme.inkHint), maxLines: 2),
+          Text(
+            sub,
+            style: const TextStyle(fontSize: 10, color: AppTheme.inkHint),
+            maxLines: 2,
+          ),
         ],
       ),
     );
@@ -872,9 +1113,15 @@ class _DonutCard extends StatelessWidget {
     final total = entries.fold<double>(0, (a, e) => a + e.$2);
     final sections = entries
         .where((e) => e.$2 > 0)
-        .map((e) => PieChartSectionData(
-              value: e.$2, color: e.$3, radius: 26, title: '', showTitle: false,
-            ))
+        .map(
+          (e) => PieChartSectionData(
+            value: e.$2,
+            color: e.$3,
+            radius: 26,
+            title: '',
+            showTitle: false,
+          ),
+        )
         .toList();
 
     return Container(
@@ -886,25 +1133,62 @@ class _DonutCard extends StatelessWidget {
           SizedBox(
             width: 88,
             height: 88,
-            child: PieChart(PieChartData(sections: sections, centerSpaceRadius: 24, sectionsSpace: 2)),
+            child: PieChart(
+              PieChartData(
+                sections: sections,
+                centerSpaceRadius: 24,
+                sectionsSpace: 2,
+              ),
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                  ),
+                ),
                 const SizedBox(height: 10),
                 ...entries.map((e) {
-                  final pct = total > 0 ? (e.$2 / total * 100).toStringAsFixed(0) : '0';
+                  final pct = total > 0
+                      ? (e.$2 / total * 100).toStringAsFixed(0)
+                      : '0';
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
                     child: Row(
                       children: [
-                        Container(width: 8, height: 8, decoration: BoxDecoration(color: e.$3, shape: BoxShape.circle)),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: e.$3,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(e.$1, style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft))),
-                        Text('$pct%', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                        Expanded(
+                          child: Text(
+                            e.$1,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: AppTheme.inkSoft,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '$pct%',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.ink,
+                          ),
+                        ),
                       ],
                     ),
                   );
@@ -924,8 +1208,16 @@ class _DuesAgingCard extends StatelessWidget {
   final List<(String bucket, double amount)> entries;
   const _DuesAgingCard({required this.entries});
 
-  static const _labels = {'0-7': '0–7 days', '8-15': '8–15 days', '15+': '15+ days'};
-  static const _colors = {'0-7': AppTheme.statusWarn, '8-15': AppTheme.statusDanger, '15+': Color(0xFF8B2E1F)};
+  static const _labels = {
+    '0-7': '0–7 days',
+    '8-15': '8–15 days',
+    '15+': '15+ days',
+  };
+  static const _colors = {
+    '0-7': AppTheme.statusWarn,
+    '8-15': AppTheme.statusDanger,
+    '15+': Color(0xFF8B2E1F),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -937,13 +1229,35 @@ class _DuesAgingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Dues aging', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+          const Text(
+            'Dues aging',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.ink,
+            ),
+          ),
           const SizedBox(height: 14),
           for (final e in entries) ...[
             Row(
               children: [
-                Expanded(child: Text(_labels[e.$1] ?? e.$1, style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft))),
-                Text(formatCurrency(e.$2), style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                Expanded(
+                  child: Text(
+                    _labels[e.$1] ?? e.$1,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
+                ),
+                Text(
+                  formatCurrency(e.$2),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.ink,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 6),
@@ -987,17 +1301,39 @@ class _LeadConversionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text('Lead conversion', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              const Text(
+                'Lead conversion',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
               const Spacer(),
-              Text('${(report.leadConversionRate * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.statusActive)),
+              Text(
+                '${(report.leadConversionRate * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.statusActive,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
           for (final r in rows) ...[
             Row(
               children: [
-                SizedBox(width: 46, child: Text(r.$1, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft))),
+                SizedBox(
+                  width: 46,
+                  child: Text(
+                    r.$1,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(999),
@@ -1010,9 +1346,18 @@ class _LeadConversionCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                SizedBox(width: 24, child: Text('${r.$2}',
-                  textAlign: TextAlign.end,
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.ink))),
+                SizedBox(
+                  width: 24,
+                  child: Text(
+                    '${r.$2}',
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -1050,13 +1395,15 @@ class _StatusDonut extends StatelessWidget {
     }
 
     final sections = entries
-        .map((e) => PieChartSectionData(
-              value: e.$2.toDouble(),
-              color: _colors[e.$1] ?? AppTheme.inkSoft,
-              radius: 48,
-              title: '',
-              showTitle: false,
-            ))
+        .map(
+          (e) => PieChartSectionData(
+            value: e.$2.toDouble(),
+            color: _colors[e.$1] ?? AppTheme.inkSoft,
+            radius: 48,
+            title: '',
+            showTitle: false,
+          ),
+        )
         .toList();
 
     return Row(
@@ -1078,35 +1425,40 @@ class _StatusDonut extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: entries
-              .map((e) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 5),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: _colors[e.$1] ?? AppTheme.inkSoft,
-                            shape: BoxShape.circle,
-                          ),
+              .map(
+                (e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: _colors[e.$1] ?? AppTheme.inkSoft,
+                          shape: BoxShape.circle,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          e.$1,
-                          style: const TextStyle(
-                              fontSize: 13, color: AppTheme.inkSoft),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        e.$1,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.inkSoft,
                         ),
-                        const SizedBox(width: 10),
-                        Text(
-                          '${e.$2}',
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.ink),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '${e.$2}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.ink,
                         ),
-                      ],
-                    ),
-                  ))
+                      ),
+                    ],
+                  ),
+                ),
+              )
               .toList(),
         ),
       ],
@@ -1123,21 +1475,23 @@ class _EmptyChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Text(message,
-          style:
-              const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+      child: Text(
+        message,
+        style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+      ),
     );
   }
 }
 
 class _ErrorText extends StatelessWidget {
-  final String message;
-  const _ErrorText(this.message);
+  const _ErrorText();
 
   @override
   Widget build(BuildContext context) {
-    return Text('Error: $message',
-        style: const TextStyle(color: AppTheme.statusDanger, fontSize: 13));
+    return const Text(
+      'Could not load. Pull down to retry.',
+      style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
+    );
   }
 }
 

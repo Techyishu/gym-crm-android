@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/app_icons.dart';
 
 /// DPDP Act 2023 consent keys. Bump the `_v*` suffix to re-prompt everyone
 /// after a material change to what we collect or who we share it with.
@@ -106,11 +107,11 @@ class _ConsentScreenState extends State<ConsentScreen> {
     if (!mounted) return;
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Privacy choices saved')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Privacy choices saved')));
     } else {
-      context.go('/login');
+      context.go('/welcome');
     }
   }
 
@@ -120,9 +121,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: canPop
-          ? AppBar(title: const Text('Privacy & data'))
-          : null,
+      appBar: canPop ? AppBar(title: const Text('Privacy & data')) : null,
       body: SafeArea(
         child: !_loaded
             ? const Center(child: CircularProgressIndicator())
@@ -140,8 +139,11 @@ class _ConsentScreenState extends State<ConsentScreen> {
                               color: AppTheme.accentSoft,
                               borderRadius: BorderRadius.circular(14),
                             ),
-                            child: const Icon(Icons.lock_outline,
-                                color: AppTheme.accent, size: 26),
+                            child: const Icon(
+                              AppIcons.lock,
+                              color: AppTheme.accent,
+                              size: 26,
+                            ),
                           ),
                           const SizedBox(height: 18),
                           const Text(
@@ -169,7 +171,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         const SizedBox(height: 22),
 
                         _ConsentTile(
-                          icon: Icons.people_outline,
+                          icon: AppIcons.people,
                           title: 'Run your gym',
                           body:
                               'Your name, email, phone, gym details, member records, '
@@ -181,7 +183,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         ),
                         const SizedBox(height: 12),
                         _ConsentTile(
-                          icon: Icons.info_outline,
+                          icon: AppIcons.info,
                           title: 'Improve the app',
                           body:
                               'Anonymous usage and crash reports via Google Firebase '
@@ -193,7 +195,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         ),
                         const SizedBox(height: 12),
                         _ConsentTile(
-                          icon: Icons.notifications_outlined,
+                          icon: AppIcons.notifications,
                           title: 'Product updates',
                           body:
                               'Push notifications about new features, offers and tips, '
@@ -205,7 +207,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         ),
                         const SizedBox(height: 12),
                         _ConsentTile(
-                          icon: Icons.campaign_outlined,
+                          icon: AppIcons.campaign,
                           title: 'Ad measurement',
                           body:
                               'Your device advertising ID and app events — install, '
@@ -213,8 +215,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
                               'we can see which ads bring gyms to us. Your member and '
                               'payment records are never shared.',
                           value: _ads,
-                          onChanged:
-                              _saving ? null : (v) => setState(() => _ads = v),
+                          onChanged: _saving
+                              ? null
+                              : (v) => setState(() => _ads = v),
                         ),
 
                         const SizedBox(height: 22),
@@ -238,21 +241,23 @@ class _ConsentScreenState extends State<ConsentScreen> {
                           onPressed: _saving
                               ? null
                               : () => _save(
-                                    analytics: _analytics,
-                                    marketing: _marketing,
-                                    ads: _ads,
-                                  ),
-                          child: Text(canPop ? 'Save choices' : 'Agree & continue'),
+                                  analytics: _analytics,
+                                  marketing: _marketing,
+                                  ads: _ads,
+                                ),
+                          child: Text(
+                            canPop ? 'Save choices' : 'Agree & continue',
+                          ),
                         ),
                         const SizedBox(height: 10),
                         OutlinedButton(
                           onPressed: _saving
                               ? null
                               : () => _save(
-                                    analytics: false,
-                                    marketing: false,
-                                    ads: false,
-                                  ),
+                                  analytics: false,
+                                  marketing: false,
+                                  ads: false,
+                                ),
                           child: const Text('Essential only'),
                         ),
                         const SizedBox(height: 12),
@@ -329,7 +334,9 @@ class _ConsentTile extends StatelessWidget {
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.statusNeutralBg,
                           borderRadius: BorderRadius.circular(8),
@@ -359,12 +366,7 @@ class _ConsentTile extends StatelessWidget {
               ],
             ),
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeThumbColor: AppTheme.accentFg,
-            activeTrackColor: AppTheme.accent,
-          ),
+          Switch(value: value, onChanged: onChanged),
         ],
       ),
     );
