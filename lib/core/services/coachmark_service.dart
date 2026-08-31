@@ -9,11 +9,14 @@ class CoachmarkService {
   final Set<String> _enabledKeys;
   final Set<String> _seenKeys;
 
-  CoachmarkService({required Set<String> enabledKeys, required Set<String> seenKeys})
-      : _enabledKeys = enabledKeys,
-        _seenKeys = seenKeys;
+  CoachmarkService({
+    required Set<String> enabledKeys,
+    required Set<String> seenKeys,
+  }) : _enabledKeys = enabledKeys,
+       _seenKeys = seenKeys;
 
-  bool shouldShow(String key) => _enabledKeys.contains(key) && !_seenKeys.contains(key);
+  bool shouldShow(String key) =>
+      _enabledKeys.contains(key) && !_seenKeys.contains(key);
 
   Future<void> markSeen(String key) async {
     if (_seenKeys.contains(key)) return;
@@ -36,11 +39,18 @@ final coachmarkServiceProvider = FutureProvider<CoachmarkService>((ref) async {
 
   final results = await Future.wait([
     client.from('coachmark_config').select('key').eq('enabled', true),
-    client.from('user_coachmarks_seen').select('coachmark_key').eq('user_id', userId),
+    client
+        .from('user_coachmarks_seen')
+        .select('coachmark_key')
+        .eq('user_id', userId),
   ]);
 
-  final enabledKeys = (results[0] as List).map((row) => row['key'] as String).toSet();
-  final seenKeys = (results[1] as List).map((row) => row['coachmark_key'] as String).toSet();
+  final enabledKeys = (results[0] as List)
+      .map((row) => row['key'] as String)
+      .toSet();
+  final seenKeys = (results[1] as List)
+      .map((row) => row['coachmark_key'] as String)
+      .toSet();
 
   return CoachmarkService(enabledKeys: enabledKeys, seenKeys: seenKeys);
 });

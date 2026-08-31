@@ -21,10 +21,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Privacy Policy'),
         actions: [
-          TextButton(
-            onPressed: _openWeb,
-            child: const Text('View on Web'),
-          ),
+          TextButton(onPressed: _openWeb, child: const Text('View on Web')),
         ],
       ),
       body: const SingleChildScrollView(
@@ -177,9 +174,14 @@ class _UpdatedChip extends StatelessWidget {
         color: AppTheme.activeBg,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(date,
-          style: const TextStyle(
-              fontSize: 12, color: AppTheme.ink, fontWeight: FontWeight.w500)),
+      child: Text(
+        date,
+        style: const TextStyle(
+          fontSize: 12,
+          color: AppTheme.ink,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
     );
   }
 }
@@ -190,9 +192,14 @@ class _Heading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.ink));
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        color: AppTheme.ink,
+      ),
+    );
   }
 }
 
@@ -202,9 +209,14 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 14, color: AppTheme.textSecondary, height: 1.6));
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 14,
+        color: AppTheme.textSecondary,
+        height: 1.6,
+      ),
+    );
   }
 }
 
@@ -220,15 +232,23 @@ class _Section extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(body,
-              style: const TextStyle(
-                  fontSize: 14, color: AppTheme.textSecondary, height: 1.6)),
+          Text(
+            body,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppTheme.textSecondary,
+              height: 1.6,
+            ),
+          ),
         ],
       ),
     );

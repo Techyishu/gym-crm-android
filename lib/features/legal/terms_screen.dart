@@ -22,10 +22,7 @@ class TermsScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Terms of Service'),
         actions: [
-          TextButton(
-            onPressed: _openWeb,
-            child: const Text('View on Web'),
-          ),
+          TextButton(onPressed: _openWeb, child: const Text('View on Web')),
         ],
       ),
       body: const SingleChildScrollView(
@@ -69,23 +66,23 @@ class _TermsContent extends StatelessWidget {
           title: '3. Subscriptions',
           body: isIOS
               ? 'GymCRM requires an active subscription from sign-up — there is no free trial on iOS. '
-                  'Subscription plans and pricing are shown in the app and purchased via the App Store.\n\n'
-                  'Subscriptions are billed monthly or annually as chosen. You may cancel at any time via your '
-                  'Apple ID subscription settings; cancellation takes effect at the end of the current billing '
-                  'period. No refunds are issued for unused periods.'
-              : 'New gym-owner accounts receive a 7-day free trial with full access. After the trial, '
-                  'continued use requires an active subscription. Subscription plans and pricing are listed at gymcrm.in.\n\n'
-                  'Subscriptions are billed monthly or annually as chosen. You may cancel at any time; '
-                  'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',
+                    'Subscription plans and pricing are shown in the app and purchased via the App Store.\n\n'
+                    'Subscriptions are billed monthly or annually as chosen. You may cancel at any time via your '
+                    'Apple ID subscription settings; cancellation takes effect at the end of the current billing '
+                    'period. No refunds are issued for unused periods.'
+              : 'New gym-owner accounts receive a 3-day free trial with full access. After the trial, '
+                    'continued use requires an active subscription. Subscription plans and pricing are listed at gymcrm.in.\n\n'
+                    'Subscriptions are billed monthly or annually as chosen. You may cancel at any time; '
+                    'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',
         ),
         _Section(
           title: '4. Subscription Management',
           body: isIOS
               ? 'Subscriptions are purchased and managed through the App Store using your Apple ID. '
-                  'Use the "Manage subscription" option in Settings to view billing, cancel, or restore purchases.'
+                    'Use the "Manage subscription" option in Settings to view billing, cancel, or restore purchases.'
               : 'Subscriptions are managed at gymcrm.in. Tap "Open gymcrm.in" to visit the website '
-                  'where you can start or manage your plan. Your subscription status applies automatically '
-                  'across all your devices.',
+                    'where you can start or manage your plan. Your subscription status applies automatically '
+                    'across all your devices.',
         ),
         _Section(
           title: '5. Acceptable Use',
@@ -145,7 +142,8 @@ class _TermsContent extends StatelessWidget {
         ),
         _Section(
           title: '12. Contact',
-          body: 'GymCRM — Operated by Shashank Kumar\nEmail: shashanksingh67567@gmail.com\nWhatsApp: +91 75410 04076\nWebsite: gymcrm.in',
+          body:
+              'GymCRM — Operated by Shashank Kumar\nEmail: shashanksingh67567@gmail.com\nWhatsApp: +91 75410 04076\nWebsite: gymcrm.in',
         ),
       ],
     );
@@ -164,9 +162,14 @@ class _UpdatedChip extends StatelessWidget {
         color: AppTheme.activeBg,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(date,
-          style: const TextStyle(
-              fontSize: 12, color: AppTheme.ink, fontWeight: FontWeight.w500)),
+      child: Text(
+        date,
+        style: const TextStyle(
+          fontSize: 12,
+          color: AppTheme.ink,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
     );
   }
 }
@@ -177,9 +180,14 @@ class _Heading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 20, fontWeight: FontWeight.w800, color: AppTheme.ink));
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        color: AppTheme.ink,
+      ),
+    );
   }
 }
 
@@ -189,9 +197,14 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 14, color: AppTheme.textSecondary, height: 1.6));
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 14,
+        color: AppTheme.textSecondary,
+        height: 1.6,
+      ),
+    );
   }
 }
 
@@ -207,15 +220,23 @@ class _Section extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(body,
-              style: const TextStyle(
-                  fontSize: 14, color: AppTheme.textSecondary, height: 1.6)),
+          Text(
+            body,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppTheme.textSecondary,
+              height: 1.6,
+            ),
+          ),
         ],
       ),
     );

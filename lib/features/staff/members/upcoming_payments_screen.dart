@@ -5,12 +5,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/member_photo.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/access/role_access.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
 final _overdueProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((
   ref,
@@ -56,29 +58,37 @@ final _upcomingProvider = FutureProvider.family<List<Map<String, dynamic>>, Stri
 });
 
 class UpcomingPaymentsScreen extends ConsumerStatefulWidget {
-  const UpcomingPaymentsScreen({super.key});
+  final bool initialTabExpiring;
+  const UpcomingPaymentsScreen({super.key, this.initialTabExpiring = false});
 
   @override
   ConsumerState<UpcomingPaymentsScreen> createState() =>
       _UpcomingPaymentsScreenState();
 }
 
-class _UpcomingPaymentsScreenState extends ConsumerState<UpcomingPaymentsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabs;
-  // bucket filter for upcoming tab: 3, 7, 14 days (null = all)
-  int? _bucketFilter;
+class _UpcomingPaymentsScreenState
+    extends ConsumerState<UpcomingPaymentsScreen> {
+  final _overdueKey = GlobalKey();
+  final _weekKey = GlobalKey();
+  final _laterKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 2, vsync: this);
+    if (widget.initialTabExpiring) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpTo(_weekKey));
+    }
   }
 
-  @override
-  void dispose() {
-    _tabs.dispose();
-    super.dispose();
+  void _jumpTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+      alignment: 0,
+    );
   }
 
   @override
@@ -88,30 +98,18 @@ class _UpcomingPaymentsScreenState extends ConsumerState<UpcomingPaymentsScreen>
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Expiring soon'),
+        title: const Text('Payments Due'),
         leading: const BackButton(),
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(text: 'Overdue'),
-            Tab(text: 'Expiring'),
-          ],
-        ),
       ),
       body: ResponsiveContent(
         child: gymAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('Error: $e')),
-          data: (gymId) => TabBarView(
-            controller: _tabs,
-            children: [
-              _OverdueTab(gymId: gymId),
-              _UpcomingTab(
-                gymId: gymId,
-                bucketFilter: _bucketFilter,
-                onBucketChange: (v) => setState(() => _bucketFilter = v),
-              ),
-            ],
+          error: (_, _) => const ErrorState(what: 'renewals'),
+          data: (gymId) => _RenewalQueue(
+            gymId: gymId,
+            overdueKey: _overdueKey,
+            weekKey: _weekKey,
+            laterKey: _laterKey,
           ),
         ),
       ),
@@ -119,293 +117,85 @@ class _UpcomingPaymentsScreenState extends ConsumerState<UpcomingPaymentsScreen>
   }
 }
 
-// ── Overdue Tab ────────────────────────────────────────────────────────────────
-
-class _OverdueTab extends ConsumerWidget {
+// ── Payments due — every member who owes or is about to owe money, in one
+// plain scroll grouped by how soon it matters. Opening from the dashboard's
+// "due in 7 days" tile scrolls straight to that section.
+class _RenewalQueue extends ConsumerWidget {
   final String gymId;
-  const _OverdueTab({required this.gymId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(_overdueProvider(gymId));
-    return data.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
-      data: (members) {
-        if (members.isEmpty) {
-          return const _EmptyState(
-            icon: Icons.check_circle_outline,
-            label: 'No overdue payments',
-            sub: 'All members are up to date.',
-          );
-        }
-        return RefreshIndicator(
-          onRefresh: () async => ref.invalidate(_overdueProvider(gymId)),
-          child: ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: members.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) =>
-                _OverdueCard(member: members[i], gymId: gymId),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _OverdueCard extends StatelessWidget {
-  final Map<String, dynamic> member;
-  final String gymId;
-  const _OverdueCard({required this.member, required this.gymId});
-
-  @override
-  Widget build(BuildContext context) {
-    final dateStr = member['next_payment_date'] as String?;
-    final isFrozen = (member['status'] as String?) == 'frozen';
-
-    int daysOverdue = 0;
-    if (dateStr != null) {
-      final due = DateTime.tryParse(dateStr);
-      if (due != null) {
-        final today = DateTime.now();
-        daysOverdue = DateTime(
-          today.year,
-          today.month,
-          today.day,
-        ).difference(DateTime(due.year, due.month, due.day)).inDays;
-      }
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isFrozen ? const Color(0xFFFFF0F0) : AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isFrozen ? const Color(0xFFFFCDD2) : AppTheme.border,
-        ),
-      ),
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        children: [
-          _Avatar(member: member),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _name(member),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                          color: AppTheme.ink,
-                        ),
-                      ),
-                    ),
-                    if (isFrozen)
-                      _Badge(
-                        label: 'Hold',
-                        bg: const Color(0xFFFFCDD2),
-                        fg: const Color(0xFFB71C1C),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  daysOverdue == 0
-                      ? 'Due today'
-                      : '$daysOverdue day${daysOverdue == 1 ? '' : 's'} overdue',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: daysOverdue == 0
-                        ? AppTheme.statusWarn
-                        : AppTheme.statusDanger,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (dateStr != null)
-                  Text(
-                    formatDateFromString(dateStr),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.inkHint,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if ((member['phone'] as String? ?? '').isNotEmpty)
-                _WhatsAppButton(member: member),
-              const SizedBox(height: 6),
-              _CollectButton(
-                memberId: member['id'] as String,
-                memberName: _name(member),
-                gymId: gymId,
-                nextPaymentDate: dateStr,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Upcoming Tab ───────────────────────────────────────────────────────────────
-
-class _UpcomingTab extends ConsumerWidget {
-  final String gymId;
-  final int? bucketFilter;
-  final ValueChanged<int?> onBucketChange;
-  const _UpcomingTab({
+  final GlobalKey overdueKey;
+  final GlobalKey weekKey;
+  final GlobalKey laterKey;
+  const _RenewalQueue({
     required this.gymId,
-    required this.bucketFilter,
-    required this.onBucketChange,
+    required this.overdueKey,
+    required this.weekKey,
+    required this.laterKey,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(_upcomingProvider(gymId));
-    return data.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
-      data: (all) {
-        final window = bucketFilter ?? 7; // 7 or 30 days
-        final filtered = all.where((m) {
-          final days = _daysUntil(m['next_payment_date'] as String?);
-          return days <= window;
-        }).toList();
+    final overdueAsync = ref.watch(_overdueProvider(gymId));
+    final upcomingAsync = ref.watch(_upcomingProvider(gymId));
 
-        // Total renewal value of the visible window.
-        double value = 0;
-        for (final m in filtered) {
-          final memberships = (m['memberships'] as List?) ?? [];
-          for (final ms in memberships) {
-            if ((ms as Map)['status'] == 'active') {
-              value +=
-                  ((ms['membership_plans'] as Map?)?['price'] as num?)
-                      ?.toDouble() ??
-                  0;
-              break;
-            }
-          }
-        }
+    if (overdueAsync.isLoading || upcomingAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (overdueAsync.hasError || upcomingAsync.hasError) {
+      return const ErrorState(what: 'renewals');
+    }
 
-        return Column(
-          children: [
-            // Dark summary card
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-                decoration: AppTheme.darkCardDecoration(),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Next $window days',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.onDarkSoft,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${filtered.length} plan${filtered.length == 1 ? '' : 's'}',
-                            style: AppTheme.numberStyle(
-                              fontSize: 20,
-                              color: AppTheme.onDark,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        const Text(
-                          'Value',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.onDarkSoft,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            formatCurrency(value),
-                            style: AppTheme.numberStyle(
-                              fontSize: 20,
-                              color: AppTheme.mintOnDark,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // 7 / 30 day toggle
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  _FilterChip(
-                    label: '7 days',
-                    selected: window == 7,
-                    onTap: () => onBucketChange(7),
-                  ),
-                  const SizedBox(width: 8),
-                  _FilterChip(
-                    label: '30 days',
-                    selected: window == 30,
-                    onTap: () => onBucketChange(30),
-                  ),
-                ],
-              ),
-            ),
-            if (filtered.isEmpty)
-              const Expanded(
-                child: _EmptyState(
-                  icon: Icons.calendar_today_outlined,
-                  label: 'No upcoming payments',
-                  sub: 'No members due in this window.',
-                ),
-              )
-            else
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () async =>
-                      ref.invalidate(_upcomingProvider(gymId)),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) =>
-                        _UpcomingCard(member: filtered[i], gymId: gymId),
-                  ),
-                ),
-              ),
-          ],
-        );
+    final overdue = overdueAsync.value ?? const [];
+    final upcoming = upcomingAsync.value ?? const [];
+    final week = upcoming.where((m) => _daysUntil(m) <= 7).toList();
+    final later = upcoming.where((m) => _daysUntil(m) > 7).toList();
+
+    if (overdue.isEmpty && week.isEmpty && later.isEmpty) {
+      return const _EmptyState(
+        icon: AppIcons.checkCircle,
+        label: 'All caught up',
+        sub: 'No overdue or upcoming renewals right now.',
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        ref.invalidate(_overdueProvider(gymId));
+        ref.invalidate(_upcomingProvider(gymId));
       },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          if (overdue.isNotEmpty) ...[
+            _SectionHeader(
+              key: overdueKey,
+              label: 'Overdue',
+              count: overdue.length,
+            ),
+            for (final m in overdue) _DueRow(member: m, gymId: gymId),
+          ],
+          if (week.isNotEmpty) ...[
+            _SectionHeader(
+              key: weekKey,
+              label: 'Due this week',
+              count: week.length,
+            ),
+            for (final m in week) _DueRow(member: m, gymId: gymId),
+          ],
+          if (later.isNotEmpty) ...[
+            _SectionHeader(
+              key: laterKey,
+              label: 'Due in the next 30 days',
+              count: later.length,
+            ),
+            for (final m in later) _DueRow(member: m, gymId: gymId),
+          ],
+        ],
+      ),
     );
   }
 
-  static int _daysUntil(String? dateStr) {
+  static int _daysUntil(Map<String, dynamic> m) {
+    final dateStr = m['next_payment_date'] as String?;
     if (dateStr == null) return 999;
     final due = DateTime.tryParse(dateStr);
     if (due == null) return 999;
@@ -418,14 +208,39 @@ class _UpcomingTab extends ConsumerWidget {
   }
 }
 
-class _UpcomingCard extends StatelessWidget {
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  final int count;
+  const _SectionHeader({super.key, required this.label, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 22, 2, 10),
+      child: Text(
+        '$label ($count)',
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.inkSoft,
+        ),
+      ),
+    );
+  }
+}
+
+// One row for both overdue and upcoming members — plain card, same shape as
+// the Money > Dues list, so the whole app reads as one consistent style
+// instead of a special screen with its own look.
+class _DueRow extends StatelessWidget {
   final Map<String, dynamic> member;
   final String gymId;
-  const _UpcomingCard({required this.member, required this.gymId});
+  const _DueRow({required this.member, required this.gymId});
 
   @override
   Widget build(BuildContext context) {
     final dateStr = member['next_payment_date'] as String?;
+    final isFrozen = (member['status'] as String?) == 'frozen';
     int days = 0;
     if (dateStr != null) {
       final due = DateTime.tryParse(dateStr);
@@ -438,85 +253,80 @@ class _UpcomingCard extends StatelessWidget {
         ).difference(DateTime(today.year, today.month, today.day)).inDays;
       }
     }
-
-    final Color daysColor = days <= 3
-        ? AppTheme.statusDanger
-        : days <= 7
-        ? const Color(0xFFF97316)
-        : const Color(0xFFEAB308);
+    final overdue = days <= 0;
+    final subtitle = overdue
+        ? (days == 0
+              ? 'Due today'
+              : '${-days} day${-days == 1 ? '' : 's'} overdue')
+        : 'Due in $days day${days == 1 ? '' : 's'}';
+    final subtitleColor = overdue ? AppTheme.statusDanger : AppTheme.inkSoft;
 
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-      ),
+      margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
-      child: Row(
+      decoration: BoxDecoration(
+        color: isFrozen ? const Color(0xFFFFF5F5) : AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Avatar(member: member),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _name(member),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: AppTheme.ink,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: 'Upcoming in $days day${days == 1 ? '' : 's'}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: daysColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (dateStr != null)
-                        TextSpan(
-                          text: ' · ${formatDateFromString(dateStr)}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.inkHint,
+          Row(
+            children: [
+              _Avatar(member: member),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _name(member),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: AppTheme.ink,
+                            ),
                           ),
                         ),
-                    ],
-                  ),
-                ),
-                if ((member['email'] as String? ?? '').isNotEmpty)
-                  Text(
-                    member['email'] as String,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.inkHint,
+                        if (isFrozen) ...[
+                          const SizedBox(width: 6),
+                          _Badge(
+                            label: 'Hold',
+                            bg: const Color(0xFFFFCDD2),
+                            fg: const Color(0xFFB71C1C),
+                          ),
+                        ],
+                      ],
                     ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if ((member['phone'] as String? ?? '').isNotEmpty)
-                _WhatsAppButton(member: member, isReminder: true),
-              const SizedBox(height: 6),
-              _CollectButton(
-                memberId: member['id'] as String,
-                memberName: _name(member),
-                gymId: gymId,
-                nextPaymentDate: dateStr,
+                    const SizedBox(height: 2),
+                    Text(
+                      dateStr != null
+                          ? '$subtitle · ${formatDateFromString(dateStr)}'
+                          : subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: subtitleColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
+              if ((member['phone'] as String? ?? '').isNotEmpty)
+                _WhatsAppButton(member: member, isReminder: !overdue),
             ],
+          ),
+          const SizedBox(height: 11),
+          _CollectButton(
+            memberId: member['id'] as String,
+            memberName: _name(member),
+            gymId: gymId,
+            nextPaymentDate: dateStr,
           ),
         ],
       ),
@@ -584,19 +394,16 @@ class _WhatsAppButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
+      width: 32,
       height: 32,
-      child: OutlinedButton.icon(
+      child: IconButton(
         onPressed: () => _launch(context),
-        icon: const Icon(
-          Icons.chat_bubble_outline,
-          size: 14,
-          color: Color(0xFF25D366),
-        ),
-        label: const Text('WA', style: TextStyle(fontSize: 12)),
-        style: OutlinedButton.styleFrom(
+        icon: const Icon(AppIcons.chat, size: 16),
+        tooltip: 'WhatsApp',
+        style: IconButton.styleFrom(
           foregroundColor: const Color(0xFF25D366),
-          side: const BorderSide(color: Color(0xFF25D366)),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.1),
+          padding: EdgeInsets.zero,
           minimumSize: Size.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
@@ -647,31 +454,37 @@ class _CollectButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final role = ref.watch(staffRoleProvider).valueOrNull;
     if (!RoleAccess.canRecordPayment(role)) return const SizedBox.shrink();
-    return SizedBox(
-      height: 32,
-      child: ElevatedButton(
-        onPressed: () {
-          showAdaptiveSheet(
-            context: context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            builder: (_) =>
-                QuickCollectSheet(memberId: memberId, memberName: memberName),
-          ).then((success) {
-            if (success == true) {
-              ref.invalidate(_overdueProvider(gymId));
-              ref.invalidate(_upcomingProvider(gymId));
-            }
-          });
-        },
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+    return GestureDetector(
+      onTap: () {
+        showAdaptiveSheet(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) =>
+              QuickCollectSheet(memberId: memberId, memberName: memberName),
+        ).then((success) {
+          if (success == true) {
+            ref.invalidate(_overdueProvider(gymId));
+            ref.invalidate(_upcomingProvider(gymId));
+          }
+        });
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.accent,
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
           isFuturePaymentDate(nextPaymentDate) ? 'Collect early' : 'Collect',
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
         ),
       ),
     );
@@ -702,12 +515,19 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   String? _planHint;
   String? _nextPaymentDate;
   double? _due;
+  bool _partlyPaid = false;
+
+  /// Balance still owed on a real open/partial invoice — 0 when there is no
+  /// such invoice. Deliberately not `_due`, which falls back to the plan price
+  /// when nothing is invoiced yet; that fallback would disable the duplicate
+  /// guard on the very retry it exists to catch.
+  double _outstanding = 0;
 
   static const _methods = [
-    ('cash', 'Cash', Icons.payments_outlined),
-    ('upi', 'UPI', Icons.qr_code_outlined),
-    ('bank_transfer', 'Bank Transfer', Icons.account_balance_outlined),
-    ('card', 'Card', Icons.credit_card_outlined),
+    ('cash', 'Cash', AppIcons.payments),
+    ('upi', 'UPI', AppIcons.qrCode),
+    ('bank_transfer', 'Bank Transfer', AppIcons.accountBalance),
+    ('card', 'Card', AppIcons.creditCard),
   ];
 
   @override
@@ -776,10 +596,13 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
         if (!mounted) return;
         setState(() {
           _due = due;
+          _partlyPaid = due < invoiceAmount;
+          _outstanding = due;
           _amountCtrl.text = due.toStringAsFixed(0);
         });
       } else {
         _due = finalPrice;
+        _outstanding = 0;
       }
     } catch (e) {
       debugPrint('[GymCRM] Autofill error: $e');
@@ -802,25 +625,23 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       return;
     }
 
-    final prior = await LocalPaymentGuard.check(widget.memberId);
+    // Only a genuine duplicate is worth stopping. If the member still owes
+    // money on an open bill, a second collection today is the rest of that
+    // bill, not an accidental re-tap — warning there told owners a normal
+    // instalment looked like a mistake.
+    final prior = _outstanding > 0
+        ? null
+        : await LocalPaymentGuard.check(widget.memberId);
     if (prior != null && mounted) {
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Already collected today'),
-          content: Text(
+      await showInfoDialog(
+        context,
+        title: 'Already collected today',
+        body:
             '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
             'from ${widget.memberName} today at '
             '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}. '
             'Refresh the member before collecting another renewal.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+        icon: AppIcons.history,
       );
       return;
     }
@@ -829,6 +650,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
     final early = await confirmEarlyRenewalIfNeeded(
       context,
       nextPaymentDate: _nextPaymentDate,
+      settlingPartialInvoice: _partlyPaid,
     );
     if (!early) return;
     if (_nextPaymentDate == null) {
@@ -907,7 +729,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(AppIcons.close),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -922,7 +744,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
               child: Row(
                 children: [
                   const Icon(
-                    Icons.person_outline,
+                    AppIcons.person,
                     size: 16,
                     color: AppTheme.inkSoft,
                   ),
@@ -1070,45 +892,6 @@ class _Badge extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w600),
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final Color? color;
-  final VoidCallback onTap;
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final activeColor = color ?? AppTheme.primary;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? activeColor.withValues(alpha: 0.12)
-              : AppTheme.background,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? activeColor : AppTheme.border),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: selected ? activeColor : AppTheme.inkSoft,
-          ),
-        ),
       ),
     );
   }

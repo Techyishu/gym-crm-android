@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/access/gym_permissions.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/lead.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
+import '../../../core/theme/app_icons.dart';
 
 Future<void> _dialPhone(String phone) async {
   final uri = Uri.parse('tel:$phone');
@@ -19,8 +21,10 @@ Future<void> _openWhatsApp(String phone, {String? text}) async {
   final clean = phone.replaceAll(RegExp(r'\D'), '');
   final number = clean.startsWith('91') ? clean : '91$clean';
   final suffix = text != null ? '?text=${Uri.encodeComponent(text)}' : '';
-  await launchUrl(Uri.parse('https://wa.me/$number$suffix'),
-      mode: LaunchMode.externalApplication);
+  await launchUrl(
+    Uri.parse('https://wa.me/$number$suffix'),
+    mode: LaunchMode.externalApplication,
+  );
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -35,7 +39,9 @@ final _leadsProvider = FutureProvider<List<Lead>>((ref) async {
       .eq('gym_id', gymId)
       .order('created_at', ascending: false);
 
-  return (data as List).map((e) => Lead.fromJson(e as Map<String, dynamic>)).toList();
+  return (data as List)
+      .map((e) => Lead.fromJson(e as Map<String, dynamic>))
+      .toList();
 });
 
 const _statuses = ['new', 'contacted', 'trial', 'converted', 'lost'];
@@ -44,134 +50,213 @@ const _sources = ['manual', 'website', 'referral', 'walk-in', 'social'];
 // ── Status helpers ─────────────────────────────────────────────────────────────
 
 Color _statusBg(String s) => switch (s) {
-      'new'       => AppTheme.statusActiveBg,
-      'contacted' => AppTheme.statusNeutralBg,
-      'trial'     => AppTheme.statusWarnBg,
-      'converted' => AppTheme.statusActiveBg,
-      'lost'      => AppTheme.statusDangerBg,
-      _           => AppTheme.activeBg,
-    };
+  'new' => AppTheme.statusActiveBg,
+  'contacted' => AppTheme.statusNeutralBg,
+  'trial' => AppTheme.statusWarnBg,
+  'converted' => AppTheme.statusActiveBg,
+  'lost' => AppTheme.statusDangerBg,
+  _ => AppTheme.activeBg,
+};
 
 Color _statusFg(String s) => switch (s) {
-      'new'       => AppTheme.statusActive,
-      'contacted' => AppTheme.statusNeutral,
-      'trial'     => AppTheme.statusWarn,
-      'converted' => AppTheme.statusActive,
-      'lost'      => AppTheme.statusDanger,
-      _           => AppTheme.inkSoft,
-    };
+  'new' => AppTheme.statusActive,
+  'contacted' => AppTheme.statusNeutral,
+  'trial' => AppTheme.statusWarn,
+  'converted' => AppTheme.statusActive,
+  'lost' => AppTheme.statusDanger,
+  _ => AppTheme.inkSoft,
+};
 
-String _capitalize(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+String _capitalize(String s) =>
+    s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
-class LeadsScreen extends ConsumerWidget {
+class LeadsScreen extends ConsumerStatefulWidget {
   const LeadsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LeadsScreen> createState() => _LeadsScreenState();
+}
+
+class _LeadsScreenState extends ConsumerState<LeadsScreen> {
+  // 'followup' | one of _statuses | 'all'
+  String _filter = 'followup';
+
+  static bool _needsFollowUp(Lead l) {
+    if (l.status == 'converted' || l.status == 'lost') return false;
+    final fu = l.followUpAt;
+    if (fu == null) return l.status == 'new';
+    final d = DateTime.tryParse(fu);
+    return d != null && !d.isAfter(DateTime.now());
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final leads = ref.watch(_leadsProvider);
+    final canAdd = ref.watch(
+      gymPermissionProvider((GymModule.leads, GymAction.add)),
+    );
+    final canEdit = ref.watch(
+      gymPermissionProvider((GymModule.leads, GymAction.edit)),
+    );
+    final canDelete = ref.watch(
+      gymPermissionProvider((GymModule.leads, GymAction.delete)),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Enquiries'),
+        title: const Text('Leads'),
         leading: const BackButton(),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: () => _showAddSheet(context, ref),
-              child: Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: AppTheme.accent,
-                  borderRadius: BorderRadius.circular(14),
+          if (canAdd)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: GestureDetector(
+                onTap: () => _showAddSheet(context, ref),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(AppIcons.add, size: 22, color: Colors.white),
                 ),
-                child: const Icon(Icons.add, size: 22, color: Colors.white),
               ),
             ),
-          ),
         ],
       ),
-      body: ResponsiveContent(child: leads.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (list) {
-          if (list.isEmpty) return const _EmptyLeads();
+      body: ResponsiveContent(
+        child: leads.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => ErrorState(
+            what: 'leads',
+            onRetry: () => ref.invalidate(_leadsProvider),
+          ),
+          data: (list) {
+            if (list.isEmpty) return const _EmptyLeads();
 
-          final counts = <String, int>{};
-          for (final l in list) {
-            counts[l.status] = (counts[l.status] ?? 0) + 1;
-          }
-          final followUpCount = list.where((l) {
-            if (l.status == 'converted' || l.status == 'lost') return false;
-            final fu = l.followUpAt;
-            if (fu == null) return l.status == 'new';
-            final d = DateTime.tryParse(fu);
-            return d != null && !d.isAfter(DateTime.now());
-          }).length;
+            final counts = <String, int>{};
+            for (final l in list) {
+              counts[l.status] = (counts[l.status] ?? 0) + 1;
+            }
+            final followUpCount = list.where(_needsFollowUp).length;
+            final converted = list.where((l) => l.status == 'converted').length;
+            final rate = list.isEmpty
+                ? 0
+                : (converted / list.length * 100).round();
+            final shown = switch (_filter) {
+              'all' => list,
+              'followup' => list.where(_needsFollowUp).toList(),
+              _ => list.where((l) => l.status == _filter).toList(),
+            };
 
-          return Column(
-            children: [
-              if (followUpCount > 0)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.accentSoft,
-                      borderRadius: BorderRadius.circular(16),
+            return Column(
+              children: [
+                if (followUpCount > 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentSoft,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: AppTheme.accent,
+                              borderRadius: BorderRadius.circular(13),
+                            ),
+                            child: const Icon(
+                              AppIcons.schedule,
+                              size: 20,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '$followUpCount to follow up today',
+                                  style: const TextStyle(
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.ink,
+                                  ),
+                                ),
+                                const Text(
+                                  'GymCRM tells you exactly who to call',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.inkSoft,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Row(children: [
-                      Container(
-                        width: 40, height: 40,
-                        decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(13)),
-                        child: const Icon(Icons.schedule, size: 20, color: Colors.white),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('$followUpCount to follow up today',
-                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-                          const Text('GymCRM tells you exactly who to call',
-                            style: TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                        ]),
-                      ),
-                    ]),
+                  ),
+                _SummaryStrip(
+                  counts: counts,
+                  followUpCount: followUpCount,
+                  total: list.length,
+                  selected: _filter,
+                  onSelect: (f) => setState(() => _filter = f),
+                ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () async => ref.invalidate(_leadsProvider),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                      itemCount: shown.length + 1,
+                      itemBuilder: (_, i) {
+                        if (i == shown.length) {
+                          return _ConversionInsight(
+                            converted: converted,
+                            total: list.length,
+                            rate: rate,
+                          );
+                        }
+                        return _LeadCard(
+                          lead: shown[i],
+                          onStatusChange: canEdit
+                              ? (status) async {
+                                  await Supabase.instance.client
+                                      .from('leads')
+                                      .update({'status': status})
+                                      .eq('id', shown[i].id);
+                                  ref.invalidate(_leadsProvider);
+                                }
+                              : null,
+                          onDelete: canDelete
+                              ? () async {
+                                  await Supabase.instance.client
+                                      .from('leads')
+                                      .delete()
+                                      .eq('id', shown[i].id);
+                                  ref.invalidate(_leadsProvider);
+                                }
+                              : null,
+                        );
+                      },
+                    ),
                   ),
                 ),
-              _SummaryStrip(counts: counts),
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(_leadsProvider),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                    itemCount: list.length,
-                    itemBuilder: (_, i) => _LeadCard(
-                      lead: list[i],
-                      onStatusChange: (status) async {
-                        await Supabase.instance.client
-                            .from('leads')
-                            .update({'status': status})
-                            .eq('id', list[i].id);
-                        ref.invalidate(_leadsProvider);
-                      },
-                      onDelete: () async {
-                        await Supabase.instance.client
-                            .from('leads')
-                            .delete()
-                            .eq('id', list[i].id);
-                        ref.invalidate(_leadsProvider);
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      )),
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -189,46 +274,59 @@ class LeadsScreen extends ConsumerWidget {
 
 class _SummaryStrip extends StatelessWidget {
   final Map<String, int> counts;
-  const _SummaryStrip({required this.counts});
+  final int followUpCount;
+  final int total;
+  final String selected;
+  final ValueChanged<String> onSelect;
+  const _SummaryStrip({
+    required this.counts,
+    required this.followUpCount,
+    required this.total,
+    required this.selected,
+    required this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // Follow-up first — it is the only bucket that needs action today.
+    final chips = <(String, String, int)>[
+      ('followup', 'Follow-up', followUpCount),
+      for (final s in _statuses) (s, _capitalize(s), counts[s] ?? 0),
+      ('all', 'All', total),
+    ];
     return Container(
       color: AppTheme.surface,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: _statuses.map((s) {
-            final count = counts[s] ?? 0;
-            final fg = _statusFg(s);
-            final bg = _statusBg(s);
+          children: chips.map((c) {
+            final (key, label, count) = c;
+            final active = key == selected;
+            final fg = active ? Colors.white : _statusFg(key);
+            final bg = active ? AppTheme.ink : _statusBg(key);
             return Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: bg,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(color: fg, shape: BoxShape.circle),
+              child: GestureDetector(
+                onTap: () => onSelect(key),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$label  $count',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: fg,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${_capitalize(s)}  $count',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: fg,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             );
@@ -239,12 +337,54 @@ class _SummaryStrip extends StatelessWidget {
   }
 }
 
+// ── Conversion insight footer ───────────────────────────────────────────────
+
+class _ConversionInsight extends StatelessWidget {
+  final int converted;
+  final int total;
+  final int rate;
+  const _ConversionInsight({
+    required this.converted,
+    required this.total,
+    required this.rate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (total == 0) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.accentSoft,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const Icon(AppIcons.insights, size: 19, color: AppTheme.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$converted of $total leads converted · $rate%',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.ink,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Lead card ─────────────────────────────────────────────────────────────────
 
 class _LeadCard extends StatelessWidget {
   final Lead lead;
-  final void Function(String) onStatusChange;
-  final VoidCallback onDelete;
+  final void Function(String)? onStatusChange;
+  final VoidCallback? onDelete;
   const _LeadCard({
     required this.lead,
     required this.onStatusChange,
@@ -253,7 +393,8 @@ class _LeadCard extends StatelessWidget {
 
   bool get _isHot {
     try {
-      return DateTime.now().difference(DateTime.parse(lead.createdAt)).inHours < 48;
+      return DateTime.now().difference(DateTime.parse(lead.createdAt)).inHours <
+          48;
     } catch (e) {
       debugPrint('[GymCRM] Parse lead date error: $e');
       return false;
@@ -263,7 +404,7 @@ class _LeadCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => _showStatusPicker(context),
+      onTap: onStatusChange == null ? null : () => _showStatusPicker(context),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: AppTheme.cardDecoration(),
@@ -298,7 +439,10 @@ class _LeadCard extends StatelessWidget {
                           if (_isHot) ...[
                             const SizedBox(width: 6),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppTheme.statusWarnBg,
                                 borderRadius: BorderRadius.circular(4),
@@ -327,7 +471,10 @@ class _LeadCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           lead.email!,
-                          style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.inkHint,
+                          ),
                         ),
                       ],
                     ],
@@ -340,33 +487,48 @@ class _LeadCard extends StatelessWidget {
                   children: [
                     _StatusBadge(status: lead.status),
                     const SizedBox(height: 4),
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 16, color: AppTheme.inkHint),
-                      onSelected: (v) async {
-                        if (v == 'delete') {
-                          final ok = await showConfirmDialog(
-                            context,
-                            title: 'Delete enquiry?',
-                            body: 'Delete ${lead.name}? This cannot be undone.',
-                            confirmLabel: 'Delete',
-                            icon: Icons.delete_outline,
-                          );
-                          if (ok == true) onDelete();
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete_outline, size: 16, color: AppTheme.statusDanger),
-                              SizedBox(width: 8),
-                              Text('Delete', style: TextStyle(color: AppTheme.statusDanger)),
-                            ],
-                          ),
+                    if (onDelete != null)
+                      PopupMenuButton<String>(
+                        icon: const Icon(
+                          AppIcons.moreVert,
+                          size: 16,
+                          color: AppTheme.inkHint,
                         ),
-                      ],
-                    ),
+                        onSelected: (v) async {
+                          if (v == 'delete') {
+                            final ok = await showConfirmDialog(
+                              context,
+                              title: 'Delete enquiry?',
+                              body:
+                                  'Delete ${lead.name}? This cannot be undone.',
+                              confirmLabel: 'Delete',
+                              icon: AppIcons.delete,
+                            );
+                            if (ok == true) onDelete!();
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  AppIcons.delete,
+                                  size: 16,
+                                  color: AppTheme.statusDanger,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Delete',
+                                  style: TextStyle(
+                                    color: AppTheme.statusDanger,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ],
@@ -388,11 +550,19 @@ class _LeadCard extends StatelessWidget {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.schedule_outlined, size: 12, color: AppTheme.statusWarn),
+                  const Icon(
+                    AppIcons.schedule,
+                    size: 12,
+                    color: AppTheme.statusWarn,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Follow up ${formatDateFromString(lead.followUpAt)}',
-                    style: const TextStyle(fontSize: 11, color: AppTheme.statusWarn, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.statusWarn,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
@@ -405,24 +575,33 @@ class _LeadCard extends StatelessWidget {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.access_time_outlined, size: 12, color: AppTheme.inkHint),
+                  const Icon(
+                    AppIcons.accessTime,
+                    size: 12,
+                    color: AppTheme.inkHint,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     timeAgo(lead.createdAt),
-                    style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
                   ),
                   const Spacer(),
                   _ActionIconBtn(
-                    icon: Icons.call_outlined,
+                    icon: AppIcons.call,
                     tooltip: 'Call',
                     onTap: () => _dialPhone(lead.phone!),
                   ),
                   const SizedBox(width: 8),
                   _ActionIconBtn(
-                    icon: Icons.chat_outlined,
+                    icon: AppIcons.chat,
                     tooltip: 'WhatsApp',
-                    onTap: () => _openWhatsApp(lead.phone!,
-                        text: 'Hi ${lead.firstName}, '),
+                    onTap: () => _openWhatsApp(
+                      lead.phone!,
+                      text: 'Hi ${lead.firstName}, ',
+                    ),
                     color: const Color(0xFF25D366),
                   ),
                 ],
@@ -431,11 +610,18 @@ class _LeadCard extends StatelessWidget {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.access_time_outlined, size: 12, color: AppTheme.inkHint),
+                  const Icon(
+                    AppIcons.accessTime,
+                    size: 12,
+                    color: AppTheme.inkHint,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     timeAgo(lead.createdAt),
-                    style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
                   ),
                 ],
               ),
@@ -466,29 +652,57 @@ class _LeadCard extends StatelessWidget {
                 child: GestureDetector(
                   onTap: () {
                     Navigator.pop(context);
-                    onStatusChange(s);
+                    onStatusChange!(s);
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       color: selected ? AppTheme.accentSoft : AppTheme.surface,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: selected ? AppTheme.accent : AppTheme.border, width: selected ? 1.5 : 1),
-                    ),
-                    child: Row(children: [
-                      Container(
-                        width: 20, height: 20,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: selected ? AppTheme.accent : Colors.transparent,
-                          border: Border.all(color: selected ? AppTheme.accent : AppTheme.inkHint, width: 1.5),
-                        ),
-                        child: selected ? const Icon(Icons.check, size: 13, color: Colors.white) : null,
+                      border: Border.all(
+                        color: selected ? AppTheme.accent : AppTheme.border,
+                        width: selected ? 1.5 : 1,
                       ),
-                      const SizedBox(width: 12),
-                      Text(_capitalize(s),
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5, color: AppTheme.ink)),
-                    ]),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: selected
+                                ? AppTheme.accent
+                                : Colors.transparent,
+                            border: Border.all(
+                              color: selected
+                                  ? AppTheme.accent
+                                  : AppTheme.inkHint,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: selected
+                              ? const Icon(
+                                  AppIcons.check,
+                                  size: 13,
+                                  color: Colors.white,
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _capitalize(s),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14.5,
+                            color: AppTheme.ink,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -624,8 +838,9 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -650,35 +865,47 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
             Row(
               children: [
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('First name'),
-                    TextFormField(controller: _firstCtrl),
-                  ]),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const FieldLabel('First name'),
+                      TextFormField(controller: _firstCtrl),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const FieldLabel('Last name'),
-                    TextFormField(controller: _lastCtrl),
-                  ]),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const FieldLabel('Last name'),
+                      TextFormField(controller: _lastCtrl),
+                    ],
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 14),
             const FieldLabel('Phone'),
-            TextFormField(controller: _phoneCtrl, keyboardType: TextInputType.phone),
+            TextFormField(
+              controller: _phoneCtrl,
+              keyboardType: TextInputType.phone,
+            ),
             const SizedBox(height: 14),
             const FieldLabel('Email'),
-            TextFormField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress),
+            TextFormField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+            ),
             const SizedBox(height: 14),
             const FieldLabel('Source'),
             DropdownButtonFormField<String>(
               value: _source,
               items: _sources
-                  .map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(_capitalize(s)),
-                      ))
+                  .map(
+                    (s) =>
+                        DropdownMenuItem(value: s, child: Text(_capitalize(s))),
+                  )
                   .toList(),
               onChanged: (v) => setState(() => _source = v!),
             ),
@@ -687,10 +914,10 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
             DropdownButtonFormField<String>(
               value: _status,
               items: _statuses
-                  .map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(_capitalize(s)),
-                      ))
+                  .map(
+                    (s) =>
+                        DropdownMenuItem(value: s, child: Text(_capitalize(s))),
+                  )
                   .toList(),
               onChanged: (v) => setState(() => _status = v!),
             ),
@@ -703,17 +930,19 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                 decoration: InputDecoration(
                   suffixIcon: _followUpAt != null
                       ? IconButton(
-                          icon: const Icon(Icons.clear, size: 18),
+                          icon: const Icon(AppIcons.clear, size: 18),
                           onPressed: () => setState(() => _followUpAt = null),
                         )
-                      : const Icon(Icons.calendar_today_outlined, size: 18),
+                      : const Icon(AppIcons.calendarToday, size: 18),
                 ),
                 child: Text(
                   _followUpAt != null
                       ? formatDateFromString(_followUpAt)
                       : 'Select date',
                   style: TextStyle(
-                    color: _followUpAt != null ? AppTheme.ink : AppTheme.inkHint,
+                    color: _followUpAt != null
+                        ? AppTheme.ink
+                        : AppTheme.inkHint,
                   ),
                 ),
               ),
@@ -729,7 +958,9 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2),
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
                     )
                   : const Text('Save enquiry'),
             ),
@@ -747,27 +978,12 @@ class _EmptyLeads extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.people_outline, size: 64, color: AppTheme.inkHint),
-          SizedBox(height: 16),
-          Text(
-            'No leads yet',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 16,
-              color: AppTheme.ink,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Add leads to track potential members',
-            style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
-          ),
-        ],
-      ),
+    return const StateMessage(
+      icon: AppIcons.personSearch,
+      title: 'No leads yet',
+      body:
+          'Add the people who walk in or call, and this list tells you who to '
+          'follow up with each day.',
     );
   }
 }

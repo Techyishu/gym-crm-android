@@ -17,7 +17,8 @@ class Expense {
 
   factory Expense.fromJson(Map<String, dynamic> j) {
     final id = j['id'] as String?;
-    if (id == null || id.isEmpty) throw const FormatException('Expense row missing id');
+    if (id == null || id.isEmpty)
+      throw const FormatException('Expense row missing id');
     return Expense(
       id: id,
       gymId: j['gym_id'] as String,
@@ -37,4 +38,11 @@ class Expense {
   };
 }
 
-const kExpenseCategories = ['Rent', 'Salary', 'Equipment', 'Utilities', 'Maintenance', 'Other'];
+const kExpenseCategories = [
+  'Rent',
+  'Salary',
+  'Equipment',
+  'Utilities',
+  'Maintenance',
+  'Other',
+];

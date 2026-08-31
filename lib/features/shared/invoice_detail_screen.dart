@@ -1,25 +1,29 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../core/access/role_access.dart';
+import '../../core/access/gym_permissions.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/invoice_pdf.dart';
 import '../../core/utils/platform_info.dart' as platform_info;
 import '../../shared/widgets/redesign.dart';
 import '../../shared/widgets/responsive_content.dart';
-import '../auth/providers/auth_provider.dart';
+import '../../core/theme/app_icons.dart';
 
-final _invoiceDetailProvider =
-    FutureProvider.family<Map<String, dynamic>, String>((ref, id) async {
+final _invoiceDetailProvider = FutureProvider.family<Map<String, dynamic>, String>((
+  ref,
+  id,
+) async {
   final data = await Supabase.instance.client
       .from('invoices')
-      .select('*, members(first_name, last_name, email), gyms(name, settings), payments(amount, method, status)')
+      .select(
+        '*, members(first_name, last_name, email), gyms(name, settings), payments(amount, method, status)',
+      )
       .eq('id', id)
       .single();
   return data;
@@ -32,7 +36,9 @@ class InvoiceDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(_invoiceDetailProvider(invoiceId));
-    final canDelete = RoleAccess.canDeleteInvoice(ref.watch(staffRoleProvider).valueOrNull);
+    final canDelete = ref.watch(
+      gymPermissionProvider((GymModule.payments, GymAction.delete)),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -42,36 +48,47 @@ class InvoiceDetailScreen extends ConsumerWidget {
         scrolledUnderElevation: 0,
         foregroundColor: AppTheme.ink,
         title: async.maybeWhen(
-          data: (inv) => Text(invoiceNumber(inv['id'] as String, inv['created_at'] as String)),
+          data: (inv) => Text(
+            invoiceNumber(
+              inv['id'] as String,
+              inv['created_at'] as String,
+              issuedNumber: inv['invoice_number'] as String?,
+            ),
+          ),
           orElse: () => const Text('Invoice'),
         ),
         actions: [
           if (async.hasValue) ...[
             if (!kIsWeb && !platform_info.isIOS)
               IconButton(
-                icon: const Icon(Icons.download_outlined),
+                icon: const Icon(AppIcons.download),
                 onPressed: () => _downloadPdf(context, async.value!),
                 tooltip: 'Download PDF',
               ),
             IconButton(
-              icon: const Icon(Icons.share_outlined),
+              icon: const Icon(AppIcons.share),
               onPressed: () => _sharePdf(async.value!),
               tooltip: 'Share as PDF',
             ),
             if (canDelete)
               IconButton(
-                icon: const Icon(Icons.delete_outline, color: AppTheme.statusDanger),
+                icon: const Icon(
+                  AppIcons.delete,
+                  color: AppTheme.statusDanger,
+                ),
                 onPressed: () => _delete(context, ref),
                 tooltip: 'Delete invoice',
               ),
           ],
         ],
       ),
-      body: ResponsiveContent(child: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e', style: const TextStyle(color: AppTheme.inkSoft))),
-        data: (inv) => _InvoiceBody(invoice: inv),
-      )),
+      body: ResponsiveContent(
+        child: async.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => const ErrorState(what: 'this invoice'),
+          data: (inv) => _InvoiceBody(invoice: inv),
+        ),
+      ),
     );
   }
 
@@ -79,36 +96,66 @@ class InvoiceDetailScreen extends ConsumerWidget {
     final ok = await showConfirmDialog(
       context,
       title: 'Delete invoice?',
-      body: 'This invoice and its payment records will be permanently deleted. This cannot be undone.',
+      body:
+          'This invoice and its payment records will be permanently deleted. This cannot be undone.',
       confirmLabel: 'Delete',
-      icon: Icons.delete_outline,
+      icon: AppIcons.delete,
     );
     if (ok != true) return;
-    await Supabase.instance.client.from('invoices').delete().eq('id', invoiceId);
+    await Supabase.instance.client
+        .from('invoices')
+        .delete()
+        .eq('id', invoiceId);
     if (context.mounted) context.pop();
   }
 
   Future<void> _sharePdf(Map<String, dynamic> inv) async {
-    final invNum = invoiceNumber(inv['id'] as String, inv['created_at'] as String);
-    final bytes  = await buildInvoicePdf(inv);
+    final invNum = invoiceNumber(
+      inv['id'] as String,
+      inv['created_at'] as String,
+      issuedNumber: inv['invoice_number'] as String?,
+    );
+    final bytes = await buildInvoicePdf(inv);
     await Printing.sharePdf(bytes: bytes, filename: '$invNum.pdf');
   }
 
-  Future<void> _downloadPdf(BuildContext context, Map<String, dynamic> inv) async {
-    final invNum = invoiceNumber(inv['id'] as String, inv['created_at'] as String);
+  Future<void> _downloadPdf(
+    BuildContext context,
+    Map<String, dynamic> inv,
+  ) async {
+    final invNum = invoiceNumber(
+      inv['id'] as String,
+      inv['created_at'] as String,
+      issuedNumber: inv['invoice_number'] as String?,
+    );
     try {
       final bytes = await buildInvoicePdf(inv);
-      final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
-      final file = await File('${dir.path}/$invNum.pdf').writeAsBytes(bytes);
+      // getDownloadsDirectory() resolves to /Android/data/<pkg>/files/Download
+      // on Android — app-private, and unbrowsable from Android 11 on, so the
+      // old "Saved …" toast pointed at a file nobody could reach. saveFile()
+      // opens the system save dialog and writes wherever the user picks.
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save invoice',
+        fileName: '$invNum.pdf',
+        bytes: bytes,
+      );
+      if (path == null) return; // dialog dismissed
+      // Android and iOS write the bytes themselves; desktop hands back a path
+      // and expects us to do it.
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        await File(path).writeAsBytes(bytes);
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved ${file.path.split('/').last}')),
+          SnackBar(content: Text('Saved $invNum.pdf')),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not download the invoice. Please try again.')),
+          const SnackBar(
+            content: Text('Could not download the invoice. Please try again.'),
+          ),
         );
       }
     }
@@ -125,9 +172,18 @@ class _InvoiceBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final gym = invoice['gyms'] as Map<String, dynamic>?;
     final member = invoice['members'] as Map<String, dynamic>?;
-    final settings = (gym?['settings'] as Map<String, dynamic>?) ?? {};
+    final settings =
+        (invoice['settings_snapshot'] as Map<String, dynamic>?) ??
+        (gym?['settings'] as Map<String, dynamic>?) ??
+        {};
+    final memberSnapshot =
+        (invoice['member_snapshot'] as Map<String, dynamic>?) ?? {};
     final status = invoice['status'] as String;
-    final invNum = invoiceNumber(invoice['id'] as String, invoice['created_at'] as String);
+    final invNum = invoiceNumber(
+      invoice['id'] as String,
+      invoice['created_at'] as String,
+      issuedNumber: invoice['invoice_number'] as String?,
+    );
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -139,10 +195,18 @@ class _InvoiceBody extends StatelessWidget {
           children: [
             // Header band: gym name + invoice number + status
             _Header(
-              gymName: gym?['name'] as String? ?? 'Gym',
+              gymName:
+                  settings['gym_name'] as String? ??
+                  gym?['name'] as String? ??
+                  'Gym',
               address: settings['address'] as String?,
-              phone: settings['phone'] as String?,
-              website: settings['website'] as String?,
+              phone:
+                  settings['contact_phone'] as String? ??
+                  settings['phone'] as String?,
+              website:
+                  settings['contact_email'] as String? ??
+                  settings['website'] as String?,
+              gstin: settings['gstin'] as String?,
               invNumber: invNum,
               status: status,
             ),
@@ -153,19 +217,46 @@ class _InvoiceBody extends StatelessWidget {
             // Bill To
             _Section(
               label: 'Bill To',
-              child: member != null
+              child: memberSnapshot.isNotEmpty || member != null
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim(),
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink),
+                          memberSnapshot['name'] as String? ??
+                              '${member?['first_name'] ?? ''} ${member?['last_name'] ?? ''}'
+                                  .trim(),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            color: AppTheme.ink,
+                          ),
                         ),
-                        if ((member['email'] as String?)?.isNotEmpty == true) ...[
+                        if (((memberSnapshot['email'] as String?) ??
+                                    (member?['email'] as String?))
+                                ?.isNotEmpty ==
+                            true) ...[
                           const SizedBox(height: 2),
                           Text(
-                            member['email'] as String,
-                            style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                            (memberSnapshot['email'] as String?) ??
+                                (member?['email'] as String?) ??
+                                '',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.inkSoft,
+                            ),
+                          ),
+                        ],
+                        if (settings['show_membership_id'] != false &&
+                            (invoice['membership_id_snapshot'] as String?)
+                                    ?.isNotEmpty ==
+                                true) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Membership ID: ${invoice['membership_id_snapshot']}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.inkSoft,
+                            ),
                           ),
                         ],
                       ],
@@ -185,12 +276,34 @@ class _InvoiceBody extends StatelessWidget {
                 label: 'Notes',
                 child: Text(
                   invoice['notes'] as String,
-                  style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, height: 1.5),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.inkSoft,
+                    height: 1.5,
+                  ),
                 ),
               ),
 
+            if ((settings['refund_policy'] as String?)?.isNotEmpty == true)
+              _Section(
+                label: 'Refund policy',
+                child: Text(settings['refund_policy'] as String),
+              ),
+            if ((settings['terms_and_conditions'] as String?)?.isNotEmpty ==
+                true)
+              _Section(
+                label: 'Terms & conditions',
+                child: Text(settings['terms_and_conditions'] as String),
+              ),
+
             // Footer
-            _Footer(invNumber: invNum, gymName: gym?['name'] as String? ?? 'the gym'),
+            _Footer(
+              invNumber: invNum,
+              gymName:
+                  settings['gym_name'] as String? ??
+                  gym?['name'] as String? ??
+                  'the gym',
+            ),
           ],
         ),
       ),
@@ -205,6 +318,7 @@ class _Header extends StatelessWidget {
   final String? address;
   final String? phone;
   final String? website;
+  final String? gstin;
   final String invNumber;
   final String status;
 
@@ -213,6 +327,7 @@ class _Header extends StatelessWidget {
     required this.address,
     required this.phone,
     required this.website,
+    required this.gstin,
     required this.invNumber,
     required this.status,
   });
@@ -243,15 +358,44 @@ class _Header extends StatelessWidget {
                 ),
                 if (address != null) ...[
                   const SizedBox(height: 4),
-                  Text(address!, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                  Text(
+                    address!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
                 ],
                 if (phone != null) ...[
                   const SizedBox(height: 2),
-                  Text(phone!, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                  Text(
+                    phone!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
                 ],
                 if (website != null) ...[
                   const SizedBox(height: 2),
-                  Text(website!, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                  Text(
+                    website!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
+                ],
+                if (gstin != null && gstin!.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'GSTIN: $gstin',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -298,9 +442,13 @@ class _MetaRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final paidAt = invoice['paid_at'] as String?;
-    final payments = (invoice['payments'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final payments =
+        (invoice['payments'] as List?)?.cast<Map<String, dynamic>>() ??
+        const [];
     final succeeded = payments.where((p) => p['status'] == 'succeeded');
-    final method = succeeded.isEmpty ? null : succeeded.first['method'] as String?;
+    final method = succeeded.isEmpty
+        ? null
+        : succeeded.first['method'] as String?;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: const BoxDecoration(
@@ -330,7 +478,9 @@ class _MetaRow extends StatelessWidget {
           if (method != null && method.isNotEmpty)
             _MetaCell(
               label: 'Method',
-              value: method[0].toUpperCase() + method.substring(1).replaceAll('_', ' '),
+              value:
+                  method[0].toUpperCase() +
+                  method.substring(1).replaceAll('_', ' '),
             ),
         ],
       ),
@@ -473,7 +623,10 @@ class _LineItems extends StatelessWidget {
               const SizedBox(width: 16),
               Text(
                 formatCurrency(displayAmount),
-                style: AppTheme.numberStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style: AppTheme.numberStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -491,13 +644,27 @@ class _Total extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The snapshot frozen onto the invoice at issue time — same source the PDF
+    // reads, so the screen and the shared document agree.
+    final settings =
+        (invoice['settings_snapshot'] as Map<String, dynamic>?) ?? const {};
     final amount = invoice['amount'] as num;
     final discountAmount = (invoice['discount_amount'] as num?) ?? 0;
-    final hasDiscount = discountAmount > 0;
+    final hasDiscount =
+        discountAmount > 0 && settings['show_discount'] != false;
+    final taxableAmount = (invoice['taxable_amount'] as num?) ?? amount;
+    final gstAmount = (invoice['gst_amount'] as num?) ?? 0;
+    final cgstAmount = (invoice['cgst_amount'] as num?) ?? 0;
+    final sgstAmount = (invoice['sgst_amount'] as num?) ?? 0;
+    final igstAmount = (invoice['igst_amount'] as num?) ?? 0;
+    final showGst = settings['show_gst_breakup'] == true && gstAmount > 0;
     final payments = (invoice['payments'] as List?) ?? const [];
     final paidSoFar = payments
         .where((p) => (p as Map)['status'] == 'succeeded')
-        .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
+        .fold<double>(
+          0,
+          (s, p) => s + ((p as Map)['amount'] as num).toDouble(),
+        );
     final balanceDue = (amount - paidSoFar).clamp(0, amount);
     final isPartial = paidSoFar > 0 && balanceDue > 0;
 
@@ -515,14 +682,31 @@ class _Total extends StatelessWidget {
               children: [
                 const Text(
                   'DISCOUNT',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusActive,
+                  ),
                 ),
                 Text(
                   '− ${formatCurrency(discountAmount)}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusActive,
+                  ),
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: AppTheme.border),
+            const SizedBox(height: 10),
+          ],
+          if (showGst) ...[
+            _taxRow('TAXABLE VALUE', taxableAmount),
+            if (cgstAmount > 0) _taxRow('CGST', cgstAmount),
+            if (sgstAmount > 0) _taxRow('SGST', sgstAmount),
+            if (igstAmount > 0) _taxRow('IGST', igstAmount),
             const SizedBox(height: 10),
             const Divider(height: 1, color: AppTheme.border),
             const SizedBox(height: 10),
@@ -533,11 +717,19 @@ class _Total extends StatelessWidget {
               children: [
                 const Text(
                   'PAID SO FAR',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusActive,
+                  ),
                 ),
                 Text(
                   formatCurrency(paidSoFar),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.statusActive),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusActive,
+                  ),
                 ),
               ],
             ),
@@ -559,7 +751,10 @@ class _Total extends StatelessWidget {
               ),
               Text(
                 formatCurrency(isPartial ? balanceDue : amount),
-                style: AppTheme.numberStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                style: AppTheme.numberStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ],
           ),
@@ -568,6 +763,29 @@ class _Total extends StatelessWidget {
     );
   }
 }
+
+/// One tax line in the totals block — quieter than the TOTAL DUE row beneath it.
+Widget _taxRow(String label, num value) => Padding(
+  padding: const EdgeInsets.only(bottom: 6),
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Text(
+        label,
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1,
+          color: AppTheme.inkSoft,
+        ),
+      ),
+      Text(
+        formatCurrencyExact(value),
+        style: AppTheme.numberStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+    ],
+  ),
+);
 
 // ── Footer ────────────────────────────────────────────────────────────────────
 
@@ -582,14 +800,23 @@ class _Footer extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
       child: Column(
         children: [
-          Text('Thank you for being a member of $gymName',
-            style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft), textAlign: TextAlign.center),
+          Text(
+            'Thank you for being a member of $gymName',
+            style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(invNumber, style: const TextStyle(fontSize: 10, color: AppTheme.inkHint)),
-              const Text('Powered by GymCRM', style: TextStyle(fontSize: 10, color: AppTheme.inkHint)),
+              Text(
+                invNumber,
+                style: const TextStyle(fontSize: 10, color: AppTheme.inkHint),
+              ),
+              const Text(
+                'Powered by GymCRM',
+                style: TextStyle(fontSize: 10, color: AppTheme.inkHint),
+              ),
             ],
           ),
         ],
@@ -601,10 +828,10 @@ class _Footer extends StatelessWidget {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 Widget _statusPill(String status) => switch (status) {
-      'paid'    => StatusPill.active(label: 'PAID'),
-      'open'    => StatusPill.warn(label: 'PENDING'),
-      'partial' => StatusPill.warn(label: 'PARTIAL'),
-      'failed'  => StatusPill.danger(label: 'FAILED'),
-      'void'   => StatusPill.neutral(label: 'VOID'),
-      _        => StatusPill.neutral(label: 'DRAFT'),
-    };
+  'paid' => StatusPill.active(label: 'PAID'),
+  'open' => StatusPill.warn(label: 'PENDING'),
+  'partial' => StatusPill.warn(label: 'PARTIAL'),
+  'failed' => StatusPill.danger(label: 'FAILED'),
+  'void' => StatusPill.neutral(label: 'VOID'),
+  _ => StatusPill.neutral(label: 'DRAFT'),
+};

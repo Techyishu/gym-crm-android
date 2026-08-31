@@ -81,14 +81,18 @@ class AppEvents {
   /// derived from whether this batch of adds crossed the 1 or 3 threshold.
   /// Shared by the single add-member sheet and CSV bulk import so a 5-row
   /// import doesn't silently jump past both milestones without firing them.
-  static Future<void> checkMemberMilestones({required int before, required int after}) async {
+  static Future<void> checkMemberMilestones({
+    required int before,
+    required int after,
+  }) async {
     if (before < 1 && after >= 1) await firstMemberAdded();
     if (before < 3 && after >= 3) await threeMembersAdded();
   }
 
   /// Owner turned WhatsApp reminders on — the most differentiated feature in
   /// the app, and per the funnel audit the one ~82% of gyms never discover.
-  static Future<void> whatsappRemindersEnabled() => _log('whatsapp_reminders_enabled');
+  static Future<void> whatsappRemindersEnabled() =>
+      _log('whatsapp_reminders_enabled');
 
   /// A member checked in. The clearest day-to-day "this gym is actually
   /// running on GymCRM" signal, distinct from setup-time activation events.

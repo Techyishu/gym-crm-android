@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.2+47
+version: 1.0.3+50
 
 environment:
   sdk: ^3.10.7
@@ -75,6 +75,12 @@ dependencies:
   onesignal_flutter: ^5.3.3
   firebase_core: ^4.12.1
   firebase_analytics: ^12.4.5
+  # phosphor_flutter (last published 2 years ago) extends IconData, which
+  # became a final class in recent Flutter — the app couldn't build on any
+  # Flutter newer than ~3.41. phosphor_icons is the maintained successor,
+  # same class/constant names (PhosphorIconsRegular.x etc.), fixed for
+  # Flutter 3.43+.
+  phosphor_icons: ^3.0.1
 
 dev_dependencies:
   flutter_test:

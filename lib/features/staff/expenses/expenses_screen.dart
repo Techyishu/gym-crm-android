@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../core/access/role_access.dart';
+import '../../../core/access/gym_permissions.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/expense.dart';
@@ -9,6 +9,7 @@ import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -22,7 +23,9 @@ final _expensesProvider = FutureProvider<List<Expense>>((ref) async {
       .eq('gym_id', gymId)
       .order('expense_date', ascending: false);
 
-  return (data as List).map((e) => Expense.fromJson(e as Map<String, dynamic>)).toList();
+  return (data as List)
+      .map((e) => Expense.fromJson(e as Map<String, dynamic>))
+      .toList();
 });
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -33,8 +36,12 @@ class ExpensesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final expenses = ref.watch(_expensesProvider);
-    final role = ref.watch(staffRoleProvider).valueOrNull;
-    final canDelete = RoleAccess.canDeleteExpense(role);
+    final canAdd = ref.watch(
+      gymPermissionProvider((GymModule.expenses, GymAction.add)),
+    );
+    final canDelete = ref.watch(
+      gymPermissionProvider((GymModule.expenses, GymAction.delete)),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -42,60 +49,68 @@ class ExpensesScreen extends ConsumerWidget {
         title: const Text('Expenses'),
         leading: const BackButton(),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: () => _showAddSheet(context, ref),
-              child: Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: AppTheme.accent,
-                  borderRadius: BorderRadius.circular(14),
+          if (canAdd)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: GestureDetector(
+                onTap: () => _showAddSheet(context, ref),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(AppIcons.add, size: 22, color: Colors.white),
                 ),
-                child: const Icon(Icons.add, size: 22, color: Colors.white),
               ),
             ),
-          ),
         ],
       ),
-      body: ResponsiveContent(child: expenses.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (list) {
-          if (list.isEmpty) return const _EmptyExpenses();
+      body: ResponsiveContent(
+        child: expenses.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => const ErrorState(what: 'expenses'),
+          data: (list) {
+            if (list.isEmpty) return const _EmptyExpenses();
 
-          final now = DateTime.now();
-          final monthTotal = list
-              .where((e) => e.expenseDate.year == now.year && e.expenseDate.month == now.month)
-              .fold<double>(0, (s, e) => s + e.amount);
+            final now = DateTime.now();
+            final monthTotal = list
+                .where(
+                  (e) =>
+                      e.expenseDate.year == now.year &&
+                      e.expenseDate.month == now.month,
+                )
+                .fold<double>(0, (s, e) => s + e.amount);
 
-          return Column(
-            children: [
-              _MonthSummary(total: monthTotal),
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(_expensesProvider),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                    itemCount: list.length,
-                    itemBuilder: (_, i) => _ExpenseCard(
-                      expense: list[i],
-                      canDelete: canDelete,
-                      onDelete: () async {
-                        await Supabase.instance.client
-                            .from('expenses')
-                            .delete()
-                            .eq('id', list[i].id);
-                        ref.invalidate(_expensesProvider);
-                      },
+            return Column(
+              children: [
+                _MonthSummary(total: monthTotal),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () async => ref.invalidate(_expensesProvider),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                      itemCount: list.length,
+                      itemBuilder: (_, i) => _ExpenseCard(
+                        expense: list[i],
+                        canDelete: canDelete,
+                        onDelete: () async {
+                          await Supabase.instance.client
+                              .from('expenses')
+                              .delete()
+                              .eq('id', list[i].id);
+                          ref.invalidate(_expensesProvider);
+                        },
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          );
-        },
-      )),
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -123,11 +138,18 @@ class _MonthSummary extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          const Text('This month', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+          const Text(
+            'This month',
+            style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+          ),
           const Spacer(),
           Text(
             formatCurrency(total),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.ink),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.ink,
+            ),
           ),
         ],
       ),
@@ -141,7 +163,11 @@ class _ExpenseCard extends StatelessWidget {
   final Expense expense;
   final bool canDelete;
   final VoidCallback onDelete;
-  const _ExpenseCard({required this.expense, required this.canDelete, required this.onDelete});
+  const _ExpenseCard({
+    required this.expense,
+    required this.canDelete,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -158,7 +184,11 @@ class _ExpenseCard extends StatelessWidget {
               children: [
                 Text(
                   expense.category,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.ink),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: AppTheme.ink,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -169,7 +199,10 @@ class _ExpenseCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     expense.note!,
-                    style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.inkSoft,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -183,20 +216,29 @@ class _ExpenseCard extends StatelessWidget {
             children: [
               Text(
                 formatCurrency(expense.amount),
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppTheme.ink),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  color: AppTheme.ink,
+                ),
               ),
               if (canDelete) ...[
                 const SizedBox(height: 4),
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, size: 16, color: AppTheme.inkHint),
+                  icon: const Icon(
+                    AppIcons.moreVert,
+                    size: 16,
+                    color: AppTheme.inkHint,
+                  ),
                   onSelected: (v) async {
                     if (v == 'delete') {
                       final ok = await showConfirmDialog(
                         context,
                         title: 'Delete expense?',
-                        body: 'Delete this ${expense.category} entry of ${formatCurrency(expense.amount)}? This cannot be undone.',
+                        body:
+                            'Delete this ${expense.category} entry of ${formatCurrency(expense.amount)}? This cannot be undone.',
                         confirmLabel: 'Delete',
-                        icon: Icons.delete_outline,
+                        icon: AppIcons.delete,
                       );
                       if (ok == true) onDelete();
                     }
@@ -206,9 +248,16 @@ class _ExpenseCard extends StatelessWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline, size: 16, color: AppTheme.statusDanger),
+                          Icon(
+                            AppIcons.delete,
+                            size: 16,
+                            color: AppTheme.statusDanger,
+                          ),
                           SizedBox(width: 8),
-                          Text('Delete', style: TextStyle(color: AppTheme.statusDanger)),
+                          Text(
+                            'Delete',
+                            style: TextStyle(color: AppTheme.statusDanger),
+                          ),
                         ],
                       ),
                     ),
@@ -276,8 +325,9 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() => _loading = false);
       }
     }
@@ -311,7 +361,9 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
             const FieldLabel('Amount'),
             TextFormField(
               controller: _amountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
             const SizedBox(height: 14),
             const FieldLabel('Date'),
@@ -320,9 +372,12 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
               borderRadius: BorderRadius.circular(14),
               child: InputDecorator(
                 decoration: const InputDecoration(
-                  suffixIcon: Icon(Icons.calendar_today_outlined, size: 18),
+                  suffixIcon: Icon(AppIcons.calendarToday, size: 18),
                 ),
-                child: Text(formatDate(_date), style: const TextStyle(color: AppTheme.ink)),
+                child: Text(
+                  formatDate(_date),
+                  style: const TextStyle(color: AppTheme.ink),
+                ),
               ),
             ),
             const SizedBox(height: 14),
@@ -335,7 +390,10 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
                   ? const SizedBox(
                       height: 20,
                       width: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
                     )
                   : const Text('Save expense'),
             ),
@@ -357,11 +415,15 @@ class _EmptyExpenses extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.receipt_long_outlined, size: 64, color: AppTheme.inkHint),
+          Icon(AppIcons.receipt, size: 64, color: AppTheme.inkHint),
           SizedBox(height: 16),
           Text(
             'No expenses logged',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppTheme.ink),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              color: AppTheme.ink,
+            ),
           ),
           SizedBox(height: 8),
           Text(

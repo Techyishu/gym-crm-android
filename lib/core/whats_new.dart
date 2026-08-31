@@ -8,10 +8,38 @@ class WhatsNewEntry {
   final String date;
   final String title;
   final List<String> bullets;
-  const WhatsNewEntry({required this.version, required this.date, required this.title, required this.bullets});
+  const WhatsNewEntry({
+    required this.version,
+    required this.date,
+    required this.title,
+    required this.bullets,
+  });
 }
 
 const whatsNewEntries = <WhatsNewEntry>[
+  WhatsNewEntry(
+    version: '1.0.3+50',
+    date: '30 Aug 2026',
+    title: 'GST on invoices, and downloads you can find',
+    bullets: [
+      'Invoices now print the GST breakup — taxable value, CGST and SGST — along with your GSTIN, whenever GST is switched on. Until now these only appeared in the shared PDF, never on the invoice you look at in the app.',
+      'GST rate and the GST breakup switch sit together in Invoice settings, and warn you when only one of them is set — a rate on its own was silently adding no tax at all.',
+      'Saving an invoice PDF or a data export now asks where to put it, so the file lands in your Downloads instead of a private app folder you could not open.',
+      'Backing out of an export no longer records it as completed, and keeps your filters so you can try again.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.3+1',
+    date: '27 Aug 2026',
+    title: 'A calmer, clearer app',
+    bullets: [
+      'Home now opens with "Needs attention" — overdue payments, memberships about to lapse, leads past their follow-up date and check-ins still waiting to sync — above the day\'s numbers.',
+      'Billing is now called Money, and its top card splits what you still have to collect from what you have already collected this month.',
+      'The members list shows a Collect button straight on the card of anyone who owes you money.',
+      'Check-in puts the scanner and manual search together in one panel, with today\'s arrivals below it.',
+      'The member app\'s bottom bar now has a tab for every section and a raised button for your QR code.',
+    ],
+  ),
   WhatsNewEntry(
     version: '1.0.2+46',
     date: '23 Aug 2026',
@@ -74,7 +102,14 @@ void showWhatsNewSheet(BuildContext context) {
               padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text("What's new", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                child: Text(
+                  "What's new",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                  ),
+                ),
               ),
             ),
             Expanded(
@@ -88,20 +123,51 @@ void showWhatsNewSheet(BuildContext context) {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(entry.date, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.inkHint)),
+                      Text(
+                        entry.date,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.inkHint,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text(entry.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+                      Text(
+                        entry.title,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.ink,
+                        ),
+                      ),
                       const SizedBox(height: 8),
-                      ...entry.bullets.map((b) => Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('•  ', style: TextStyle(color: AppTheme.inkSoft, fontSize: 13)),
-                                Expanded(child: Text(b, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, height: 1.4))),
-                              ],
-                            ),
-                          )),
+                      ...entry.bullets.map(
+                        (b) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '•  ',
+                                style: TextStyle(
+                                  color: AppTheme.inkSoft,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  b,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: AppTheme.inkSoft,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   );
                 },

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'activity_log_service.dart';
 import 'app_events.dart';
+import 'data_refresh.dart';
 
 /// Stores QR check-ins that failed due to no connectivity.
 /// Uses shared_preferences (already a dep) and dart:io for connectivity tests.
@@ -26,8 +27,9 @@ class OfflineCheckInQueue {
     // loaded the app at all if it had no network, so assume online.
     if (kIsWeb) return true;
     try {
-      final results = await InternetAddress.lookup('8.8.8.8')
-          .timeout(const Duration(seconds: 3));
+      final results = await InternetAddress.lookup(
+        '8.8.8.8',
+      ).timeout(const Duration(seconds: 3));
       return results.isNotEmpty && results.first.rawAddress.isNotEmpty;
     } catch (e) {
       debugPrint('[GymCRM] isOnline check error: $e');
@@ -70,13 +72,15 @@ class OfflineCheckInQueue {
 
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_queueKey) ?? [];
-    raw.add(jsonEncode({
-      'member_id': memberId,
-      'gym_id': gymId,
-      'staff_id': staffId,
-      'method': 'qr',
-      'queued_at': DateTime.now().toIso8601String(),
-    }));
+    raw.add(
+      jsonEncode({
+        'member_id': memberId,
+        'gym_id': gymId,
+        'staff_id': staffId,
+        'method': 'qr',
+        'queued_at': DateTime.now().toIso8601String(),
+      }),
+    );
     await prefs.setStringList(_queueKey, raw);
   }
 
@@ -99,19 +103,26 @@ class OfflineCheckInQueue {
         // Server RPC validates that the member belongs to the gym and that
         // the caller is staff of that gym before inserting. See:
         //   supabase/migrations/20260614_security_rpcs.sql → insert_checkin_secure
-        await client.rpc('insert_checkin_secure', params: {
-          'p_member_id': data['member_id'],
-          'p_gym_id': data['gym_id'],
-          'p_method': data['method'] ?? 'qr',
-          'p_checked_in_at': data['queued_at'],
-        });
+        await client.rpc(
+          'insert_checkin_secure',
+          params: {
+            'p_member_id': data['member_id'],
+            'p_gym_id': data['gym_id'],
+            'p_method': data['method'] ?? 'qr',
+            'p_checked_in_at': data['queued_at'],
+          },
+        );
         synced++;
         ActivityLogService.logActivity(
           gymId: data['gym_id'] as String,
           action: 'check_in',
-          metadata: {'member_id': data['member_id'], 'via': 'android_offline_sync'},
+          metadata: {
+            'member_id': data['member_id'],
+            'via': 'android_offline_sync',
+          },
         );
         unawaited(AppEvents.checkinCompleted());
+        notifyGymDataChanged();
       } catch (e) {
         debugPrint('[GymCRM] Flush checkin error: $e');
         remaining.add(item);

@@ -10,9 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
-import '../../../core/widgets/auth_blob_background.dart';
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 /// Matches the web `/(auth)/signup` form 1:1 in fields, validation and flow:
 /// first name, last name, email, +91 mobile, password (with strength meter),
@@ -56,8 +56,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   }
 
   // OTP verification state
-  final List<TextEditingController> _otpControllers =
-      List.generate(6, (_) => TextEditingController());
+  final List<TextEditingController> _otpControllers = List.generate(
+    6,
+    (_) => TextEditingController(),
+  );
   final List<FocusNode> _otpFocusNodes = List.generate(6, (_) => FocusNode());
   bool _verifying = false;
   String? _otpError;
@@ -76,13 +78,22 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   @override
   void dispose() {
+    // Safety net: if this screen is torn down mid-handshake (verified but
+    // setupGym() not yet done — e.g. the user confirmed via the emailed
+    // magic link in another tab instead of typing the code here), don't
+    // leave the router permanently ignoring auth changes.
+    signupHandshakeInProgress.value = false;
     _gymNameCtrl.dispose();
     _firstCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     _passwordCtrl.dispose();
-    for (final c in _otpControllers) { c.dispose(); }
-    for (final f in _otpFocusNodes) { f.dispose(); }
+    for (final c in _otpControllers) {
+      c.dispose();
+    }
+    for (final f in _otpFocusNodes) {
+      f.dispose();
+    }
     _resendTimer?.cancel();
     super.dispose();
   }
@@ -121,7 +132,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     }
     if (error != null) {
       signupHandshakeInProgress.value = false;
-      for (final c in _otpControllers) { c.clear(); }
+      for (final c in _otpControllers) {
+        c.clear();
+      }
       _otpFocusNodes[0].requestFocus();
       setState(() {
         _otpError = error;
@@ -169,9 +182,16 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     await prefs.setString('home_route', '/staff/dashboard');
     ref.invalidate(userTypeProvider);
     ref.invalidate(staffProfileProvider);
-    signupHandshakeInProgress.value = false;
-    if (!mounted) return;
+    if (!mounted) {
+      signupHandshakeInProgress.value = false;
+      return;
+    }
+    // Navigate BEFORE releasing the guard. While it's held the redirect is a
+    // no-op, so this go() lands. Release it first and the redirect re-runs
+    // while we're still on /signup, where the home_route written just above
+    // sends the user straight to the dashboard and skips this screen.
     context.go('/staff/first-setup');
+    signupHandshakeInProgress.value = false;
   }
 
   Future<void> _resendOtp() async {
@@ -186,9 +206,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         const SnackBar(content: Text('Code resent — check your email.')),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
     }
   }
 
@@ -206,7 +226,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
     setState(() => _googleLoading = true);
-    final error = await ref.read(authNotifierProvider.notifier).signUpWithGoogle();
+    final error = await ref
+        .read(authNotifierProvider.notifier)
+        .signUpWithGoogle();
     if (!mounted) return;
     setState(() => _googleLoading = false);
     if (error != null) setState(() => _error = error);
@@ -258,15 +280,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: AuthBlobBackground(
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 400),
-                child: _sentTo != null ? _buildOtpScreen() : _buildForm(),
-              ),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: _sentTo != null ? _buildOtpScreen() : _buildForm(),
             ),
           ),
         ),
@@ -281,16 +301,53 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => context.go('/login'),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 0),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                '← Back',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'GYM OWNER',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
+              color: AppTheme.accent,
+            ),
+          ),
+          const SizedBox(height: 5),
           Text(
             'Create your gym',
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                  letterSpacing: -0.4,
-                ),
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.4,
+            ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 5),
+          Text(
+            'Takes about a minute.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 24),
           if (_error != null) ...[
             _ErrorBanner(message: _error!),
             const SizedBox(height: 16),
@@ -305,7 +362,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           if (!isIOS) ...[
             AuthGoogleButton(
               loading: _googleLoading,
-              onPressed: (_googleLoading || _loading) ? null : _signUpWithGoogle,
+              onPressed: (_googleLoading || _loading)
+                  ? null
+                  : _signUpWithGoogle,
               label: 'Sign up with Google',
             ),
             const SizedBox(height: 20),
@@ -332,7 +391,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           const AuthFieldLabel('Country & currency'),
           const SizedBox(height: 6),
           InkWell(
-            borderRadius: BorderRadius.circular(28),
+            borderRadius: BorderRadius.circular(16),
             onTap: () => showCountryPicker(
               context: context,
               showPhoneCode: true,
@@ -340,18 +399,27 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               onSelect: _selectCountry,
             ),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppTheme.border),
               ),
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('${_country.flagEmoji}  ${_country.name}  ($_currencyCode)',
-                        style: const TextStyle(fontSize: 15, color: AppTheme.textPrimary)),
+                    child: Text(
+                      '${_country.flagEmoji}  ${_country.name}  ($_currencyCode)',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
                   ),
-                  const Icon(Icons.keyboard_arrow_down, color: AppTheme.inkHint, size: 20),
+                  const Icon(
+                    AppIcons.keyboardArrowDown,
+                    color: AppTheme.inkHint,
+                    size: 20,
+                  ),
                 ],
               ),
             ),
@@ -363,7 +431,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           // exist. Still wired to the same firstName param/column; asked
           // later in Settings if the owner wants a last name filled in, and
           // setup_gym already tolerates it being blank.
-          const AuthFieldLabel('Name'),
+          const AuthFieldLabel('Your name'),
           const SizedBox(height: 6),
           AuthPillField(
             controller: _firstCtrl,
@@ -401,7 +469,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               hint: '9876543210',
               prefixIcon: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 14,
+                ),
                 child: GestureDetector(
                   onTap: () => showCountryPicker(
                     context: context,
@@ -409,8 +480,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     exclude: const ['PK', 'BD'],
                     onSelect: _selectCountry,
                   ),
-                  child: Text('${_country.flagEmoji} +${_country.phoneCode}',
-                      style: const TextStyle(fontSize: 14)),
+                  child: Text(
+                    '${_country.flagEmoji} +${_country.phoneCode}',
+                    style: const TextStyle(fontSize: 14),
+                  ),
                 ),
               ),
               prefixIconConstraints: const BoxConstraints(minWidth: 0),
@@ -424,8 +497,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             ),
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 4),
-              child: Text('Tap the flag to change country',
-                  style: TextStyle(fontSize: 12, color: AppTheme.inkHint)),
+              child: Text(
+                'Tap the flag to change country',
+                style: TextStyle(fontSize: 12, color: AppTheme.inkHint),
+              ),
             ),
           ],
           const SizedBox(height: 16),
@@ -438,8 +513,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             obscureText: _obscure,
             hint: 'Min. 8 characters',
             suffixIcon: IconButton(
-              icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                  color: AppTheme.inkHint, size: 20),
+              icon: Icon(
+                _obscure
+                    ? AppIcons.visibility
+                    : AppIcons.visibilityOff,
+                color: AppTheme.inkHint,
+                size: 20,
+              ),
               onPressed: () => setState(() => _obscure = !_obscure),
             ),
             validator: (v) => (v == null || v.length < 8)
@@ -464,7 +544,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           const SizedBox(height: 24),
 
           AuthGradientButton(
-            label: 'Create your gym  →',
+            label: 'Create your gym',
             loading: _loading,
             onPressed: (_loading || _googleLoading) ? null : _submit,
           ),
@@ -473,8 +553,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             child: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text('Already on GymCRM? ',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                Text(
+                  'Already on GymCRM? ',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                ),
                 GestureDetector(
                   onTap: () => context.go('/login'),
                   child: const Text(
@@ -501,32 +583,60 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const SizedBox(height: 24),
-        Container(
-          height: 56,
-          width: 56,
-          decoration: const BoxDecoration(color: AppTheme.accentSoft, shape: BoxShape.circle),
-          child: const Icon(Icons.mark_email_read_outlined, color: AppTheme.accent, size: 26),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () {
+              _resendTimer?.cancel();
+              for (final c in _otpControllers) {
+                c.clear();
+              }
+              setState(() {
+                _sentTo = null;
+                _otpError = null;
+                _resendCooldown = 0;
+              });
+            },
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              '← Change email',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
         Text(
-          'Enter verification code',
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w800, color: AppTheme.ink),
+          'Check your email',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: AppTheme.ink,
+          ),
         ),
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(
             text: 'We sent a 6-digit code to\n',
             style: const TextStyle(
-                color: AppTheme.textSecondary, fontSize: 14, height: 1.6),
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.6,
+            ),
             children: [
               TextSpan(
                 text: _sentTo,
                 style: const TextStyle(
-                    color: AppTheme.textPrimary, fontWeight: FontWeight.w700),
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
@@ -587,30 +697,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color:
-                  _resendCooldown > 0 ? AppTheme.inkHint : AppTheme.accent,
+              color: _resendCooldown > 0 ? AppTheme.inkHint : AppTheme.accent,
             ),
-          ),
-        ),
-        const SizedBox(height: 10),
-
-        // Change email
-        GestureDetector(
-          onTap: () {
-            _resendTimer?.cancel();
-            for (final c in _otpControllers) { c.clear(); }
-            setState(() {
-              _sentTo = null;
-              _otpError = null;
-              _resendCooldown = 0;
-            });
-          },
-          child: const Text(
-            'Change email',
-            style: TextStyle(
-                fontSize: 13,
-                color: AppTheme.inkHint,
-                fontWeight: FontWeight.w500),
           ),
         ),
         const SizedBox(height: 24),
@@ -625,7 +713,12 @@ class _StrengthMeter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const colors = [Colors.transparent, AppTheme.statusDanger, AppTheme.statusWarn, AppTheme.ink];
+    const colors = [
+      Colors.transparent,
+      AppTheme.statusDanger,
+      AppTheme.statusWarn,
+      AppTheme.ink,
+    ];
     const labels = ['', 'Weak', 'Fair', 'Strong'];
     return Row(
       children: [
@@ -647,8 +740,14 @@ class _StrengthMeter extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Text(labels[strength],
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colors[strength])),
+        Text(
+          labels[strength],
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: colors[strength],
+          ),
+        ),
       ],
     );
   }
@@ -689,7 +788,10 @@ class _OtpBox extends StatelessWidget {
           maxLength: 1,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: const TextStyle(
-              fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.ink),
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.ink,
+          ),
           decoration: InputDecoration(
             counterText: '',
             contentPadding: EdgeInsets.zero,
@@ -728,9 +830,14 @@ class _ErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: AppTheme.error, size: 18),
+          const Icon(AppIcons.error, color: AppTheme.error, size: 18),
           const SizedBox(width: 8),
-          Expanded(child: Text(message, style: const TextStyle(color: AppTheme.error, fontSize: 14))),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: AppTheme.error, fontSize: 14),
+            ),
+          ),
         ],
       ),
     );

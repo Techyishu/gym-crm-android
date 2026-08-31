@@ -126,8 +126,11 @@ async function sendReminder(
   const template = TEMPLATES[templateName]
   if (!template) throw new Error(`unknown whatsapp template "${templateName}"`)
 
-  const to = phone.replace(/\D/g, '')
-  const withCountryCode = to.startsWith('91') ? to : `91${to}`
+  // 91 + the last 10 digits, always. A prefix check drops the country code
+  // from every Indian mobile that itself starts with 91 (e.g. 9116669678),
+  // and MSG91 silently never delivers those.
+  const to = phone.replace(/\D/g, '').replace(/^0+/, '')
+  const withCountryCode = `91${to.slice(-10)}`
 
   const res = await fetch('https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/', {
     method: 'POST',

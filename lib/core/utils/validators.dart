@@ -18,5 +18,24 @@ String? validateOptionalEmail(String? v) {
 String? validateOptionalPhone(String? v) {
   final value = v?.trim() ?? '';
   if (value.isEmpty) return null;
-  return isValidIndianMobile(value) ? null : 'Enter a valid 10-digit mobile number';
+  return isValidIndianMobile(value)
+      ? null
+      : 'Enter a valid 10-digit mobile number';
+}
+
+/// Stores the number the way WhatsApp/MSG91 need it — with the country code.
+///
+/// The add-member form paints "+91" beside the field as decoration only, so a
+/// bare 10-digit number was saved and every reminder to that member silently
+/// failed to send. Anything the user typed with its own "+" is left alone, and
+/// an empty value stays empty.
+String? phoneWithCountryCode(String? v, {String dialCode = '91'}) {
+  final value = v?.trim() ?? '';
+  if (value.isEmpty) return null;
+  if (value.startsWith('+')) return value;
+  final digits = value.replaceAll(RegExp(r'\D'), '');
+  if (digits.isEmpty) return null;
+  // Already carries the country code without the "+" (e.g. pasted "919812…").
+  if (digits.length > 10 && digits.startsWith(dialCode)) return '+$digits';
+  return '+$dialCode$digits';
 }

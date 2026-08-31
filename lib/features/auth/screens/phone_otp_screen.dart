@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/auth_blob_background.dart';
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 // MSG91 widget keys — client-facing widget config, not the sensitive
 // server authkey (that lives only as the MSG91_AUTHKEY Supabase secret,
@@ -35,7 +36,10 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   String? _error;
   String? _reqId; // set once OTP has been sent — switches to code entry
 
-  final List<TextEditingController> _otpControllers = List.generate(6, (_) => TextEditingController());
+  final List<TextEditingController> _otpControllers = List.generate(
+    6,
+    (_) => TextEditingController(),
+  );
   final List<FocusNode> _otpFocusNodes = List.generate(6, (_) => FocusNode());
   bool _verifying = false;
   String? _otpError;
@@ -53,8 +57,12 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   @override
   void dispose() {
     _phoneCtrl.dispose();
-    for (final c in _otpControllers) { c.dispose(); }
-    for (final f in _otpFocusNodes) { f.dispose(); }
+    for (final c in _otpControllers) {
+      c.dispose();
+    }
+    for (final f in _otpFocusNodes) {
+      f.dispose();
+    }
     _resendTimer?.cancel();
     super.dispose();
   }
@@ -72,7 +80,8 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
     });
   }
 
-  String get _fullIdentifier => '${_country.phoneCode}${_phoneCtrl.text.trim()}';
+  String get _fullIdentifier =>
+      '${_country.phoneCode}${_phoneCtrl.text.trim()}';
 
   Future<void> _sendOtp() async {
     final digits = _phoneCtrl.text.trim();
@@ -80,7 +89,10 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       setState(() => _error = 'Enter a valid mobile number');
       return;
     }
-    setState(() { _sending = true; _error = null; });
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
 
     try {
       final response = await OTPWidget.sendOTP({'identifier': _fullIdentifier});
@@ -110,13 +122,15 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       await OTPWidget.retryOTP({'reqId': _reqId});
       _startResendTimer();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Code resent via SMS.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Code resent via SMS.')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not resend code. Please try again.')),
+        const SnackBar(
+          content: Text('Could not resend code. Please try again.'),
+        ),
       );
     }
   }
@@ -124,18 +138,31 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   Future<void> _verifyOtp() async {
     final code = _otpControllers.map((c) => c.text).join();
     if (code.length < 6 || _reqId == null) return;
-    setState(() { _verifying = true; _otpError = null; });
+    setState(() {
+      _verifying = true;
+      _otpError = null;
+    });
 
     try {
-      final response = await OTPWidget.verifyOTP({'reqId': _reqId, 'otp': code});
-      final accessToken = response?['access-token'] as String? ??
-          (response?['message'] is String ? response!['message'] as String : null);
-      if (response == null || response['type'] != 'success' || accessToken == null) {
+      final response = await OTPWidget.verifyOTP({
+        'reqId': _reqId,
+        'otp': code,
+      });
+      final accessToken =
+          response?['access-token'] as String? ??
+          (response?['message'] is String
+              ? response!['message'] as String
+              : null);
+      if (response == null ||
+          response['type'] != 'success' ||
+          accessToken == null) {
         _failOtp('Incorrect code. Please try again.');
         return;
       }
 
-      final error = await ref.read(authNotifierProvider.notifier).verifyPhoneOtpToken(
+      final error = await ref
+          .read(authNotifierProvider.notifier)
+          .verifyPhoneOtpToken(
             phone: _fullIdentifier,
             msg91AccessToken: accessToken,
           );
@@ -154,7 +181,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
 
   void _failOtp(String message) {
     if (!mounted) return;
-    for (final c in _otpControllers) { c.clear(); }
+    for (final c in _otpControllers) {
+      c.clear();
+    }
     _otpFocusNodes[0].requestFocus();
     setState(() {
       _otpError = message;
@@ -189,7 +218,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+              icon: const Icon(AppIcons.arrowBack, color: AppTheme.textPrimary),
               onPressed: () => context.pop(),
             ),
           ],
@@ -200,15 +229,17 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         Text(
           'Log in with mobile',
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: AppTheme.textPrimary,
-                letterSpacing: -0.4,
-              ),
+            fontWeight: FontWeight.w800,
+            color: AppTheme.textPrimary,
+            letterSpacing: -0.4,
+          ),
         ),
         const SizedBox(height: 6),
         Text(
           "We'll text you a one-time code.",
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
         ),
         const SizedBox(height: 28),
         if (_error != null) ...[
@@ -232,8 +263,10 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                 exclude: const ['PK', 'BD'],
                 onSelect: (c) => setState(() => _country = c),
               ),
-              child: Text('${_country.flagEmoji} +${_country.phoneCode}',
-                  style: const TextStyle(fontSize: 14)),
+              child: Text(
+                '${_country.flagEmoji} +${_country.phoneCode}',
+                style: const TextStyle(fontSize: 14),
+              ),
             ),
           ),
           prefixIconConstraints: const BoxConstraints(minWidth: 0),
@@ -260,23 +293,40 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         Container(
           height: 56,
           width: 56,
-          decoration: const BoxDecoration(color: AppTheme.accentSoft, shape: BoxShape.circle),
-          child: const Icon(Icons.sms_outlined, color: AppTheme.accent, size: 26),
+          decoration: const BoxDecoration(
+            color: AppTheme.accentSoft,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            AppIcons.sms,
+            color: AppTheme.accent,
+            size: 26,
+          ),
         ),
         const SizedBox(height: 16),
         Text(
           'Enter verification code',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: AppTheme.ink),
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: AppTheme.ink,
+          ),
         ),
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(
             text: 'We sent a 6-digit code to\n',
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14, height: 1.6),
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.6,
+            ),
             children: [
               TextSpan(
                 text: '+$_fullIdentifier',
-                style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
@@ -324,7 +374,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         GestureDetector(
           onTap: _resendCooldown > 0 ? null : _resendOtp,
           child: Text(
-            _resendCooldown > 0 ? 'Resend code in ${_resendCooldown}s' : 'Resend code',
+            _resendCooldown > 0
+                ? 'Resend code in ${_resendCooldown}s'
+                : 'Resend code',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -336,7 +388,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         GestureDetector(
           onTap: () {
             _resendTimer?.cancel();
-            for (final c in _otpControllers) { c.clear(); }
+            for (final c in _otpControllers) {
+              c.clear();
+            }
             setState(() {
               _reqId = null;
               _otpError = null;
@@ -345,7 +399,11 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
           },
           child: const Text(
             'Change number',
-            style: TextStyle(fontSize: 13, color: AppTheme.inkHint, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.inkHint,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
         const SizedBox(height: 24),
@@ -390,7 +448,11 @@ class _OtpBox extends StatelessWidget {
           textAlign: TextAlign.center,
           maxLength: 1,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: AppTheme.ink),
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.ink,
+          ),
           decoration: InputDecoration(
             counterText: '',
             contentPadding: EdgeInsets.zero,
@@ -429,9 +491,14 @@ class _PhoneErrorBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: AppTheme.error, size: 18),
+          const Icon(AppIcons.error, color: AppTheme.error, size: 18),
           const SizedBox(width: 8),
-          Expanded(child: Text(message, style: const TextStyle(color: AppTheme.error, fontSize: 14))),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: AppTheme.error, fontSize: 14),
+            ),
+          ),
         ],
       ),
     );

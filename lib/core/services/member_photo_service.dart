@@ -11,7 +11,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class MemberPhotoService {
   MemberPhotoService._();
 
-  static const _workerBase = 'https://gym-crm-photo-proxy.ishansingh687.workers.dev';
+  static const _workerBase =
+      'https://gym-crm-photo-proxy.ishansingh687.workers.dev';
 
   /// Builds the Worker URL for a stored avatar value. Accepts plain paths
   /// ('gymId/file.png') and legacy Supabase public/signed URLs.
@@ -54,7 +55,10 @@ class MemberPhotoService {
     // path is a stable per-member key for re-uploads (member_detail_screen),
     // so evict it or every CachedNetworkImage keyed on this path keeps
     // serving the old bytes until the disk cache naturally expires.
-    await CachedNetworkImage.evictFromCache('$_workerBase/$path', cacheKey: path);
+    await CachedNetworkImage.evictFromCache(
+      '$_workerBase/$path',
+      cacheKey: path,
+    );
   }
 
   static String? pathFrom(String? stored) {

@@ -15,9 +15,11 @@ import '../../../core/services/revenue_cat_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'ios_custom_paywall.dart';
+import '../../../core/theme/app_icons.dart';
 
 const _kWhatsAppUrl = 'https://wa.me/917541004076';
 
@@ -27,36 +29,39 @@ const _kWhatsAppUrl = 'https://wa.me/917541004076';
 /// the owner as "your gym" would be a lie, and the numbers are the whole point.
 ///
 /// autoDispose: only ever read while the paywall is on screen.
-final paywallGymStatsProvider =
-    FutureProvider.autoDispose<Map<String, num>>((ref) async {
+final paywallGymStatsProvider = FutureProvider.autoDispose<Map<String, num>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
   final now = DateTime.now();
   final startOfMonth = DateTime(now.year, now.month, 1).toIso8601String();
   final todayDate = now.toIso8601String().split('T')[0];
-  final in7Days =
-      now.add(const Duration(days: 7)).toIso8601String().split('T')[0];
+  final in7Days = now
+      .add(const Duration(days: 7))
+      .toIso8601String()
+      .split('T')[0];
 
   final counts =
       await Future.wait<PostgrestResponse<List<Map<String, dynamic>>>>([
-    client
-        .from('members')
-        .select('id')
-        .eq('gym_id', gymId)
-        .eq('status', 'active')
-        .eq('is_demo_data', false)
-        .count(CountOption.exact),
-    client
-        .from('members')
-        .select('id')
-        .eq('gym_id', gymId)
-        .eq('status', 'active')
-        .eq('is_demo_data', false)
-        .gte('next_payment_date', todayDate)
-        .lte('next_payment_date', in7Days)
-        .count(CountOption.exact),
-  ]);
+        client
+            .from('members')
+            .select('id')
+            .eq('gym_id', gymId)
+            .eq('status', 'active')
+            .eq('is_demo_data', false)
+            .count(CountOption.exact),
+        client
+            .from('members')
+            .select('id')
+            .eq('gym_id', gymId)
+            .eq('status', 'active')
+            .eq('is_demo_data', false)
+            .gte('next_payment_date', todayDate)
+            .lte('next_payment_date', in7Days)
+            .count(CountOption.exact),
+      ]);
 
   // Cash actually collected this month — same source as the dashboard hero
   // (payments, not invoices) so a partial collection counts immediately.
@@ -91,19 +96,12 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _loggedView = false;
 
   Future<void> _signOut() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Sign out'),
-        content: const Text('Are you sure you want to sign out?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sign out', style: TextStyle(color: AppTheme.statusDanger)),
-          ),
-        ],
-      ),
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Sign out?',
+      body: 'You can sign back in anytime.',
+      confirmLabel: 'Sign out',
+      icon: AppIcons.logout,
     );
     if (ok == true) {
       await ref.read(authNotifierProvider.notifier).signOut();
@@ -121,7 +119,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     if (!_loggedView && gym != null) {
       _loggedView = true;
       unawaited(AppEvents.paywallViewed());
-      final isTrial = gym['trial_ends_at'] != null && gym['plan_expires_at'] == null;
+      final isTrial =
+          gym['trial_ends_at'] != null && gym['plan_expires_at'] == null;
       if (isTrial && _paywallStatus(gym).tone == _StatusTone.danger) {
         unawaited(AppEvents.trialExpired());
       }
@@ -135,7 +134,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         actions: [
           TextButton(
             onPressed: _signOut,
-            child: const Text('Sign out', style: TextStyle(color: AppTheme.inkSoft, fontSize: 13)),
+            child: const Text(
+              'Sign out',
+              style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
+            ),
           ),
         ],
       ),
@@ -206,7 +208,10 @@ class _PlanBody extends StatelessWidget {
           children: [
             _PaywallHero(gym: gym, features: features),
             const SizedBox(height: 24),
-            if (isLegacy) _LegacyPricing(gym: gym) else _NewProPricing(gym: gym),
+            if (isLegacy)
+              _LegacyPricing(gym: gym)
+            else
+              _NewProPricing(gym: gym),
             const SizedBox(height: 22),
             const _TrustFooterRow(),
             const SizedBox(height: 10),
@@ -306,27 +311,29 @@ class _PaywallHero extends ConsumerWidget {
           const SizedBox(height: 22),
           _HeroDivider(),
           const SizedBox(height: 18),
-          ...features.map((f) => Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(f.icon, size: 17, color: AppTheme.mintOnDark),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        f.text,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          color: AppTheme.onDark,
-                          fontWeight: FontWeight.w500,
-                          height: 1.4,
-                        ),
+          ...features.map(
+            (f) => Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(f.icon, size: 17, color: AppTheme.mintOnDark),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      f.text,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: AppTheme.onDark,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
                       ),
                     ),
-                  ],
-                ),
-              )),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -344,7 +351,11 @@ class _HeaderStat extends StatelessWidget {
   final String value;
   final String label;
   final Color? valueColor;
-  const _HeaderStat({required this.value, required this.label, this.valueColor});
+  const _HeaderStat({
+    required this.value,
+    required this.label,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -371,7 +382,10 @@ class _HeaderStat extends StatelessWidget {
             const SizedBox(height: 3),
             Text(
               label,
-              style: const TextStyle(fontSize: 11.5, color: AppTheme.onDarkSoft),
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppTheme.onDarkSoft,
+              ),
             ),
           ],
         ),
@@ -397,9 +411,11 @@ _StatusInfo _paywallStatus(Map<String, dynamic>? gym) {
   final trialEndsAt = gym?['trial_ends_at'] as String?;
   final dodoId = gym?['dodo_subscription_id'] as String?;
 
-  final hasExpiry = planExpiresAt != null &&
+  final hasExpiry =
+      planExpiresAt != null &&
       (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false);
-  final isActive = (plan == 'pro' && planExpiresAt == null) ||
+  final isActive =
+      (plan == 'pro' && planExpiresAt == null) ||
       (dodoId != null && hasExpiry) ||
       hasExpiry;
 
@@ -412,21 +428,30 @@ _StatusInfo _paywallStatus(Map<String, dynamic>? gym) {
     if (planExpiresAt != null) {
       final exp = DateTime.tryParse(planExpiresAt)?.toLocal();
       if (exp != null) {
-        sub = 'Active $planName plan · renews '
+        sub =
+            'Active $planName plan · renews '
             '${exp.day}/${exp.month}/${exp.year}';
       }
     }
-    return (icon: Icons.check_circle_outline, message: sub, tone: _StatusTone.active);
+    return (
+      icon: AppIcons.checkCircle,
+      message: sub,
+      tone: _StatusTone.active,
+    );
   }
 
   // Trial active — iOS has no trial, so skip straight to the paywall message.
   // ceil(), not .inDays: 23h left on a 24h trial is "1 day left", not "0".
-  final trialEnd = trialEndsAt != null ? DateTime.tryParse(trialEndsAt)?.toUtc() : null;
+  final trialEnd = trialEndsAt != null
+      ? DateTime.tryParse(trialEndsAt)?.toUtc()
+      : null;
   final trialDiff = trialEnd?.difference(now);
-  final daysLeft = (trialDiff != null && !trialDiff.isNegative) ? (trialDiff.inHours / 24).ceil() : null;
+  final daysLeft = (trialDiff != null && !trialDiff.isNegative)
+      ? (trialDiff.inHours / 24).ceil()
+      : null;
   if (!isIOS && daysLeft != null) {
     return (
-      icon: Icons.access_time_outlined,
+      icon: AppIcons.accessTime,
       message: daysLeft == 1
           ? 'Your free trial ends tomorrow. Subscribe now and nothing changes.'
           : 'Your free trial ends in $daysLeft days. Subscribe now and nothing changes.',
@@ -436,11 +461,11 @@ _StatusInfo _paywallStatus(Map<String, dynamic>? gym) {
 
   // Expired / no subscription
   return (
-    icon: Icons.lock_outline,
+    icon: AppIcons.lock,
     message: isIOS
         ? 'Subscribe to unlock your gym.'
         : 'Your free trial has ended. Your members and payment history are '
-            'safe — subscribe to get back in.',
+              'safe — subscribe to get back in.',
     tone: _StatusTone.danger,
   );
 }
@@ -468,7 +493,12 @@ class _HeroStatusRow extends StatelessWidget {
         Expanded(
           child: Text(
             info.message,
-            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: color, height: 1.4),
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+              height: 1.4,
+            ),
           ),
         ),
       ],
@@ -491,7 +521,12 @@ class _StatusBanner extends StatelessWidget {
       _StatusTone.warn => (AppTheme.statusWarnBg, AppTheme.statusWarn),
       _StatusTone.danger => (AppTheme.statusDangerBg, AppTheme.statusDanger),
     };
-    return _Banner(icon: info.icon, message: info.message, color: bg, textColor: fg);
+    return _Banner(
+      icon: info.icon,
+      message: info.message,
+      color: bg,
+      textColor: fg,
+    );
   }
 }
 
@@ -523,7 +558,11 @@ class _Banner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: TextStyle(fontSize: 13, color: textColor, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontSize: 13,
+                color: textColor,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -540,33 +579,38 @@ class _TrustFooterRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const items = [
-      (icon: Icons.close_rounded, text: 'Cancel anytime — no lock-in'),
-      (icon: Icons.lock_outline, text: 'Your member data is never deleted, even if you cancel'),
+      (icon: AppIcons.closeRounded, text: 'Cancel anytime — no lock-in'),
+      (
+        icon: AppIcons.lock,
+        text: 'Your member data is never deleted, even if you cancel',
+      ),
     ];
 
     return Column(
       children: items
-          .map((i) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(i.icon, size: 15, color: AppTheme.statusActive),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        i.text,
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: AppTheme.inkSoft,
-                          fontWeight: FontWeight.w600,
-                          height: 1.4,
-                        ),
+          .map(
+            (i) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(i.icon, size: 15, color: AppTheme.statusActive),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      i.text,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppTheme.inkSoft,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
                       ),
                     ),
-                  ],
-                ),
-              ))
+                  ),
+                ],
+              ),
+            ),
+          )
           .toList(),
     );
   }
@@ -575,15 +619,15 @@ class _TrustFooterRow extends StatelessWidget {
 // ── Legacy (₹249/mo grandfathered) pricing: adds 3/6/12mo terms ──────────────
 
 const _kLegacyFeatures = [
-  (icon: Icons.groups_outlined, text: 'Unlimited members & check-ins'),
-  (icon: Icons.badge_outlined, text: 'Unlimited staff logins & roles'),
-  (icon: Icons.mail_outline, text: 'Automatic email due reminders'),
-  (icon: Icons.chat_bubble_outline, text: 'WhatsApp due reminders'),
-  (icon: Icons.show_chart_rounded, text: 'Advanced reports & analytics'),
-  (icon: Icons.event_outlined, text: 'Class scheduling & bookings'),
-  (icon: Icons.person_add_alt_1_outlined, text: 'Leads & CRM'),
-  (icon: Icons.qr_code_2_rounded, text: 'Member portal & QR check-in'),
-  (icon: Icons.support_agent_outlined, text: 'Priority support'),
+  (icon: AppIcons.groups, text: 'Unlimited members & check-ins'),
+  (icon: AppIcons.badge, text: 'Unlimited staff logins & roles'),
+  (icon: AppIcons.mail, text: 'Automatic email due reminders'),
+  (icon: AppIcons.chat, text: 'WhatsApp due reminders'),
+  (icon: AppIcons.showChart, text: 'Advanced reports & analytics'),
+  (icon: AppIcons.event, text: 'Class scheduling & bookings'),
+  (icon: AppIcons.personAdd, text: 'Leads & CRM'),
+  (icon: AppIcons.qrCode, text: 'Member portal & QR check-in'),
+  (icon: AppIcons.supportAgent, text: 'Priority support'),
 ];
 
 // Multi-month terms at legacy gyms' locked-in ₹249/mo rate, same 7/12/20%
@@ -594,7 +638,14 @@ const _kLegacyFeatures = [
 const _kLegacyMultiMonthTerms = [
   _TermOption('3mo', '3 Months', 694, 3, discountPct: 7),
   _TermOption('6mo', '6 Months', 1315, 6, discountPct: 12),
-  _TermOption('12mo', '12 Months', 2390, 12, discountPct: 20, badge: '2 months free'),
+  _TermOption(
+    '12mo',
+    '12 Months',
+    2390,
+    12,
+    discountPct: 20,
+    badge: '2 months free',
+  ),
 ];
 
 class _LegacyPricing extends StatefulWidget {
@@ -643,8 +694,10 @@ class _IosPaywall extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final customerInfoAsync = ref.watch(customerInfoProvider);
-    final hasAccess = customerInfoAsync.valueOrNull?.entitlements.active
-            .containsKey(kRcEntitlement) ??
+    final hasAccess =
+        customerInfoAsync.valueOrNull?.entitlements.active.containsKey(
+          kRcEntitlement,
+        ) ??
         false;
 
     // Loading RC customer info — show blank to avoid flash.
@@ -691,17 +744,25 @@ class _IosActiveSubscription extends StatelessWidget {
                 children: [
                   const Text(
                     'Subscription',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink),
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   const Text(
                     'View billing history, cancel, or restore purchases.',
-                    style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft, height: 1.5),
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: AppTheme.inkSoft,
+                      height: 1.5,
+                    ),
                   ),
                   const SizedBox(height: 18),
                   ElevatedButton.icon(
                     onPressed: _openCustomerCenter,
-                    icon: const Icon(Icons.manage_accounts_outlined, size: 18),
+                    icon: const Icon(AppIcons.manageAccounts, size: 18),
                     label: const Text('Manage subscription'),
                   ),
                 ],
@@ -724,15 +785,28 @@ class _TermOption {
   final int? discountPct;
   final String? badge;
 
-  const _TermOption(this.id, this.label, this.totalPrice, this.months,
-      {this.discountPct, this.badge});
+  const _TermOption(
+    this.id,
+    this.label,
+    this.totalPrice,
+    this.months, {
+    this.discountPct,
+    this.badge,
+  });
 }
 
 const _kProTerms = [
   _TermOption('1mo', '1 Month', 499, 1),
   _TermOption('3mo', '3 Months', 1399, 3, discountPct: 7),
   _TermOption('6mo', '6 Months', 2599, 6, discountPct: 12),
-  _TermOption('12mo', '12 Months', 4799, 12, discountPct: 20, badge: '2 months free'),
+  _TermOption(
+    '12mo',
+    '12 Months',
+    4799,
+    12,
+    discountPct: 20,
+    badge: '2 months free',
+  ),
 ];
 
 // Elite is hidden until plan gating is enforced. Do not delete.
@@ -742,34 +816,65 @@ const _kProTerms = [
 const _kEliteTerms = [
   _TermOption('1mo', '1 Month', 999, 1),
   _TermOption('6mo', '6 Months', 5299, 6, discountPct: 12),
-  _TermOption('12mo', '12 Months', 9599, 12, discountPct: 20, badge: 'Best Value'),
+  _TermOption(
+    '12mo',
+    '12 Months',
+    9599,
+    12,
+    discountPct: 20,
+    badge: 'Best Value',
+  ),
 ];
 
 // Benefit-first, in the order a gym owner cares about: money he is losing,
 // time he is wasting, then everything else. Plan limits still apply but belong
 // in the fine print, not in the pitch.
 const _kProFeatures = [
-  (icon: Icons.chat_bubble_outline, text: 'We WhatsApp your members before their fees are due — automatically'),
-  (icon: Icons.account_balance_wallet_outlined, text: 'Know exactly who owes you money, today'),
-  (icon: Icons.show_chart_rounded, text: 'See what you collected this month without opening a register'),
-  (icon: Icons.qr_code_2_rounded, text: 'Members check in by QR — works even when your internet doesn\'t'),
-  (icon: Icons.person_add_alt_1_outlined, text: 'Never lose a walk-in enquiry again'),
-  (icon: Icons.badge_outlined, text: 'Your staff get their own logins, with only the access you allow'),
-  (icon: Icons.layers_outlined, text: 'Up to 500 members, 4 staff logins, 300 WhatsApp reminders a month'),
+  (
+    icon: AppIcons.chat,
+    text: 'We WhatsApp your members before their fees are due — automatically',
+  ),
+  (
+    icon: AppIcons.wallet,
+    text: 'Know exactly who owes you money, today',
+  ),
+  (
+    icon: AppIcons.showChart,
+    text: 'See what you collected this month without opening a register',
+  ),
+  (
+    icon: AppIcons.qrCode,
+    text: 'Members check in by QR — works even when your internet doesn\'t',
+  ),
+  (
+    icon: AppIcons.personAdd,
+    text: 'Never lose a walk-in enquiry again',
+  ),
+  (
+    icon: AppIcons.badge,
+    text: 'Your staff get their own logins, with only the access you allow',
+  ),
+  (
+    icon: AppIcons.layers,
+    text: 'Up to 500 members, 4 staff logins, 300 WhatsApp reminders a month',
+  ),
 ];
 
 // Elite is hidden until plan gating is enforced. Do not delete.
 // ignore: unused_element
 const _kEliteFeatures = [
-  (icon: Icons.groups_outlined, text: 'Unlimited members & check-ins'),
-  (icon: Icons.badge_outlined, text: 'Unlimited staff logins & roles'),
-  (icon: Icons.mail_outline, text: 'Automatic email due reminders'),
-  (icon: Icons.chat_bubble_outline, text: '1,500 free WhatsApp due reminders/month'),
-  (icon: Icons.show_chart_rounded, text: 'Advanced reports & analytics'),
-  (icon: Icons.event_outlined, text: 'Class scheduling & bookings'),
-  (icon: Icons.person_add_alt_1_outlined, text: 'Leads & CRM'),
-  (icon: Icons.qr_code_2_rounded, text: 'Member portal & QR check-in'),
-  (icon: Icons.support_agent_outlined, text: 'Priority support'),
+  (icon: AppIcons.groups, text: 'Unlimited members & check-ins'),
+  (icon: AppIcons.badge, text: 'Unlimited staff logins & roles'),
+  (icon: AppIcons.mail, text: 'Automatic email due reminders'),
+  (
+    icon: AppIcons.chat,
+    text: '1,500 free WhatsApp due reminders/month',
+  ),
+  (icon: AppIcons.showChart, text: 'Advanced reports & analytics'),
+  (icon: AppIcons.event, text: 'Class scheduling & bookings'),
+  (icon: AppIcons.personAdd, text: 'Leads & CRM'),
+  (icon: AppIcons.qrCode, text: 'Member portal & QR check-in'),
+  (icon: AppIcons.supportAgent, text: 'Priority support'),
 ];
 
 class _NewProPricing extends StatefulWidget {
@@ -828,8 +933,20 @@ class _TierToggle extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: _TierTab(label: 'Pro', selected: tier == 'pro', onTap: () => onChanged('pro'))),
-          Expanded(child: _TierTab(label: 'Elite', selected: tier == 'elite', onTap: () => onChanged('elite'))),
+          Expanded(
+            child: _TierTab(
+              label: 'Pro',
+              selected: tier == 'pro',
+              onTap: () => onChanged('pro'),
+            ),
+          ),
+          Expanded(
+            child: _TierTab(
+              label: 'Elite',
+              selected: tier == 'elite',
+              onTap: () => onChanged('elite'),
+            ),
+          ),
         ],
       ),
     );
@@ -842,7 +959,11 @@ class _TierTab extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _TierTab({required this.label, required this.selected, required this.onTap});
+  const _TierTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -879,15 +1000,19 @@ class _DurationSegmented extends StatelessWidget {
   final List<_TermOption> terms;
   final String selected;
   final ValueChanged<String> onChanged;
-  const _DurationSegmented({required this.terms, required this.selected, required this.onChanged});
+  const _DurationSegmented({
+    required this.terms,
+    required this.selected,
+    required this.onChanged,
+  });
 
   static String _shortLabel(_TermOption t) => switch (t.months) {
-        1 => '1 mo',
-        3 => '3 mo',
-        6 => '6 mo',
-        12 => '1 yr',
-        _ => t.label,
-      };
+    1 => '1 mo',
+    3 => '3 mo',
+    6 => '6 mo',
+    12 => '1 yr',
+    _ => t.label,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -979,28 +1104,43 @@ class _PricePanel extends StatelessWidget {
                 children: [
                   Text(
                     '₹${term.totalPrice}',
-                    style: AppTheme.numberStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppTheme.ink),
+                    style: AppTheme.numberStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.ink,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
                       isMonthly ? '/ month' : 'for ${term.label.toLowerCase()}',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.inkSoft,
+                      ),
                     ),
                   ),
                 ],
               ),
               if (term.badge != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.accentSoft,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     term.badge!,
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.accent),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.accent,
+                    ),
                   ),
                 ),
             ],
@@ -1010,7 +1150,11 @@ class _PricePanel extends StatelessWidget {
             isMonthly
                 ? 'Less than one member\'s monthly fee.'
                 : '₹$perMonth/mo · ${term.discountPct ?? 0}% cheaper than paying monthly.',
-            style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppTheme.inkSoft,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -1065,7 +1209,11 @@ class _UpgradeButton extends ConsumerStatefulWidget {
   final Map<String, dynamic>? gym;
   final String plan;
   final String term;
-  const _UpgradeButton({required this.gym, this.plan = 'pro', required this.term});
+  const _UpgradeButton({
+    required this.gym,
+    this.plan = 'pro',
+    required this.term,
+  });
 
   @override
   ConsumerState<_UpgradeButton> createState() => _UpgradeButtonState();
@@ -1120,11 +1268,14 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
 
       if (response.statusCode != 200) {
         final message = response.statusCode == 422
-            ? ((jsonDecode(response.body) as Map<String, dynamic>)['error'] as String? ??
-                'Could not change plan.')
+            ? ((jsonDecode(response.body) as Map<String, dynamic>)['error']
+                      as String? ??
+                  'Could not change plan.')
             : 'Could not start checkout. Please try again.';
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(message)));
         }
         return;
       }
@@ -1135,9 +1286,9 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
       if (url == null) {
         // Plan changed on the existing subscription directly — no checkout redirect.
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Plan updated.')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Plan updated.')));
         }
         ref.invalidate(staffProfileProvider);
         return;
@@ -1153,7 +1304,9 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start checkout. Please try again.')),
+          const SnackBar(
+            content: Text('Could not start checkout. Please try again.'),
+          ),
         );
       }
     } finally {
@@ -1168,8 +1321,12 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
     final isLegacy = widget.gym?['legacy_pricing'] == true;
     final terms = isLegacy
         ? [
-            _TermOption('1mo', '1 Month',
-                widget.gym?['plan_price'] as int? ?? 249, 1),
+            _TermOption(
+              '1mo',
+              '1 Month',
+              widget.gym?['plan_price'] as int? ?? 249,
+              1,
+            ),
             ..._kLegacyMultiMonthTerms,
           ]
         : _kProTerms;
@@ -1183,7 +1340,8 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
     final plan = widget.gym?['plan'] as String?;
     final planExpiresAt = widget.gym?['plan_expires_at'] as String?;
     final now = DateTime.now().toUtc();
-    final hasExpiry = planExpiresAt != null &&
+    final hasExpiry =
+        planExpiresAt != null &&
         (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false);
     final isActive = (plan == 'pro' && planExpiresAt == null) || hasExpiry;
 
@@ -1196,11 +1354,17 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
             ? const SizedBox(
                 height: 20,
                 width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               )
             : Text(
                 isActive ? 'Change plan' : _ctaLabel,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
               ),
       ),
     );

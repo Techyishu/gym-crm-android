@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/access/gym_permissions.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/gym_class.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -134,6 +136,15 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
   Widget build(BuildContext context) {
     final classesAsync = ref.watch(_classesProvider);
     final sessionsAsync = ref.watch(_upcomingSessionsProvider);
+    final canAdd = ref.watch(
+      gymPermissionProvider((GymModule.batches, GymAction.add)),
+    );
+    final canEdit = ref.watch(
+      gymPermissionProvider((GymModule.batches, GymAction.edit)),
+    );
+    final canDelete = ref.watch(
+      gymPermissionProvider((GymModule.batches, GymAction.delete)),
+    );
 
     void openAddSheet() =>
         showAdaptiveSheet(
@@ -152,128 +163,141 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
         title: const Text('Classes'),
         leading: const BackButton(),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: openAddSheet,
-              child: Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: AppTheme.accent,
-                  borderRadius: BorderRadius.circular(14),
+          if (canAdd)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: GestureDetector(
+                onTap: openAddSheet,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accent,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(AppIcons.add, size: 22, color: Colors.white),
                 ),
-                child: const Icon(Icons.add, size: 22, color: Colors.white),
               ),
             ),
-          ),
         ],
       ),
-      body: ResponsiveContent(child: classesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
-        data: (classes) {
-          if (classes.isEmpty) {
-            return _EmptyBatches(onAdd: openAddSheet);
-          }
+      body: ResponsiveContent(
+        child: classesAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => const ErrorState(what: 'batches'),
+          data: (classes) {
+            if (classes.isEmpty) {
+              return _EmptyBatches(onAdd: canAdd ? openAddSheet : null);
+            }
 
-          final sessionMap = sessionsAsync.maybeWhen(
-            data: (m) => m,
-            orElse: () => <String, List<ClassSession>>{},
-          );
+            final sessionMap = sessionsAsync.maybeWhen(
+              data: (m) => m,
+              orElse: () => <String, List<ClassSession>>{},
+            );
 
-          // Classes with no schedule days always show; others only on their days.
-          final visible = classes.where((c) =>
-              c.scheduleDays.isEmpty || c.scheduleDays.contains(_selectedDay)).toList();
+            // Classes with no schedule days always show; others only on their days.
+            final visible = classes
+                .where(
+                  (c) =>
+                      c.scheduleDays.isEmpty ||
+                      c.scheduleDays.contains(_selectedDay),
+                )
+                .toList();
 
-          return RefreshIndicator(
-            color: AppTheme.accent,
-            onRefresh: () async {
-              ref.invalidate(_classesProvider);
-              ref.invalidate(_upcomingSessionsProvider);
-            },
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              itemCount: visible.length + 1,
-              itemBuilder: (_, idx) {
-                if (idx == 0) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: _WeekDayStrip(
-                      selected: _selectedDay,
-                      onSelect: (d) => setState(() => _selectedDay = d),
-                    ),
-                  );
-                }
-                final i = classes.indexOf(visible[idx - 1]);
-                return _ClassCard(
-                gymClass: classes[i],
-                sessions: sessionMap[classes[i].id] ?? [],
-                onEdit: () =>
-                    showAdaptiveSheet(
+            return RefreshIndicator(
+              color: AppTheme.accent,
+              onRefresh: () async {
+                ref.invalidate(_classesProvider);
+                ref.invalidate(_upcomingSessionsProvider);
+              },
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                itemCount: visible.length + 1,
+                itemBuilder: (_, idx) {
+                  if (idx == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _WeekDayStrip(
+                        selected: _selectedDay,
+                        onSelect: (d) => setState(() => _selectedDay = d),
+                      ),
+                    );
+                  }
+                  final i = classes.indexOf(visible[idx - 1]);
+                  return _ClassCard(
+                    gymClass: classes[i],
+                    sessions: sessionMap[classes[i].id] ?? [],
+                    canAdd: canAdd,
+                    canEdit: canEdit,
+                    canDelete: canDelete,
+                    onEdit: () =>
+                        showAdaptiveSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          useSafeArea: true,
+                          builder: (_) => _ClassFormSheet(
+                            cls: {
+                              'id': classes[i].id,
+                              'name': classes[i].name,
+                              'type': classes[i].type,
+                              'color': classes[i].color,
+                              'capacity': classes[i].capacity,
+                              'description': classes[i].description,
+                              'default_start_time': classes[i].defaultStartTime,
+                              'default_end_time': classes[i].defaultEndTime,
+                              'trainer_name': classes[i].trainerName,
+                              'schedule_days': classes[i].scheduleDays,
+                            },
+                          ),
+                        ).then((_) {
+                          ref.invalidate(_classesProvider);
+                          ref.invalidate(_upcomingSessionsProvider);
+                        }),
+                    onAddSession: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
-                      builder: (_) => _ClassFormSheet(
-                        cls: {
-                          'id': classes[i].id,
-                          'name': classes[i].name,
-                          'type': classes[i].type,
-                          'color': classes[i].color,
-                          'capacity': classes[i].capacity,
-                          'description': classes[i].description,
-                          'default_start_time': classes[i].defaultStartTime,
-                          'default_end_time': classes[i].defaultEndTime,
-                          'trainer_name': classes[i].trainerName,
-                          'schedule_days': classes[i].scheduleDays,
-                        },
-                      ),
-                    ).then((_) {
-                      ref.invalidate(_classesProvider);
-                      ref.invalidate(_upcomingSessionsProvider);
-                    }),
-                onAddSession: () => showAdaptiveSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => _AddSessionSheet(gymClass: classes[i]),
-                ).then((_) => ref.invalidate(_upcomingSessionsProvider)),
-                onEnroll: () => showAdaptiveSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) =>
-                      _BatchEnrollmentSheet(gymClass: classes[i]),
-                ),
-                onDelete: () async {
-                  final confirmed = await showConfirmDialog(
-                    context,
-                    title: 'Delete batch',
-                    body: 'Delete "${classes[i].name}"? All sessions and enrollments will also be removed. This cannot be undone.',
-                    confirmLabel: 'Delete',
-                    icon: Icons.delete_outline,
-                  );
-                  if (confirmed != true) return;
-                  try {
-                    await Supabase.instance.client
-                        .from('classes')
-                        .delete()
-                        .eq('id', classes[i].id);
-                    ref.invalidate(_classesProvider);
-                    ref.invalidate(_upcomingSessionsProvider);
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Failed to delete: $e')),
+                      builder: (_) => _AddSessionSheet(gymClass: classes[i]),
+                    ).then((_) => ref.invalidate(_upcomingSessionsProvider)),
+                    onEnroll: () => showAdaptiveSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      builder: (_) =>
+                          _BatchEnrollmentSheet(gymClass: classes[i]),
+                    ),
+                    onDelete: () async {
+                      final confirmed = await showConfirmDialog(
+                        context,
+                        title: 'Delete batch',
+                        body:
+                            'Delete "${classes[i].name}"? All sessions and enrollments will also be removed. This cannot be undone.',
+                        confirmLabel: 'Delete',
+                        icon: AppIcons.delete,
                       );
-                    }
-                  }
+                      if (confirmed != true) return;
+                      try {
+                        await Supabase.instance.client
+                            .from('classes')
+                            .delete()
+                            .eq('id', classes[i].id);
+                        ref.invalidate(_classesProvider);
+                        ref.invalidate(_upcomingSessionsProvider);
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to delete: $e')),
+                          );
+                        }
+                      }
+                    },
+                  );
                 },
-              );
-              },
-            ),
-          );
-        },
-      )),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -309,20 +333,26 @@ class _WeekDayStrip extends StatelessWidget {
                   color: isSel ? AppTheme.accent : AppTheme.surface,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Column(children: [
-                  Text(_labels[i],
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: isSel ? Colors.white : AppTheme.inkHint,
-                    )),
-                  const SizedBox(height: 2),
-                  Text('${date.day}',
-                    style: AppTheme.numberStyle(
-                      fontSize: 16,
-                      color: isSel ? Colors.white : AppTheme.ink,
-                    )),
-                ]),
+                child: Column(
+                  children: [
+                    Text(
+                      _labels[i],
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: isSel ? Colors.white : AppTheme.inkHint,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${date.day}',
+                      style: AppTheme.numberStyle(
+                        fontSize: 16,
+                        color: isSel ? Colors.white : AppTheme.ink,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -437,31 +467,49 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
           Row(
             children: [
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const FieldLabel('Date'),
-                  InkWell(
-                    onTap: _pickDate,
-                    borderRadius: BorderRadius.circular(14),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 16)),
-                      child: Text(formatDateFromString(_date.toIso8601String())),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const FieldLabel('Date'),
+                    InkWell(
+                      onTap: _pickDate,
+                      borderRadius: BorderRadius.circular(14),
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          suffixIcon: Icon(
+                            AppIcons.calendarToday,
+                            size: 16,
+                          ),
+                        ),
+                        child: Text(
+                          formatDateFromString(_date.toIso8601String()),
+                        ),
+                      ),
                     ),
-                  ),
-                ]),
+                  ],
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const FieldLabel('Time'),
-                  InkWell(
-                    onTap: _pickTime,
-                    borderRadius: BorderRadius.circular(14),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(suffixIcon: Icon(Icons.access_time_outlined, size: 16)),
-                      child: Text(_start.format(context)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const FieldLabel('Time'),
+                    InkWell(
+                      onTap: _pickTime,
+                      borderRadius: BorderRadius.circular(14),
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          suffixIcon: Icon(
+                            AppIcons.accessTime,
+                            size: 16,
+                          ),
+                        ),
+                        child: Text(_start.format(context)),
+                      ),
                     ),
-                  ),
-                ]),
+                  ],
+                ),
               ),
             ],
           ),
@@ -490,6 +538,9 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
 class _ClassCard extends ConsumerStatefulWidget {
   final GymClass gymClass;
   final List<ClassSession> sessions;
+  final bool canAdd;
+  final bool canEdit;
+  final bool canDelete;
   final VoidCallback onEdit;
   final VoidCallback onAddSession;
   final VoidCallback onEnroll;
@@ -497,6 +548,9 @@ class _ClassCard extends ConsumerStatefulWidget {
   const _ClassCard({
     required this.gymClass,
     required this.sessions,
+    required this.canAdd,
+    required this.canEdit,
+    required this.canDelete,
     required this.onEdit,
     required this.onAddSession,
     required this.onEnroll,
@@ -578,30 +632,32 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                               ),
                             ),
                             const SizedBox(width: 4),
-                            InkWell(
-                              onTap: widget.onEdit,
-                              borderRadius: BorderRadius.circular(6),
-                              child: const Padding(
-                                padding: EdgeInsets.all(4),
-                                child: Icon(
-                                  Icons.edit_outlined,
-                                  size: 16,
-                                  color: AppTheme.inkHint,
+                            if (widget.canEdit)
+                              InkWell(
+                                onTap: widget.onEdit,
+                                borderRadius: BorderRadius.circular(6),
+                                child: const Padding(
+                                  padding: EdgeInsets.all(4),
+                                  child: Icon(
+                                    AppIcons.edit,
+                                    size: 16,
+                                    color: AppTheme.inkHint,
+                                  ),
                                 ),
                               ),
-                            ),
-                            InkWell(
-                              onTap: widget.onDelete,
-                              borderRadius: BorderRadius.circular(6),
-                              child: const Padding(
-                                padding: EdgeInsets.all(4),
-                                child: Icon(
-                                  Icons.delete_outline,
-                                  size: 16,
-                                  color: AppTheme.statusDanger,
+                            if (widget.canDelete)
+                              InkWell(
+                                onTap: widget.onDelete,
+                                borderRadius: BorderRadius.circular(6),
+                                child: const Padding(
+                                  padding: EdgeInsets.all(4),
+                                  child: Icon(
+                                    AppIcons.delete,
+                                    size: 16,
+                                    color: AppTheme.statusDanger,
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -610,7 +666,7 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                         Row(
                           children: [
                             const Icon(
-                              Icons.people_outline,
+                              AppIcons.people,
                               size: 13,
                               color: AppTheme.inkHint,
                             ),
@@ -623,26 +679,37 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                               ),
                             ),
                             const Spacer(),
-                            Builder(builder: (context) {
-                              final enrolled = _enrolledCount(ref);
-                              final full = cls.capacity > 0 && enrolled >= cls.capacity;
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: full ? AppTheme.statusWarnBg : AppTheme.statusActiveBg,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  '$enrolled/${cls.capacity}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    fontFeatures: AppTheme.tabularFigures,
-                                    color: full ? AppTheme.statusWarn : AppTheme.statusActive,
+                            Builder(
+                              builder: (context) {
+                                final enrolled = _enrolledCount(ref);
+                                final full =
+                                    cls.capacity > 0 &&
+                                    enrolled >= cls.capacity;
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
                                   ),
-                                ),
-                              );
-                            }),
+                                  decoration: BoxDecoration(
+                                    color: full
+                                        ? AppTheme.statusWarnBg
+                                        : AppTheme.statusActiveBg,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '$enrolled/${cls.capacity}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      fontFeatures: AppTheme.tabularFigures,
+                                      color: full
+                                          ? AppTheme.statusWarn
+                                          : AppTheme.statusActive,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                           ],
                         ),
                         const SizedBox(height: 8),
@@ -650,12 +717,16 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                           borderRadius: BorderRadius.circular(99),
                           child: LinearProgressIndicator(
                             value: cls.capacity > 0
-                                ? (_enrolledCount(ref) / cls.capacity).clamp(0.0, 1.0)
+                                ? (_enrolledCount(ref) / cls.capacity).clamp(
+                                    0.0,
+                                    1.0,
+                                  )
                                 : 0,
                             minHeight: 5,
                             backgroundColor: AppTheme.surface2,
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              cls.capacity > 0 && _enrolledCount(ref) >= cls.capacity
+                              cls.capacity > 0 &&
+                                      _enrolledCount(ref) >= cls.capacity
                                   ? AppTheme.statusWarn
                                   : AppTheme.statusActive,
                             ),
@@ -667,7 +738,7 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                         Row(
                           children: [
                             const Icon(
-                              Icons.schedule_outlined,
+                              AppIcons.schedule,
                               size: 13,
                               color: AppTheme.inkHint,
                             ),
@@ -713,8 +784,8 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                                   const SizedBox(width: 4),
                                   Icon(
                                     _expanded
-                                        ? Icons.keyboard_arrow_up
-                                        : Icons.keyboard_arrow_down,
+                                        ? AppIcons.keyboardArrowUp
+                                        : AppIcons.keyboardArrowDown,
                                     size: 16,
                                     color: AppTheme.ink,
                                   ),
@@ -723,28 +794,29 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                             ),
                             const Spacer(),
                             // "Enroll members" button
-                            GestureDetector(
-                              onTap: widget.onEnroll,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.person_add_outlined,
-                                    size: 14,
-                                    color: AppTheme.inkSoft,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '${_enrolledCount(ref)} enrolled',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
+                            if (widget.canAdd)
+                              GestureDetector(
+                                onTap: widget.onEnroll,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      AppIcons.personAdd,
+                                      size: 14,
                                       color: AppTheme.inkSoft,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '${_enrolledCount(ref)} enrolled',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppTheme.inkSoft,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
                           ],
                         ),
                       ],
@@ -772,17 +844,18 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
               ...sessions.map(
                 (s) => _SessionRow(session: s, classCapacity: cls.capacity),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: OutlinedButton.icon(
-                onPressed: widget.onAddSession,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Add session'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 42),
+            if (widget.canAdd)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                child: OutlinedButton.icon(
+                  onPressed: widget.onAddSession,
+                  icon: const Icon(AppIcons.add, size: 16),
+                  label: const Text('Add session'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 42),
+                  ),
                 ),
               ),
-            ),
           ],
         ],
       ),
@@ -854,7 +927,7 @@ class _SessionRow extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(
-                      Icons.people_outline,
+                      AppIcons.people,
                       size: 12,
                       color: AppTheme.inkSoft,
                     ),
@@ -899,7 +972,7 @@ class _SessionRow extends StatelessWidget {
 // ── Empty state ────────────────────────────────────────────────────────────────
 
 class _EmptyBatches extends StatelessWidget {
-  final VoidCallback onAdd;
+  final VoidCallback? onAdd;
   const _EmptyBatches({required this.onAdd});
 
   @override
@@ -918,7 +991,7 @@ class _EmptyBatches extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
               ),
               child: const Icon(
-                Icons.fitness_center_outlined,
+                AppIcons.fitness,
                 size: 48,
                 color: AppTheme.inkHint,
               ),
@@ -938,16 +1011,20 @@ class _EmptyBatches extends StatelessWidget {
               style: TextStyle(color: AppTheme.inkSoft, fontSize: 14),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: 180,
-              child: ElevatedButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Batch'),
-                style: ElevatedButton.styleFrom(minimumSize: const Size(0, 44)),
+            if (onAdd != null) ...[
+              const SizedBox(height: 24),
+              SizedBox(
+                width: 180,
+                child: ElevatedButton.icon(
+                  onPressed: onAdd,
+                  icon: const Icon(AppIcons.add, size: 18),
+                  label: const Text('Add Batch'),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                  ),
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -1144,17 +1221,26 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
               Row(
                 children: [
                   Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const FieldLabel('Coach'),
-                      TextFormField(controller: _trainerCtrl),
-                    ]),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FieldLabel('Coach'),
+                        TextFormField(controller: _trainerCtrl),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const FieldLabel('Capacity'),
-                      TextFormField(controller: _capacityCtrl, keyboardType: TextInputType.number),
-                    ]),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FieldLabel('Capacity'),
+                        TextFormField(
+                          controller: _capacityCtrl,
+                          keyboardType: TextInputType.number,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1162,31 +1248,47 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
               Row(
                 children: [
                   Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const FieldLabel('Time'),
-                      InkWell(
-                        onTap: () => _pickTime(true),
-                        borderRadius: BorderRadius.circular(14),
-                        child: InputDecorator(
-                          decoration: const InputDecoration(suffixIcon: Icon(Icons.access_time_outlined, size: 16)),
-                          child: Text(_formatTod(_startTime)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FieldLabel('Time'),
+                        InkWell(
+                          onTap: () => _pickTime(true),
+                          borderRadius: BorderRadius.circular(14),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              suffixIcon: Icon(
+                                AppIcons.accessTime,
+                                size: 16,
+                              ),
+                            ),
+                            child: Text(_formatTod(_startTime)),
+                          ),
                         ),
-                      ),
-                    ]),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const FieldLabel('Duration'),
-                      InkWell(
-                        onTap: () => _pickTime(false),
-                        borderRadius: BorderRadius.circular(14),
-                        child: InputDecorator(
-                          decoration: const InputDecoration(suffixIcon: Icon(Icons.access_time_outlined, size: 16)),
-                          child: Text(_formatTod(_endTime)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const FieldLabel('Duration'),
+                        InkWell(
+                          onTap: () => _pickTime(false),
+                          borderRadius: BorderRadius.circular(14),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              suffixIcon: Icon(
+                                AppIcons.accessTime,
+                                size: 16,
+                              ),
+                            ),
+                            child: Text(_formatTod(_endTime)),
+                          ),
                         ),
-                      ),
-                    ]),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1230,7 +1332,10 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                   _scheduleDays.isEmpty
                       ? 'No days selected — add sessions manually from the calendar.'
                       : '${_scheduleDays.length} day${_scheduleDays.length > 1 ? 's' : ''} selected',
-                  style: const TextStyle(fontSize: 11.5, color: AppTheme.inkHint),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppTheme.inkHint,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1265,7 +1370,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                       ),
                       child: selected
                           ? const Icon(
-                              Icons.check,
+                              AppIcons.check,
                               color: Colors.white,
                               size: 16,
                             )
@@ -1344,31 +1449,36 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
   // class whose days + time overlap with the class being enrolled into.
   Future<String?> _findScheduleConflict(String memberId) async {
     final newStart = _hhmm(widget.gymClass.defaultStartTime);
-    final newEnd   = _hhmm(widget.gymClass.defaultEndTime);
-    final newDays  = widget.gymClass.scheduleDays.toSet();
+    final newEnd = _hhmm(widget.gymClass.defaultEndTime);
+    final newDays = widget.gymClass.scheduleDays.toSet();
     if (newStart == null || newEnd == null || newDays.isEmpty) return null;
 
     final data = await Supabase.instance.client
         .from('class_enrollments')
-        .select('classes(id, name, default_start_time, default_end_time, schedule_days)')
+        .select(
+          'classes(id, name, default_start_time, default_end_time, schedule_days)',
+        )
         .eq('member_id', memberId);
 
     for (final row in (data as List)) {
-      final cls = (row as Map<String, dynamic>)['classes'] as Map<String, dynamic>?;
+      final cls =
+          (row as Map<String, dynamic>)['classes'] as Map<String, dynamic>?;
       if (cls == null || cls['id'] == widget.gymClass.id) continue;
 
       final exStart = _hhmm(cls['default_start_time'] as String?);
-      final exEnd   = _hhmm(cls['default_end_time']   as String?);
-      final exDays  = ((cls['schedule_days'] as List?) ?? []).map((e) => e as int).toSet();
+      final exEnd = _hhmm(cls['default_end_time'] as String?);
+      final exDays = ((cls['schedule_days'] as List?) ?? [])
+          .map((e) => e as int)
+          .toSet();
 
       if (exStart == null || exEnd == null || exDays.isEmpty) continue;
       if (newDays.intersection(exDays).isEmpty) continue;
 
       // Standard interval overlap: A.start < B.end && A.end > B.start
       final ns = newStart.hour * 60 + newStart.minute;
-      final ne = newEnd.hour   * 60 + newEnd.minute;
-      final es = exStart.hour  * 60 + exStart.minute;
-      final ee = exEnd.hour    * 60 + exEnd.minute;
+      final ne = newEnd.hour * 60 + newEnd.minute;
+      final es = exStart.hour * 60 + exStart.minute;
+      final ee = exEnd.hour * 60 + exEnd.minute;
       if (ns < ee && ne > es) return cls['name'] as String? ?? 'another batch';
     }
     return null;
@@ -1433,7 +1543,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
       title: 'Remove from batch',
       body: 'Remove $name from ${widget.gymClass.name}?',
       confirmLabel: 'Remove',
-      icon: Icons.person_remove_outlined,
+      icon: AppIcons.personRemove,
     );
     if (confirmed != true) return;
 
@@ -1476,7 +1586,8 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
     final results = _allMembers.where((m) {
       if (enrolledIds.contains(m['id'])) return false;
       if (query.isEmpty) return true;
-      final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase();
+      final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+          .toLowerCase();
       final phone = (m['phone'] as String? ?? '').toLowerCase();
       final email = (m['email'] as String? ?? '').toLowerCase();
       return name.contains(query) ||
@@ -1512,7 +1623,11 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                 Expanded(
                   child: Text(
                     widget.gymClass.name,
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: AppTheme.ink),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 19,
+                      color: AppTheme.ink,
+                    ),
                   ),
                 ),
                 enrollmentsAsync.maybeWhen(
@@ -1533,8 +1648,10 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
               controller: _searchCtrl,
               enabled: !_loadingMembers,
               decoration: InputDecoration(
-                hintText: _loadingMembers ? 'Loading members…' : 'Search members',
-                prefixIcon: const Icon(Icons.search, size: 18),
+                hintText: _loadingMembers
+                    ? 'Loading members…'
+                    : 'Search members',
+                prefixIcon: const Icon(AppIcons.search, size: 18),
               ),
               onChanged: (v) => setState(() => _search = v),
             ),
@@ -1557,33 +1674,55 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                           query.isEmpty
                               ? 'All members are already enrolled.'
                               : 'No members found',
-                          style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppTheme.inkSoft,
+                          ),
                         ),
                       )
                     else
                       CardList(
                         children: results.map((m) {
-                          final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
+                          final name =
+                              '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                                  .trim();
                           final busy = _busyMemberId == m['id'];
                           return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            child: Row(children: [
-                              InitialsAvatar(name: name, size: 38),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(name,
-                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                              ),
-                              busy
-                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : RoundIconButton(
-                                      icon: Icons.add,
-                                      bg: AppTheme.accentSoft,
-                                      fg: AppTheme.accent,
-                                      size: 34,
-                                      onTap: () => _enroll(m),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              children: [
+                                InitialsAvatar(name: name, size: 38),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.ink,
                                     ),
-                            ]),
+                                  ),
+                                ),
+                                busy
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : RoundIconButton(
+                                        icon: AppIcons.add,
+                                        bg: AppTheme.accentSoft,
+                                        fg: AppTheme.accent,
+                                        size: 34,
+                                        onTap: () => _enroll(m),
+                                      ),
+                              ],
+                            ),
                           );
                         }).toList(),
                       ),
@@ -1598,7 +1737,10 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                               padding: EdgeInsets.symmetric(vertical: 12),
                               child: Text(
                                 'No members enrolled yet — add one above.',
-                                style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppTheme.inkSoft,
+                                ),
                               ),
                             ),
                           ];
@@ -1606,30 +1748,52 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                         return [
                           CardList(
                             children: rows.map((row) {
-                              final member = row['members'] as Map<String, dynamic>?;
-                              if (member == null) return const SizedBox.shrink();
+                              final member =
+                                  row['members'] as Map<String, dynamic>?;
+                              if (member == null)
+                                return const SizedBox.shrink();
                               final memberId = member['id'] as String;
-                              final name = '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim();
+                              final name =
+                                  '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'
+                                      .trim();
                               final busy = _busyMemberId == memberId;
                               return Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                child: Row(children: [
-                                  InitialsAvatar(name: name, size: 38),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(name,
-                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-                                  ),
-                                  busy
-                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                      : RoundIconButton(
-                                          icon: Icons.close,
-                                          bg: AppTheme.statusDangerBg,
-                                          fg: AppTheme.statusDanger,
-                                          size: 34,
-                                          onTap: () => _remove(memberId, name),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    InitialsAvatar(name: name, size: 38),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        name,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.ink,
                                         ),
-                                ]),
+                                      ),
+                                    ),
+                                    busy
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : RoundIconButton(
+                                            icon: AppIcons.close,
+                                            bg: AppTheme.statusDangerBg,
+                                            fg: AppTheme.statusDanger,
+                                            size: 34,
+                                            onTap: () =>
+                                                _remove(memberId, name),
+                                          ),
+                                  ],
+                                ),
                               );
                             }).toList(),
                           ),

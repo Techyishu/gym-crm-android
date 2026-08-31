@@ -8,22 +8,27 @@ import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import 'workout_plan_sheet.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../core/theme/app_icons.dart';
 
 // All workout plans in the gym, grouped by member.
-final _gymWorkoutPlansProvider =
-    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _gymWorkoutPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('members')
-      .select('id, first_name, last_name, workout_plans(id, name, type, days, is_active, created_at)')
+      .select(
+        'id, first_name, last_name, workout_plans(id, name, type, days, is_active, created_at)',
+      )
       .eq('gym_id', gymId)
       .order('first_name');
   return (data as List).cast<Map<String, dynamic>>();
 });
 
 // All members in the gym (for the member picker when creating a plan).
-final _gymMembersProvider =
-    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _gymMembersProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final data = await Supabase.instance.client
       .from('members')
@@ -37,10 +42,12 @@ class StaffWorkoutPlansScreen extends ConsumerStatefulWidget {
   const StaffWorkoutPlansScreen({super.key});
 
   @override
-  ConsumerState<StaffWorkoutPlansScreen> createState() => _StaffWorkoutPlansScreenState();
+  ConsumerState<StaffWorkoutPlansScreen> createState() =>
+      _StaffWorkoutPlansScreenState();
 }
 
-class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScreen> {
+class _StaffWorkoutPlansScreenState
+    extends ConsumerState<StaffWorkoutPlansScreen> {
   String _query = '';
 
   Future<void> _pickMemberAndCreate({Map<String, dynamic>? preselected}) async {
@@ -58,7 +65,8 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
     if (selected == null || !mounted) return;
 
     final memberId = selected['id'] as String;
-    final memberName = '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
+    final memberName =
+        '${selected['first_name'] ?? ''} ${selected['last_name'] ?? ''}'.trim();
 
     final saved = await showAdaptiveSheet<bool>(
       context: context,
@@ -76,78 +84,116 @@ class _StaffWorkoutPlansScreenState extends ConsumerState<StaffWorkoutPlansScree
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: ResponsiveContent(child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Row(children: [
-                IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 18), onPressed: () => Navigator.of(context).maybePop()),
-                const Expanded(
-                  child: Text('Workout plans',
-                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: AppTheme.ink, letterSpacing: -0.5)),
-                ),
-                GestureDetector(
-                  onTap: () => _pickMemberAndCreate(),
-                  child: Container(
-                    width: 38, height: 38,
-                    decoration: BoxDecoration(color: AppTheme.accent, borderRadius: BorderRadius.circular(13)),
-                    child: const Icon(Icons.add, size: 21, color: Colors.white),
-                  ),
-                ),
-              ]),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: TextField(
-                decoration: const InputDecoration(hintText: 'Search members', prefixIcon: Icon(Icons.search, size: 20)),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-            Expanded(
-              child: plansAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('Error: $e')),
-                data: (members) {
-                  final filtered = _query.trim().isEmpty
-                      ? members
-                      : members.where((m) =>
-                          '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase().contains(_query.toLowerCase())).toList();
-
-                  if (filtered.isEmpty) return const _EmptyState();
-
-                  return RefreshIndicator(
-                    color: AppTheme.accent,
-                    onRefresh: () async => ref.invalidate(_gymWorkoutPlansProvider),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final m = filtered[i];
-                        final memberId = m['id'] as String;
-                        final memberName = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
-                        final plans = (m['workout_plans'] as List? ?? []).cast<Map<String, dynamic>>();
-                        if (plans.isEmpty) {
-                          return _NoPlanRow(
-                            name: memberName,
-                            onAssign: () => _pickMemberAndCreate(preselected: m),
-                          );
-                        }
-                        return _MemberPlanGroup(
-                          memberId: memberId,
-                          memberName: memberName,
-                          plans: plans,
-                          onChanged: () => ref.invalidate(_gymWorkoutPlansProvider),
-                        );
-                      },
+      body: ResponsiveContent(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(AppIcons.arrowBackIosNew, size: 18),
+                      onPressed: () => Navigator.of(context).maybePop(),
                     ),
-                  );
-                },
+                    const Expanded(
+                      child: Text(
+                        'Workout plans',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.ink,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => _pickMemberAndCreate(),
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent,
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: const Icon(
+                          AppIcons.add,
+                          size: 21,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'Search members',
+                    prefixIcon: Icon(AppIcons.search, size: 20),
+                  ),
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+              Expanded(
+                child: plansAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (_, _) => const ErrorState(what: 'workout plans'),
+                  data: (members) {
+                    final filtered = _query.trim().isEmpty
+                        ? members
+                        : members
+                              .where(
+                                (m) =>
+                                    '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                                        .toLowerCase()
+                                        .contains(_query.toLowerCase()),
+                              )
+                              .toList();
+
+                    if (filtered.isEmpty) return const _EmptyState();
+
+                    return RefreshIndicator(
+                      color: AppTheme.accent,
+                      onRefresh: () async =>
+                          ref.invalidate(_gymWorkoutPlansProvider),
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final m = filtered[i];
+                          final memberId = m['id'] as String;
+                          final memberName =
+                              '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                                  .trim();
+                          final plans = (m['workout_plans'] as List? ?? [])
+                              .cast<Map<String, dynamic>>();
+                          if (plans.isEmpty) {
+                            return _NoPlanRow(
+                              name: memberName,
+                              onAssign: () =>
+                                  _pickMemberAndCreate(preselected: m),
+                            );
+                          }
+                          return _MemberPlanGroup(
+                            memberId: memberId,
+                            memberName: memberName,
+                            plans: plans,
+                            onChanged: () =>
+                                ref.invalidate(_gymWorkoutPlansProvider),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 }
@@ -165,19 +211,38 @@ class _NoPlanRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: AppTheme.cardDecoration(),
-      child: Row(children: [
-        InitialsAvatar(name: name, size: 40),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.ink)),
-            const Text('No plan assigned',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.statusDanger)),
-          ]),
-        ),
-        PillButton(label: 'Assign', onTap: onAssign),
-      ]),
+      child: Row(
+        children: [
+          InitialsAvatar(name: name, size: 40),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.ink,
+                  ),
+                ),
+                const Text(
+                  'No plan assigned',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.statusDanger,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PillButton(label: 'Assign', onTap: onAssign),
+        ],
+      ),
     );
   }
 }
@@ -206,20 +271,24 @@ class _MemberPlanGroup extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 8, top: 4),
           child: Row(
             children: [
-              const Icon(Icons.person_outline, size: 14, color: AppTheme.inkHint),
+              const Icon(
+                AppIcons.person,
+                size: 14,
+                color: AppTheme.inkHint,
+              ),
               const SizedBox(width: 6),
               Text(
                 memberName,
                 style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.inkSoft,
-                    letterSpacing: 0.3),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.inkSoft,
+                  letterSpacing: 0.3,
+                ),
               ),
               const SizedBox(width: 6),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppTheme.surface2,
                   borderRadius: BorderRadius.circular(10),
@@ -227,20 +296,23 @@ class _MemberPlanGroup extends StatelessWidget {
                 child: Text(
                   '${plans.length}',
                   style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.inkSoft),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.inkSoft,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        ...plans.map((plan) => _StaffPlanCard(
-              plan: plan,
-              memberId: memberId,
-              memberName: memberName,
-              onChanged: onChanged,
-            )),
+        ...plans.map(
+          (plan) => _StaffPlanCard(
+            plan: plan,
+            memberId: memberId,
+            memberName: memberName,
+            onChanged: onChanged,
+          ),
+        ),
         const SizedBox(height: 8),
       ],
     );
@@ -275,7 +347,7 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
       title: 'Delete plan?',
       body: 'Delete "${widget.plan['name']}"? This cannot be undone.',
       confirmLabel: 'Delete',
-      icon: Icons.delete_outline,
+      icon: AppIcons.delete,
     );
     if (ok != true) return;
     try {
@@ -287,9 +359,9 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
     } catch (e) {
       debugPrint('[GymCRM] Delete workout plan error: $e');
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to delete plan')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to delete plan')));
       }
     }
   }
@@ -311,8 +383,7 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
   @override
   Widget build(BuildContext context) {
     final name = widget.plan['name'] as String? ?? 'Plan';
-    final type =
-        (widget.plan['type'] as String? ?? 'weekly').toLowerCase();
+    final type = (widget.plan['type'] as String? ?? 'weekly').toLowerCase();
     final rawDays = widget.plan['days'];
     final days = rawDays is List
         ? rawDays.cast<Map<String, dynamic>>()
@@ -343,53 +414,71 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
               child: Row(
                 children: [
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
-                        color: typeBg,
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Text(type.toUpperCase(),
-                        style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: typeFg,
-                            letterSpacing: 0.8)),
+                      color: typeBg,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      type.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: typeFg,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                color: AppTheme.ink)),
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: AppTheme.ink,
+                          ),
+                        ),
                         if (createdAt != null)
                           Text(
                             'Created ${formatDateFromString(createdAt)}',
                             style: const TextStyle(
-                                fontSize: 11, color: AppTheme.inkHint),
+                              fontSize: 11,
+                              color: AppTheme.inkHint,
+                            ),
                           ),
                       ],
                     ),
                   ),
-                  Text('$totalEx ex',
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.inkHint)),
+                  Text(
+                    '$totalEx ex',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
                   Icon(
                     _expanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                        ? AppIcons.keyboardArrowUp
+                        : AppIcons.keyboardArrowDown,
                     size: 18,
                     color: AppTheme.inkHint,
                   ),
                   // ⋮ menu
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert,
-                        size: 18, color: AppTheme.inkSoft),
+                    icon: const Icon(
+                      AppIcons.moreVert,
+                      size: 18,
+                      color: AppTheme.inkSoft,
+                    ),
                     padding: EdgeInsets.zero,
                     onSelected: (v) {
                       if (v == 'edit') _edit(context);
@@ -398,22 +487,30 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
                     itemBuilder: (_) => [
                       const PopupMenuItem(
                         value: 'edit',
-                        child: Row(children: [
-                          Icon(Icons.edit_outlined, size: 16),
-                          SizedBox(width: 10),
-                          Text('Edit'),
-                        ]),
+                        child: Row(
+                          children: [
+                            Icon(AppIcons.edit, size: 16),
+                            SizedBox(width: 10),
+                            Text('Edit'),
+                          ],
+                        ),
                       ),
                       const PopupMenuItem(
                         value: 'delete',
-                        child: Row(children: [
-                          Icon(Icons.delete_outline,
-                              size: 16, color: AppTheme.statusDanger),
-                          SizedBox(width: 10),
-                          Text('Delete',
-                              style:
-                                  TextStyle(color: AppTheme.statusDanger)),
-                        ]),
+                        child: Row(
+                          children: [
+                            Icon(
+                              AppIcons.delete,
+                              size: 16,
+                              color: AppTheme.statusDanger,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Delete',
+                              style: TextStyle(color: AppTheme.statusDanger),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -452,8 +549,7 @@ class _DayView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = day['label'] as String? ?? '';
-    final exercises =
-        (day['exercises'] as List).cast<Map<String, dynamic>>();
+    final exercises = (day['exercises'] as List).cast<Map<String, dynamic>>();
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
       child: Column(
@@ -462,10 +558,11 @@ class _DayView extends StatelessWidget {
           Text(
             label.toUpperCase(),
             style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.inkHint,
-                letterSpacing: 0.8),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.inkHint,
+              letterSpacing: 0.8,
+            ),
           ),
           const SizedBox(height: 6),
           ...exercises.asMap().entries.map((e) {
@@ -483,22 +580,33 @@ class _DayView extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${e.key + 1}. ',
-                      style: const TextStyle(
-                          fontSize: 11, color: AppTheme.inkHint)),
+                  Text(
+                    '${e.key + 1}. ',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(ex['name'] as String? ?? '—',
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: AppTheme.ink)),
+                        Text(
+                          ex['name'] as String? ?? '—',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.ink,
+                          ),
+                        ),
                         if (parts.isNotEmpty)
-                          Text(parts.join(' · '),
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppTheme.inkHint)),
+                          Text(
+                            parts.join(' · '),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.inkHint,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -528,14 +636,16 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final filtered = widget.members.where((m) {
-      final name =
-          '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.toLowerCase();
+      final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+          .toLowerCase();
       return name.contains(_query.toLowerCase());
     }).toList();
 
     return Padding(
       padding: EdgeInsets.only(
-        left: 16, right: 16, top: 20,
+        left: 16,
+        right: 16,
+        top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
       child: Column(
@@ -546,7 +656,10 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
           const SizedBox(height: 14),
           TextFormField(
             autofocus: true,
-            decoration: const InputDecoration(hintText: 'Search members', prefixIcon: Icon(Icons.search, size: 18)),
+            decoration: const InputDecoration(
+              hintText: 'Search members',
+              prefixIcon: Icon(AppIcons.search, size: 18),
+            ),
             onChanged: (v) => setState(() => _query = v),
           ),
           const SizedBox(height: 12),
@@ -559,19 +672,32 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
               itemCount: filtered.length,
               itemBuilder: (_, i) {
                 final m = filtered[i];
-                final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
+                final name = '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'
+                    .trim();
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(14),
                     onTap: () => Navigator.pop(context, m),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                      child: Row(children: [
-                        InitialsAvatar(name: name, size: 38),
-                        const SizedBox(width: 12),
-                        Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppTheme.ink)),
-                      ]),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          InitialsAvatar(name: name, size: 38),
+                          const SizedBox(width: 12),
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: AppTheme.ink,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -595,16 +721,21 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.fitness_center, size: 56, color: AppTheme.inkHint),
+          Icon(AppIcons.fitnessActive, size: 56, color: AppTheme.inkHint),
           SizedBox(height: 16),
-          Text('No workout plans yet',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.ink)),
+          Text(
+            'No workout plans yet',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.ink,
+            ),
+          ),
           SizedBox(height: 8),
-          Text('Tap + to create a plan for a member',
-              style: TextStyle(color: AppTheme.inkSoft)),
+          Text(
+            'Tap + to create a plan for a member',
+            style: TextStyle(color: AppTheme.inkSoft),
+          ),
         ],
       ),
     );

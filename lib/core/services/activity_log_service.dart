@@ -36,7 +36,9 @@ class ActivityLogService {
         'user_id': client.auth.currentUser?.id,
         'source': 'android',
         'message': message.length > 2000 ? message.substring(0, 2000) : message,
-        'stack_trace': stackTrace != null && stackTrace.length > 8000 ? stackTrace.substring(0, 8000) : stackTrace,
+        'stack_trace': stackTrace != null && stackTrace.length > 8000
+            ? stackTrace.substring(0, 8000)
+            : stackTrace,
         'page': page,
       });
     } catch (e) {

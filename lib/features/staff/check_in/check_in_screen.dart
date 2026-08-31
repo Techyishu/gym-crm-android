@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:gal/gal.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -13,15 +14,15 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../core/services/activity_log_service.dart';
-import '../../../core/services/app_events.dart';
 import '../../../core/services/member_photo_service.dart';
+import '../../../core/services/check_in_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
-import '../../../core/services/review_prompt.dart';
 import '../../../shared/widgets/member_photo.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,12 @@ String _formatDuration(String inAt, String outAt) {
     return '-';
   }
 }
+
+String _methodLabel(String method) => switch (method) {
+  'qr' => 'QR',
+  'biometric' => 'biometric',
+  _ => 'manual',
+};
 
 Color _methodColor(String method) => switch (method) {
   'qr' => AppTheme.accent,
@@ -224,89 +231,19 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         }
       }
 
-      final client = Supabase.instance.client;
       final gymId = await ref.read(gymIdProvider.future);
-
-      // Cache gym_id after every successful network fetch so offline mode works.
-      await OfflineCheckInQueue.cacheGymId(gymId);
-
-      final member = await client
-          .from('members')
-          .select('id, first_name, last_name, status, avatar_url')
-          .eq('id', memberId)
-          .eq('gym_id', gymId)
-          .maybeSingle();
-
-      if (member == null) {
-        return const _CheckResult(
-          success: false,
-          title: 'Member not found',
-          subtitle: 'This QR code is not a member of your gym.',
-        );
-      }
-
-      final name = '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'
-          .trim();
-      final label = name.isNotEmpty ? name : 'Member';
-      final avatarUrl = member['avatar_url'] as String?;
-
-      if ((member['status'] as String) != 'active') {
-        unawaited(
-          client.rpc(
-            'notify_owner_expired_checkin',
-            params: {
-              'p_gym_id': gymId,
-              'p_member_name': label,
-              'p_member_status': member['status'],
-              'p_method': method,
-            },
-          ),
-        );
-        return _CheckResult(
-          success: false,
-          title: label,
-          subtitle: 'Not active (${member['status']}). Check-in blocked.',
-          avatarUrl: avatarUrl,
-        );
-      }
-
-      try {
-        await client.from('check_ins').insert({
-          'member_id': memberId,
-          'gym_id': gymId,
-          'method': method,
-          'staff_id': client.auth.currentUser?.id,
-        });
-      } on PostgrestException catch (e) {
-        if (e.code == '23505') {
-          return _CheckResult(
-            success: false,
-            already: true,
-            title: label,
-            subtitle: 'Already checked in. Check them out first.',
-            avatarUrl: avatarUrl,
-          );
-        }
-        rethrow;
-      }
-      ActivityLogService.logActivity(
+      final r = await checkInMember(
+        memberId: memberId,
         gymId: gymId,
-        action: 'check_in',
-        metadata: {
-          'member_id': memberId,
-          'member_name': label,
-          'method': method,
-        },
+        method: method,
       );
-      ref.invalidate(_recentCheckInsProvider);
-      unawaited(ReviewPrompt.recordSuccess());
-      unawaited(AppEvents.checkinCompleted());
-
+      if (r.success) ref.invalidate(_recentCheckInsProvider);
       return _CheckResult(
-        success: true,
-        title: label,
-        subtitle: 'Checked in successfully.',
-        avatarUrl: avatarUrl,
+        success: r.success,
+        already: r.already,
+        title: r.title,
+        subtitle: r.subtitle,
+        avatarUrl: r.avatarUrl,
       );
     } catch (e) {
       return _CheckResult(success: false, title: 'Error', subtitle: '$e');
@@ -430,83 +367,103 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Row(
+        bottom: false,
+        child: _tab == 1
+            ? Column(
                 children: [
-                  const Text(
-                    'Check-in',
-                    style: TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.ink,
-                      letterSpacing: -0.5,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: _checkInHeader(context),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: _ScanTabSwitch(
+                      index: _tab,
+                      onChanged: (i) => setState(() => _tab = i),
                     ),
                   ),
-                  const Spacer(),
-                  _HeaderIconButton(
-                    icon: Icons.history,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const _HistoryPage()),
-                    ),
-                  ),
+                  const Expanded(child: _GymQrTab()),
                 ],
-              ),
-            ),
-            if (_pendingSync > 0)
-              _PendingSyncBanner(count: _pendingSync, onTap: _tryFlushQueue),
-            if (_message != null)
-              _ResultBanner(message: _message!, success: _success),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: _ScanTabSwitch(
-                index: _tab,
-                onChanged: (i) => setState(() => _tab = i),
-              ),
-            ),
-            Expanded(
-              child: _tab == 0
-                  ? RefreshIndicator(
+              )
+            : Column(
+                children: [
+                  // Everything you do to check someone in — scan, or search —
+                  // lives in one dark panel at the top. The cream body below
+                  // is only the record of what already happened.
+                  Container(
+                    color: AppTheme.darkCard,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+                    child: Column(
+                      children: [
+                        _checkInHeader(context, onDark: true),
+                        const SizedBox(height: 12),
+                        _ScanTabSwitch(
+                          index: _tab,
+                          onChanged: (i) => setState(() => _tab = i),
+                          onDark: true,
+                        ),
+                        const SizedBox(height: 14),
+                        _buildScannerCard(),
+                        const SizedBox(height: 12),
+                        _buildSearchField(),
+                      ],
+                    ),
+                  ),
+                  if (_pendingSync > 0)
+                    _PendingSyncBanner(
+                      count: _pendingSync,
+                      onTap: _tryFlushQueue,
+                    ),
+                  if (_message != null)
+                    _ResultBanner(message: _message!, success: _success),
+                  Expanded(
+                    child: RefreshIndicator(
                       color: AppTheme.accent,
                       onRefresh: () async =>
                           ref.invalidate(_recentCheckInsProvider),
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                         children: [
-                          _buildScannerCard(),
-                          const SizedBox(height: 18),
-                          Row(
-                            children: [
-                              const Expanded(child: Divider()),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                child: Text(
-                                  'or search member by name',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.inkHint,
-                                  ),
-                                ),
-                              ),
-                              const Expanded(child: Divider()),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          _buildSearch(),
-                          const SizedBox(height: 20),
+                          ..._buildSearchResults(),
                           _buildInToday(recentAsync),
                         ],
                       ),
-                    )
-                  : const _GymQrTab(),
-            ),
-          ],
-        ),
+                    ),
+                  ),
+                ],
+              ),
       ),
+    );
+  }
+
+  Widget _checkInHeader(BuildContext context, {bool onDark = false}) {
+    final fg = onDark ? AppTheme.onDark : AppTheme.ink;
+    return Row(
+      children: [
+        Text(
+          'Check-in',
+          style: TextStyle(
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+            color: fg,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const Spacer(),
+        _HeaderIconButton(
+          icon: AppIcons.calendarMonth,
+          onDark: onDark,
+          onTap: () => context.push('/staff/attendance-calendar'),
+        ),
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          icon: AppIcons.history,
+          onDark: onDark,
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const _HistoryPage())),
+        ),
+      ],
     );
   }
 
@@ -514,8 +471,13 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
 
   Widget _buildScannerCard() {
     return Container(
-      height: 250,
-      decoration: AppTheme.darkCardDecoration(radius: 20),
+      height: 220,
+      // Recessed well, not another darkCard surface — the scanner sits
+      // *inside* the dark panel, so it needs to read as a hole in it.
+      decoration: BoxDecoration(
+        color: AppTheme.darkInset,
+        borderRadius: BorderRadius.circular(18),
+      ),
       clipBehavior: Clip.antiAlias,
       child: _qrResult != null
           ? Container(
@@ -569,8 +531,8 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.onDark,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.onDarkSoft,
                     ),
                   ),
                 ),
@@ -588,79 +550,98 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
 
   // ── Search ─────────────────────────────────────────────────────────────────
 
-  Widget _buildSearch() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(
-          controller: _searchCtrl,
-          onChanged: _searchMembers,
-          decoration: InputDecoration(
-            hintText: 'Search to check in',
-            prefixIcon: const Icon(
-              Icons.search,
-              color: AppTheme.inkHint,
-              size: 20,
-            ),
-            isDense: true,
-            suffixIcon: _searching
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppTheme.ink,
+  Widget _buildSearchField() {
+    return TextField(
+      controller: _searchCtrl,
+      onChanged: _searchMembers,
+      style: const TextStyle(color: AppTheme.onDark, fontSize: 14),
+      cursorColor: AppTheme.mintOnDark,
+      decoration: InputDecoration(
+        hintText: 'Search name or enter member ID',
+        hintStyle: const TextStyle(color: AppTheme.onDarkSoft, fontSize: 14),
+        filled: true,
+        fillColor: AppTheme.darkCard2,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.mintOnDark),
+        ),
+        prefixIcon: const Icon(
+          AppIcons.search,
+          color: AppTheme.onDarkSoft,
+          size: 20,
+        ),
+        isDense: true,
+        suffixIcon: _searching
+            ? const Padding(
+                padding: EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.mintOnDark,
+                  ),
+                ),
+              )
+            : (_searchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(
+                        AppIcons.clear,
+                        size: 18,
+                        color: AppTheme.onDarkSoft,
                       ),
-                    ),
-                  )
-                : (_searchCtrl.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(
-                            Icons.clear,
-                            size: 18,
-                            color: AppTheme.inkHint,
-                          ),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() => _searchResults = []);
-                          },
-                        )
-                      : null),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _searchResults = []);
+                      },
+                    )
+                  : null),
+      ),
+    );
+  }
+
+  List<Widget> _buildSearchResults() {
+    if (_searchResults.isNotEmpty) {
+      return [
+        Container(
+          margin: const EdgeInsets.only(bottom: 18),
+          decoration: AppTheme.cardDecoration(),
+          child: Column(
+            children: _searchResults
+                .map(
+                  (m) => _SearchResultRow(
+                    member: m,
+                    processing: _processing,
+                    onCheckIn: () => _processManual(m['id'] as String),
+                  ),
+                )
+                .toList(),
           ),
         ),
-        if (_searchResults.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.cardDecoration(),
-            child: Column(
-              children: _searchResults
-                  .map(
-                    (m) => _SearchResultRow(
-                      member: m,
-                      processing: _processing,
-                      onCheckIn: () => _processManual(m['id'] as String),
-                    ),
-                  )
-                  .toList(),
+      ];
+    }
+    if (_searchCtrl.text.isNotEmpty && !_searching) {
+      return const [
+        Padding(
+          padding: EdgeInsets.only(bottom: 18),
+          child: Center(
+            child: Text(
+              'No members match that name',
+              style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
             ),
           ),
-        ],
-        if (_searchCtrl.text.isNotEmpty &&
-            _searchResults.isEmpty &&
-            !_searching)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
-            child: Center(
-              child: Text(
-                'No members found',
-                style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
-              ),
-            ),
-          ),
-      ],
-    );
+        ),
+      ];
+    }
+    return const [];
   }
 
   // ── In today ───────────────────────────────────────────────────────────────
@@ -764,7 +745,12 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
 class _HeaderIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _HeaderIconButton({required this.icon, required this.onTap});
+  final bool onDark;
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    this.onDark = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -774,10 +760,14 @@ class _HeaderIconButton extends StatelessWidget {
         width: 38,
         height: 38,
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: onDark ? AppTheme.darkCard2 : AppTheme.surface,
           borderRadius: BorderRadius.circular(13),
         ),
-        child: Icon(icon, size: 20, color: AppTheme.ink),
+        child: Icon(
+          icon,
+          size: 20,
+          color: onDark ? AppTheme.onDark : AppTheme.ink,
+        ),
       ),
     );
   }
@@ -788,14 +778,19 @@ class _HeaderIconButton extends StatelessWidget {
 class _ScanTabSwitch extends StatelessWidget {
   final int index;
   final ValueChanged<int> onChanged;
-  const _ScanTabSwitch({required this.index, required this.onChanged});
+  final bool onDark;
+  const _ScanTabSwitch({
+    required this.index,
+    required this.onChanged,
+    this.onDark = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: AppTheme.activeBg,
+        color: onDark ? AppTheme.darkCard2 : AppTheme.activeBg,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -815,9 +810,11 @@ class _ScanTabSwitch extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.surface : Colors.transparent,
+          color: selected
+              ? (onDark ? AppTheme.accent : AppTheme.surface)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          boxShadow: selected
+          boxShadow: selected && !onDark
               ? const [
                   BoxShadow(
                     color: Color(0x14000000),
@@ -833,7 +830,9 @@ class _ScanTabSwitch extends StatelessWidget {
           style: TextStyle(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-            color: selected ? AppTheme.ink : AppTheme.inkHint,
+            color: selected
+                ? (onDark ? Colors.white : AppTheme.ink)
+                : (onDark ? AppTheme.onDarkSoft : AppTheme.inkHint),
           ),
         ),
       ),
@@ -1173,7 +1172,7 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                                 color: Colors.white,
                               ),
                             )
-                          : const Icon(Icons.download_outlined, size: 18),
+                          : const Icon(AppIcons.download, size: 18),
                       label: Text(_saving ? 'Saving…' : 'Save to gallery'),
                     ),
                   ),
@@ -1191,7 +1190,7 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                                 color: AppTheme.ink,
                               ),
                             )
-                          : const Icon(Icons.share_outlined, size: 18),
+                          : const Icon(AppIcons.share, size: 18),
                       label: Text(_sharing ? 'Preparing…' : 'Share / Print'),
                     ),
                   ),
@@ -1235,7 +1234,7 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                           ),
                           const SizedBox(width: 8),
                           const Icon(
-                            Icons.copy,
+                            AppIcons.copy,
                             size: 14,
                             color: AppTheme.primary,
                           ),
@@ -1277,7 +1276,7 @@ class _PendingSyncBanner extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            const Icon(Icons.history, color: AppTheme.statusWarn, size: 18),
+            const Icon(AppIcons.history, color: AppTheme.statusWarn, size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -1307,7 +1306,7 @@ class _ResultBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final bg = success ? AppTheme.statusActiveBg : AppTheme.statusDangerBg;
     final fg = success ? AppTheme.statusActive : AppTheme.statusDanger;
-    final icon = success ? Icons.check_circle_outline : Icons.error_outline;
+    final icon = success ? AppIcons.checkCircle : AppIcons.error;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
@@ -1393,7 +1392,7 @@ class _InitialsAvatar extends StatelessWidget {
         shape: BoxShape.circle,
       ),
       child: Icon(
-        Icons.person_outline,
+        AppIcons.person,
         size: size * 0.5,
         color: AppTheme.inkSoft,
       ),
@@ -1419,15 +1418,15 @@ class _CheckResultView extends StatelessWidget {
     if (result.success) {
       bg = AppTheme.statusActiveBg;
       fg = AppTheme.statusActive;
-      icon = Icons.check_circle_outline;
+      icon = AppIcons.checkCircle;
     } else if (result.already || result.queued) {
       bg = AppTheme.statusWarnBg;
       fg = AppTheme.statusWarn;
-      icon = result.queued ? Icons.history : Icons.info_outline;
+      icon = result.queued ? AppIcons.history : AppIcons.info;
     } else {
       bg = AppTheme.statusDangerBg;
       fg = AppTheme.statusDanger;
-      icon = Icons.error_outline;
+      icon = AppIcons.error;
     }
 
     return Center(
@@ -1476,7 +1475,7 @@ class _CheckResultView extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () => onScanNext(),
-                icon: const Icon(Icons.qr_code_scanner, size: 18),
+                icon: const Icon(AppIcons.qrScanner, size: 18),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.ink,
                   foregroundColor: Colors.white,
@@ -1681,8 +1680,6 @@ class _RecentCheckInRow extends StatelessWidget {
     final member = checkIn['members'] as Map<String, dynamic>?;
     final firstName = member?['first_name'] as String? ?? '';
     final lastName = member?['last_name'] as String? ?? '';
-    final email = member?['email'] as String?;
-    final inits = initials(firstName, lastName);
     final method = checkIn['method'] as String? ?? 'manual';
     final checkedAt = checkIn['checked_in_at'] as String?;
     final checkedOut = checkIn['checked_out_at'] as String?;
@@ -1695,51 +1692,34 @@ class _RecentCheckInRow extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: AppTheme.activeBg,
-                child: Text(
-                  inits,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                    color: AppTheme.ink,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
+              InitialsAvatar(name: '$firstName $lastName'.trim(), size: 40),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       '$firstName $lastName'.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
                         color: AppTheme.ink,
                       ),
                     ),
-                    if (email != null)
-                      Text(
-                        email,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.inkHint,
-                        ),
-                      ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
                         _MethodDot(method: method),
-                        const SizedBox(width: 3),
+                        const SizedBox(width: 5),
                         Text(
                           isOpen
-                              ? 'In ${_formatTime(checkedAt)}'
-                              : 'In ${_formatTime(checkedAt)} · Out ${_formatTime(checkedOut)}',
+                              ? '${_formatTime(checkedAt)} · ${_methodLabel(method)}'
+                              : '${_formatTime(checkedAt)} · out ${_formatTime(checkedOut)}',
                           style: const TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.inkHint,
+                            fontSize: 12,
+                            color: AppTheme.inkSoft,
                           ),
                         ),
                       ],
@@ -1766,7 +1746,7 @@ class _RecentCheckInRow extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              Icons.logout,
+                              AppIcons.logout,
                               size: 12,
                               color: AppTheme.statusActive,
                             ),
@@ -1848,7 +1828,7 @@ class _HistoryPage extends StatelessWidget {
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(
-                      Icons.arrow_back,
+                      AppIcons.arrowBack,
                       size: 20,
                       color: AppTheme.ink,
                     ),
@@ -2018,7 +1998,7 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                 decoration: InputDecoration(
                   hintText: 'Search member name...',
                   prefixIcon: const Icon(
-                    Icons.search,
+                    AppIcons.search,
                     color: AppTheme.inkHint,
                     size: 20,
                   ),

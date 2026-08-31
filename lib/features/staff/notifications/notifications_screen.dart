@@ -16,40 +16,46 @@ class StaffNotification {
   final DateTime? readAt;
 
   StaffNotification.fromJson(Map<String, dynamic> json)
-      : id = json['id'] as String,
-        title = json['title'] as String,
-        body = json['body'] as String,
-        url = json['url'] as String?,
-        createdAt = DateTime.parse(json['created_at'] as String),
-        readAt = json['read_at'] != null
-            ? DateTime.parse(json['read_at'] as String)
-            : null;
+    : id = json['id'] as String,
+      title = json['title'] as String,
+      body = json['body'] as String,
+      url = json['url'] as String?,
+      createdAt = DateTime.parse(json['created_at'] as String),
+      readAt = json['read_at'] != null
+          ? DateTime.parse(json['read_at'] as String)
+          : null;
 }
 
 final staffNotificationsProvider =
     FutureProvider.autoDispose<List<StaffNotification>>((ref) async {
-  final client = ref.watch(supabaseProvider);
-  final user = client.auth.currentUser;
-  if (user == null) return [];
+      final client = ref.watch(supabaseProvider);
+      final user = client.auth.currentUser;
+      if (user == null) return [];
 
-  final rows = await client
-      .from('staff_notifications')
-      .select()
-      .eq('user_id', user.id)
-      .order('created_at', ascending: false)
-      .limit(50);
+      final rows = await client
+          .from('staff_notifications')
+          .select()
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(50);
 
-  return (rows as List)
-      .map((r) => StaffNotification.fromJson(r as Map<String, dynamic>))
-      .toList();
-});
+      return (rows as List)
+          .map((r) => StaffNotification.fromJson(r as Map<String, dynamic>))
+          .toList();
+    });
 
-final unreadNotificationCountProvider = FutureProvider.autoDispose<int>((ref) async {
+final unreadNotificationCountProvider = FutureProvider.autoDispose<int>((
+  ref,
+) async {
   final notifications = await ref.watch(staffNotificationsProvider.future);
   return notifications.where((n) => n.readAt == null).length;
 });
 
-void _openNotification(BuildContext context, WidgetRef ref, StaffNotification n) {
+void _openNotification(
+  BuildContext context,
+  WidgetRef ref,
+  StaffNotification n,
+) {
   if (n.readAt == null) {
     ref
         .read(supabaseProvider)
@@ -57,8 +63,8 @@ void _openNotification(BuildContext context, WidgetRef ref, StaffNotification n)
         .update({'read_at': DateTime.now().toIso8601String()})
         .eq('id', n.id)
         .then((_) {
-      if (context.mounted) ref.invalidate(staffNotificationsProvider);
-    });
+          if (context.mounted) ref.invalidate(staffNotificationsProvider);
+        });
   }
 
   final url = n.url;
@@ -84,30 +90,38 @@ class NotificationsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Notifications'), leading: const BackButton()),
-      body: ResponsiveContent(child: notifications.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Failed to load: $e')),
-        data: (items) {
-          if (items.isEmpty) {
-            return const Center(
-              child: Text('No notifications yet', style: TextStyle(color: AppTheme.inkSoft)),
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(staffNotificationsProvider),
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, i) => _NotificationTile(
-                notification: items[i],
-                onTap: () => _openNotification(context, ref, items[i]),
+      appBar: AppBar(
+        title: const Text('Notifications'),
+        leading: const BackButton(),
+      ),
+      body: ResponsiveContent(
+        child: notifications.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(child: Text('Failed to load: $e')),
+          data: (items) {
+            if (items.isEmpty) {
+              return const Center(
+                child: Text(
+                  'No notifications yet',
+                  style: TextStyle(color: AppTheme.inkSoft),
+                ),
+              );
+            }
+            return RefreshIndicator(
+              onRefresh: () async => ref.invalidate(staffNotificationsProvider),
+              child: ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, i) => _NotificationTile(
+                  notification: items[i],
+                  onTap: () => _openNotification(context, ref, items[i]),
+                ),
               ),
-            ),
-          );
-        },
-      )),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -136,7 +150,9 @@ class _NotificationTile extends StatelessWidget {
           color: AppTheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: unread ? AppTheme.accent.withValues(alpha: 0.25) : AppTheme.border,
+            color: unread
+                ? AppTheme.accent.withValues(alpha: 0.25)
+                : AppTheme.border,
           ),
         ),
         child: Row(
@@ -147,7 +163,10 @@ class _NotificationTile extends StatelessWidget {
                 margin: const EdgeInsets.only(top: 6, right: 10),
                 width: 8,
                 height: 8,
-                decoration: const BoxDecoration(color: AppTheme.statusDanger, shape: BoxShape.circle),
+                decoration: const BoxDecoration(
+                  color: AppTheme.statusDanger,
+                  shape: BoxShape.circle,
+                ),
               ),
             Expanded(
               child: Column(
@@ -162,11 +181,20 @@ class _NotificationTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(notification.body, style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+                  Text(
+                    notification.body,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Text(
                     _relativeTime(notification.createdAt),
-                    style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.inkHint,
+                    ),
                   ),
                 ],
               ),

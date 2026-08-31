@@ -5,6 +5,7 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/app_icons.dart';
 
 class IosCustomPaywall extends StatefulWidget {
   const IosCustomPaywall({super.key});
@@ -46,7 +47,8 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'Could not load plans. Check your connection and try again.';
+        _errorMessage =
+            'Could not load plans. Check your connection and try again.';
         _loadingOfferings = false;
       });
     }
@@ -54,7 +56,10 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
 
   Future<void> _purchase() async {
     if (_selected == null || _purchasing) return;
-    setState(() { _purchasing = true; _errorMessage = null; });
+    setState(() {
+      _purchasing = true;
+      _errorMessage = null;
+    });
     try {
       await Purchases.purchasePackage(_selected!);
       // customerInfoProvider stream auto-updates → StaffShell gate drops
@@ -62,16 +67,24 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
       if (!mounted) return;
       // User cancelled — no error message needed
       if (e.code != PurchasesErrorCode.purchaseCancelledError) {
-        setState(() { _errorMessage = e.message; });
+        setState(() {
+          _errorMessage = e.message;
+        });
       }
     } finally {
-      if (mounted) setState(() { _purchasing = false; });
+      if (mounted)
+        setState(() {
+          _purchasing = false;
+        });
     }
   }
 
   Future<void> _restore() async {
     if (_restoring) return;
-    setState(() { _restoring = true; _errorMessage = null; });
+    setState(() {
+      _restoring = true;
+      _errorMessage = null;
+    });
     try {
       final info = await Purchases.restorePurchases();
       if (!mounted) return;
@@ -84,9 +97,14 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
       // If hasAccess → stream updates → gate drops automatically
     } on PurchasesError catch (e) {
       if (!mounted) return;
-      setState(() { _errorMessage = e.message; });
+      setState(() {
+        _errorMessage = e.message;
+      });
     } finally {
-      if (mounted) setState(() { _restoring = false; });
+      if (mounted)
+        setState(() {
+          _restoring = false;
+        });
     }
   }
 
@@ -94,9 +112,9 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
     final uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open link')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not open link')));
       }
     }
   }
@@ -107,31 +125,46 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
       child: _loadingOfferings
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null && _monthly == null && _annual == null
-              ? _ErrorState(message: _errorMessage!, onRetry: _loadOfferings)
-              : _PaywallBody(
-                  monthly: _monthly,
-                  annual: _annual,
-                  selected: _selected,
-                  onSelect: (pkg) => setState(() => _selected = pkg),
-                  onPurchase: _purchase,
-                  onRestore: _restore,
-                  purchasing: _purchasing,
-                  restoring: _restoring,
-                  errorMessage: _errorMessage,
-                  onOpenUrl: _openUrl,
-                ),
+          ? _ErrorState(message: _errorMessage!, onRetry: _loadOfferings)
+          : _PaywallBody(
+              monthly: _monthly,
+              annual: _annual,
+              selected: _selected,
+              onSelect: (pkg) => setState(() => _selected = pkg),
+              onPurchase: _purchase,
+              onRestore: _restore,
+              purchasing: _purchasing,
+              restoring: _restoring,
+              errorMessage: _errorMessage,
+              onOpenUrl: _openUrl,
+            ),
     );
   }
 }
 
 // Benefit-first, distinct icon per line — matches the Android paywall's hero.
 const _kIosFeatures = [
-  (icon: Icons.chat_bubble_outline, text: 'We remind your members before their fees are due — automatically'),
-  (icon: Icons.account_balance_wallet_outlined, text: 'Know exactly who owes you money, today'),
-  (icon: Icons.show_chart_rounded, text: 'See what you collected this month without opening a register'),
-  (icon: Icons.qr_code_2_rounded, text: 'Members check in by QR — works even when your internet doesn\'t'),
-  (icon: Icons.all_inclusive_rounded, text: 'Unlimited members, check-ins and staff logins'),
-  (icon: Icons.support_agent_outlined, text: 'Priority support'),
+  (
+    icon: AppIcons.chat,
+    text: 'We remind your members before their fees are due — automatically',
+  ),
+  (
+    icon: AppIcons.wallet,
+    text: 'Know exactly who owes you money, today',
+  ),
+  (
+    icon: AppIcons.showChart,
+    text: 'See what you collected this month without opening a register',
+  ),
+  (
+    icon: AppIcons.qrCode,
+    text: 'Members check in by QR — works even when your internet doesn\'t',
+  ),
+  (
+    icon: AppIcons.allInclusive,
+    text: 'Unlimited members, check-ins and staff logins',
+  ),
+  (icon: AppIcons.supportAgent, text: 'Priority support'),
 ];
 
 // ── Paywall body ──────────────────────────────────────────────────────────────
@@ -183,7 +216,8 @@ class _PaywallBody extends StatelessWidget {
                   selected: selected,
                   onSelect: onSelect,
                 ),
-                if (monthly != null && annual != null) const SizedBox(height: 14),
+                if (monthly != null && annual != null)
+                  const SizedBox(height: 14),
                 if (selected != null) _IosPricePanel(package: selected!),
 
                 // ── Error ────────────────────────────────────────────────────
@@ -198,7 +232,9 @@ class _PaywallBody extends StatelessWidget {
                     child: Text(
                       errorMessage!,
                       style: const TextStyle(
-                          fontSize: 13, color: AppTheme.statusDanger),
+                        fontSize: 13,
+                        color: AppTheme.statusDanger,
+                      ),
                     ),
                   ),
                 ],
@@ -209,13 +245,16 @@ class _PaywallBody extends StatelessWidget {
                 SizedBox(
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: (purchasing || selected == null) ? null : onPurchase,
+                    onPressed: (purchasing || selected == null)
+                        ? null
+                        : onPurchase,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.accent,
                       foregroundColor: AppTheme.accentFg,
                       disabledBackgroundColor: AppTheme.surface2,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                       elevation: 0,
                     ),
                     child: purchasing
@@ -305,7 +344,11 @@ class _IosHero extends StatelessWidget {
             ),
             child: const Text(
               'GymCRM Pro',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.accentFg),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.accentFg,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -322,27 +365,29 @@ class _IosHero extends StatelessWidget {
           const SizedBox(height: 22),
           Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
           const SizedBox(height: 18),
-          ...features.map((f) => Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(f.icon, size: 17, color: AppTheme.mintOnDark),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        f.text,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          color: AppTheme.onDark,
-                          fontWeight: FontWeight.w500,
-                          height: 1.4,
-                        ),
+          ...features.map(
+            (f) => Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(f.icon, size: 17, color: AppTheme.mintOnDark),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      f.text,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: AppTheme.onDark,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
                       ),
                     ),
-                  ],
-                ),
-              )),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -446,27 +491,42 @@ class _IosPricePanel extends StatelessWidget {
             children: [
               Text(
                 package.storeProduct.priceString,
-                style: AppTheme.numberStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppTheme.ink),
+                style: AppTheme.numberStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
               ),
               const SizedBox(width: 6),
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
                   _isAnnual ? '/ year' : '/ month',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.inkSoft),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.inkSoft,
+                  ),
                 ),
               ),
               if (_isAnnual) ...[
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.accentSoft,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
                     'Best value',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.accent),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.accent,
+                    ),
                   ),
                 ),
               ],
@@ -477,7 +537,11 @@ class _IosPricePanel extends StatelessWidget {
             _isAnnual
                 ? '$_perMonthPrice — billed annually'
                 : 'Cancel anytime from your Apple ID settings.',
-            style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppTheme.inkSoft,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -493,33 +557,41 @@ class _TrustFooterRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const items = [
-      (icon: Icons.close_rounded, text: 'Cancel anytime from your Apple ID settings'),
-      (icon: Icons.lock_outline, text: 'Your member data is never deleted, even if you cancel'),
+      (
+        icon: AppIcons.closeRounded,
+        text: 'Cancel anytime from your Apple ID settings',
+      ),
+      (
+        icon: AppIcons.lock,
+        text: 'Your member data is never deleted, even if you cancel',
+      ),
     ];
 
     return Column(
       children: items
-          .map((i) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(i.icon, size: 15, color: AppTheme.statusActive),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        i.text,
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: AppTheme.inkSoft,
-                          fontWeight: FontWeight.w600,
-                          height: 1.4,
-                        ),
+          .map(
+            (i) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(i.icon, size: 15, color: AppTheme.statusActive),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      i.text,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppTheme.inkSoft,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
                       ),
                     ),
-                  ],
-                ),
-              ))
+                  ),
+                ],
+              ),
+            ),
+          )
           .toList(),
     );
   }
@@ -586,7 +658,11 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.wifi_off_outlined, size: 48, color: AppTheme.inkHint),
+          const Icon(
+            AppIcons.wifiOff,
+            size: 48,
+            color: AppTheme.inkHint,
+          ),
           const SizedBox(height: 16),
           Text(
             message,
@@ -594,10 +670,7 @@ class _ErrorState extends StatelessWidget {
             style: const TextStyle(fontSize: 14, color: AppTheme.inkSoft),
           ),
           const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: onRetry,
-            child: const Text('Try again'),
-          ),
+          ElevatedButton(onPressed: onRetry, child: const Text('Try again')),
         ],
       ),
     );

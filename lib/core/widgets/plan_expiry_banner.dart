@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../billing/billing_access.dart';
 import '../theme/app_theme.dart';
 import '../utils/platform_info.dart';
+import '../theme/app_icons.dart';
 
 const _kDismissedKeyPrefix = 'plan_expiry_popup_dismissed_';
 
@@ -41,11 +42,14 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
     if (isIOS) return;
 
     // Never show this the moment a brand-new gym lands on its own dashboard —
-    // with a 1-day trial, "days left <= 3" is true from the very first
+    // with a 3-day trial, "days left <= 3" is true from the very first
     // second, so this used to be the first thing a new owner ever saw.
-    final createdAt = DateTime.tryParse(widget.gym['created_at'] as String? ?? '');
+    final createdAt = DateTime.tryParse(
+      widget.gym['created_at'] as String? ?? '',
+    );
     if (createdAt != null &&
-        DateTime.now().toUtc().difference(createdAt.toUtc()) < const Duration(hours: 1)) {
+        DateTime.now().toUtc().difference(createdAt.toUtc()) <
+            const Duration(hours: 1)) {
       return;
     }
 
@@ -58,7 +62,9 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
 
     if (!mounted) return;
 
-    final isTrial = widget.gym['trial_ends_at'] != null && widget.gym['plan_expires_at'] == null;
+    final isTrial =
+        widget.gym['trial_ends_at'] != null &&
+        widget.gym['plan_expires_at'] == null;
     final expired = daysLeft < 0;
 
     final String title;
@@ -70,13 +76,21 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
       title = isTrial ? 'Trial ends today' : 'Plan expires today';
       body = 'Renew now to keep everything running smoothly.';
     } else {
-      title = isTrial ? 'Trial ends in $daysLeft day${daysLeft == 1 ? '' : 's'}' : 'Plan expires in $daysLeft day${daysLeft == 1 ? '' : 's'}';
+      title = isTrial
+          ? 'Trial ends in $daysLeft day${daysLeft == 1 ? '' : 's'}'
+          : 'Plan expires in $daysLeft day${daysLeft == 1 ? '' : 's'}';
       body = 'Renew soon to avoid any interruption.';
     }
 
-    final tint = expired || daysLeft == 0 ? AppTheme.statusDanger : AppTheme.statusWarn;
-    final tintBg = expired || daysLeft == 0 ? AppTheme.statusDangerBg : AppTheme.statusWarnBg;
-    final icon = expired || daysLeft == 0 ? Icons.error_outline : Icons.schedule;
+    final tint = expired || daysLeft == 0
+        ? AppTheme.statusDanger
+        : AppTheme.statusWarn;
+    final tintBg = expired || daysLeft == 0
+        ? AppTheme.statusDangerBg
+        : AppTheme.statusWarnBg;
+    final icon = expired || daysLeft == 0
+        ? AppIcons.error
+        : AppIcons.schedule;
 
     showDialog(
       context: context,
@@ -91,15 +105,32 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
               Container(
                 width: 56,
                 height: 56,
-                decoration: BoxDecoration(color: tintBg, borderRadius: BorderRadius.circular(18)),
+                decoration: BoxDecoration(
+                  color: tintBg,
+                  borderRadius: BorderRadius.circular(18),
+                ),
                 child: Icon(icon, size: 26, color: tint),
               ),
               const SizedBox(height: 16),
-              Text(title, textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.ink)),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text(body, textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13.5, color: AppTheme.inkSoft, height: 1.4)),
+              Text(
+                body,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  color: AppTheme.inkSoft,
+                  height: 1.4,
+                ),
+              ),
               const SizedBox(height: 22),
               Row(
                 children: [
@@ -108,10 +139,19 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
                       onTap: () => Navigator.pop(dialogContext),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 13),
-                        decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(14)),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface2,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                         alignment: Alignment.center,
-                        child: const Text('Maybe later',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                        child: const Text(
+                          'Maybe later',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.ink,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -124,10 +164,19 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 13),
-                        decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(14)),
+                        decoration: BoxDecoration(
+                          color: tint,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                         alignment: Alignment.center,
-                        child: const Text('Renew now',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+                        child: const Text(
+                          'Renew now',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
                       ),
                     ),
                   ),

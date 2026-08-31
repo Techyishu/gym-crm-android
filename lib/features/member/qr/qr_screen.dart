@@ -1,12 +1,17 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gal/gal.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 /// Outcome of a scan, shown on a confirmation screen that replaces the camera.
 class _ScanOutcome {
@@ -40,10 +45,51 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
   // leaving autoStart on races with it (mobile_scanner throws instead of
   // queuing when start() is called while a previous start() is still
   // resolving).
-  final MobileScannerController _scanner = MobileScannerController(autoStart: false);
+  final MobileScannerController _scanner = MobileScannerController(
+    autoStart: false,
+  );
   StreamSubscription<BarcodeCapture>? _barcodeSub;
   bool _processing = false;
   _ScanOutcome? _outcome;
+
+  // Capture target for "Save to phone" — the QR card, not the whole screen.
+  final _qrCaptureKey = GlobalKey();
+  bool _savingQr = false;
+
+  Future<void> _saveQrToGallery(String memberName) async {
+    setState(() => _savingQr = true);
+    try {
+      final boundary =
+          _qrCaptureKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final image = await boundary.toImage(pixelRatio: 3);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = byteData?.buffer.asUint8List();
+      if (bytes == null) return;
+      final safeName = memberName.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
+      await Gal.putImageBytes(
+        bytes,
+        album: 'GymCRM',
+        name: 'member_qr_$safeName',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Saved to gallery')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save the QR code. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingQr = false);
+    }
+  }
 
   @override
   void initState() {
@@ -105,18 +151,22 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
 
     final token = _extractToken(raw);
     if (token == null) {
-      setState(() => _outcome = const _ScanOutcome(
-            success: false,
-            title: 'Not a gym QR code',
-            subtitle: "Point the camera at your gym's check-in QR code.",
-          ));
+      setState(
+        () => _outcome = const _ScanOutcome(
+          success: false,
+          title: 'Not a gym QR code',
+          subtitle: "Point the camera at your gym's check-in QR code.",
+        ),
+      );
       return;
     }
 
     setState(() => _processing = true);
     try {
-      final res = await Supabase.instance.client
-          .rpc('self_checkin', params: {'p_token': token});
+      final res = await Supabase.instance.client.rpc(
+        'self_checkin',
+        params: {'p_token': token},
+      );
       final map = (res as Map).cast<String, dynamic>();
       final member = (map['member'] as Map?)?.cast<String, dynamic>();
       final name = member != null
@@ -129,35 +179,43 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
         final checkedInAt = map['checked_in_at'] as String?;
         final checkedOutAt = map['checked_out_at'] as String?;
         if (action == 'checkout') {
-          setState(() => _outcome = _ScanOutcome(
-                success: true,
-                checkout: true,
-                title: name.isNotEmpty ? 'See you, $name!' : 'Checked out!',
-                subtitle: gym,
-                checkedInAt: checkedInAt,
-                checkedOutAt: checkedOutAt,
-              ));
+          setState(
+            () => _outcome = _ScanOutcome(
+              success: true,
+              checkout: true,
+              title: name.isNotEmpty ? 'See you, $name!' : 'Checked out!',
+              subtitle: gym,
+              checkedInAt: checkedInAt,
+              checkedOutAt: checkedOutAt,
+            ),
+          );
         } else {
-          setState(() => _outcome = _ScanOutcome(
-                success: true,
-                title: name.isNotEmpty ? 'Welcome, $name!' : 'Checked in!',
-                subtitle: gym,
-                checkedInAt: checkedInAt,
-              ));
+          setState(
+            () => _outcome = _ScanOutcome(
+              success: true,
+              title: name.isNotEmpty ? 'Welcome, $name!' : 'Checked in!',
+              subtitle: gym,
+              checkedInAt: checkedInAt,
+            ),
+          );
         }
       } else {
-        setState(() => _outcome = _ScanOutcome(
-              success: false,
-              title: map['error'] as String? ?? 'Check-in failed',
-              subtitle: map['reason'] as String?,
-            ));
+        setState(
+          () => _outcome = _ScanOutcome(
+            success: false,
+            title: map['error'] as String? ?? 'Check-in failed',
+            subtitle: map['reason'] as String?,
+          ),
+        );
       }
     } catch (e) {
-      setState(() => _outcome = _ScanOutcome(
-            success: false,
-            title: 'Something went wrong',
-            subtitle: '$e',
-          ));
+      setState(
+        () => _outcome = _ScanOutcome(
+          success: false,
+          title: 'Something went wrong',
+          subtitle: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _processing = false);
     }
@@ -180,7 +238,10 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
             // Leaving the scan tab: drop any result so returning starts fresh.
             if (_outcome != null) _scanAgain();
           },
-          tabs: const [Tab(text: 'My QR Code'), Tab(text: 'Scan Gym QR')],
+          tabs: const [
+            Tab(text: 'My QR Code'),
+            Tab(text: 'Scan Gym QR'),
+          ],
         ),
       ),
       body: TabBarView(
@@ -200,116 +261,171 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
       error: (e, _) => const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
-          child: Text('Could not load your QR code',
-              style: TextStyle(color: AppTheme.textSecondary)),
+          child: Text(
+            'Could not load your QR code',
+            style: TextStyle(color: AppTheme.onDarkSoft),
+          ),
         ),
       ),
       data: (m) {
         final memberId = m?['id'] as String? ?? '';
-        return Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      if (memberId.isNotEmpty)
-                        QrImageView(
-                          data: memberId,
-                          version: QrVersions.auto,
-                          size: 200,
-                          eyeStyle: const QrEyeStyle(
-                            eyeShape: QrEyeShape.square,
-                            color: AppTheme.textPrimary,
-                          ),
-                          dataModuleStyle: const QrDataModuleStyle(
-                            dataModuleShape: QrDataModuleShape.square,
-                            color: AppTheme.textPrimary,
-                          ),
-                        )
-                      else
-                        const SizedBox(
-                          width: 200,
-                          height: 200,
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Scan to Check In',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Show this QR to gym staff at the front desk',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                if (memberId.isNotEmpty) ...[
-                  GestureDetector(
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: memberId));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Member ID copied'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryLight,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              memberId,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 11,
-                                color: AppTheme.primary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Icon(Icons.copy, size: 14, color: AppTheme.primary),
-                        ],
-                      ),
+        final firstName = m?['first_name'] as String? ?? '';
+        final lastName = m?['last_name'] as String? ?? '';
+        final fullName = '$firstName $lastName'.trim();
+        final customId = m?['custom_id'] as String?;
+        final memberships = (m?['memberships'] as List?) ?? const [];
+        final currentMs = memberships.isNotEmpty
+            ? memberships.first as Map<String, dynamic>
+            : null;
+        final planName =
+            (currentMs?['membership_plans'] as Map<String, dynamic>?)?['name']
+                as String?;
+        final endsAt = currentMs?['ends_at'] as String?;
+
+        final idLine = [
+          if (customId != null && customId.isNotEmpty)
+            'Member ID $customId'
+          else
+            'Member',
+          if (planName != null && planName.isNotEmpty) planName,
+        ].join(' · ');
+
+        return ColoredBox(
+          color: AppTheme.darkCard,
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'Your check-in code',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.onDark,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Tap to copy Member ID',
-                    style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                  const SizedBox(height: 20),
+                  RepaintBoundary(
+                    key: _qrCaptureKey,
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: AppTheme.onDark,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: memberId.isEmpty
+                          ? const SizedBox(
+                              width: 220,
+                              height: 220,
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          : QrImageView(
+                              data: memberId,
+                              version: QrVersions.auto,
+                              size: 220,
+                              eyeStyle: const QrEyeStyle(
+                                eyeShape: QrEyeShape.square,
+                                color: AppTheme.darkCard,
+                              ),
+                              dataModuleStyle: const QrDataModuleStyle(
+                                dataModuleShape: QrDataModuleShape.square,
+                                color: AppTheme.darkCard,
+                              ),
+                            ),
+                    ),
                   ),
+                  const SizedBox(height: 20),
+                  if (fullName.isNotEmpty)
+                    Text(
+                      fullName,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.onDark,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  Text(
+                    idLine,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.onDarkSoft,
+                    ),
+                  ),
+                  if (endsAt != null && endsAt.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Active till ${formatDateFromString(endsAt)}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppTheme.onDarkSoft,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  if (memberId.isNotEmpty)
+                    GestureDetector(
+                      onTap: _savingQr
+                          ? null
+                          : () => _saveQrToGallery(
+                              fullName.isEmpty ? 'member' : fullName,
+                            ),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.darkCard2,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _savingQr ? AppIcons.hourglass : AppIcons.iosShare,
+                              size: 17,
+                              color: AppTheme.onDark,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _savingQr ? 'Saving…' : 'Save to phone',
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.onDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  if (memberId.isNotEmpty)
+                    GestureDetector(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: memberId));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Member ID copied'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      behavior: HitTestBehavior.opaque,
+                      child: const Text(
+                        'Tap to copy member ID',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppTheme.onDarkSoft,
+                        ),
+                      ),
+                    ),
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -375,15 +491,15 @@ class _ScanResultView extends StatelessWidget {
     if (outcome.checkout) {
       bg = AppTheme.statusWarnBg;
       fg = AppTheme.statusWarn;
-      icon = Icons.logout;
+      icon = AppIcons.logout;
     } else if (outcome.success) {
       bg = AppTheme.statusActiveBg;
       fg = AppTheme.statusActive;
-      icon = Icons.check_circle_outline;
+      icon = AppIcons.checkCircle;
     } else {
       bg = AppTheme.statusDangerBg;
       fg = AppTheme.statusDanger;
-      icon = Icons.error_outline;
+      icon = AppIcons.error;
     }
 
     String fmt(String iso) {
@@ -428,7 +544,10 @@ class _ScanResultView extends StatelessWidget {
             if (outcome.success) ...[
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   borderRadius: BorderRadius.circular(12),
@@ -459,7 +578,7 @@ class _ScanResultView extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () => onScanAgain(),
-                icon: const Icon(Icons.qr_code_scanner, size: 18),
+                icon: const Icon(AppIcons.qrScanner, size: 18),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.ink,
                   foregroundColor: Colors.white,
@@ -468,8 +587,10 @@ class _ScanResultView extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                label: const Text('Scan again',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
+                label: const Text(
+                  'Scan again',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
@@ -483,18 +604,29 @@ class _TimeRow extends StatelessWidget {
   final String label;
   final String time;
   final Color color;
-  const _TimeRow({required this.label, required this.time, required this.color});
+  const _TimeRow({
+    required this.label,
+    required this.time,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label,
-            style: const TextStyle(fontSize: 12, color: AppTheme.inkHint)),
-        Text(time,
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
+        ),
+        Text(
+          time,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
       ],
     );
   }

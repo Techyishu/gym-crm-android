@@ -43,7 +43,8 @@ class Member {
     // id is used for routing — throw rather than silently produce an empty-string
     // ID that would cause subtle navigation bugs downstream.
     final id = j['id'] as String?;
-    if (id == null || id.isEmpty) throw FormatException('Member row missing id');
+    if (id == null || id.isEmpty)
+      throw FormatException('Member row missing id');
 
     return Member(
       id: id,
@@ -68,20 +69,22 @@ class Member {
         final maps = list.cast<Map<String, dynamic>>();
         // Prefer the active membership; fall back to first if none are active.
         final active = maps.where((ms) => ms['status'] == 'active').toList();
-        return Membership.fromJson(active.isNotEmpty ? active.first : maps.first);
+        return Membership.fromJson(
+          active.isNotEmpty ? active.first : maps.first,
+        );
       })(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'gym_id': gymId,
-        'first_name': firstName,
-        'last_name': lastName,
-        'email': email,
-        if (phone != null) 'phone': phone,
-        if (notes != null) 'notes': notes,
-        'status': status,
-      };
+    'gym_id': gymId,
+    'first_name': firstName,
+    'last_name': lastName,
+    'email': email,
+    if (phone != null) 'phone': phone,
+    if (notes != null) 'notes': notes,
+    'status': status,
+  };
 }
 
 class Membership {
@@ -109,7 +112,8 @@ class Membership {
 
   factory Membership.fromJson(Map<String, dynamic> j) {
     final id = j['id'] as String?;
-    if (id == null || id.isEmpty) throw FormatException('Membership row missing id');
+    if (id == null || id.isEmpty)
+      throw FormatException('Membership row missing id');
 
     return Membership(
       id: id,
@@ -121,7 +125,8 @@ class Membership {
       discountAmount: (j['discount_amount'] as num?)?.toDouble() ?? 0.0,
       plan: j['membership_plans'] != null
           ? MembershipPlan.fromJson(
-              j['membership_plans'] as Map<String, dynamic>)
+              j['membership_plans'] as Map<String, dynamic>,
+            )
           : null,
     );
   }
@@ -157,12 +162,18 @@ class MembershipPlan {
   // plan (see 2026-08-26 quarterly/annual-billed-as-monthly incident).
   int get resolvedIntervalMonths =>
       billingIntervalMonths ??
-      const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[billingInterval] ??
+      const {
+        'monthly': 1,
+        'quarterly': 3,
+        'biannual': 6,
+        'annual': 12,
+      }[billingInterval] ??
       1;
 
   factory MembershipPlan.fromJson(Map<String, dynamic> j) {
     final id = j['id'] as String?;
-    if (id == null || id.isEmpty) throw FormatException('MembershipPlan row missing id');
+    if (id == null || id.isEmpty)
+      throw FormatException('MembershipPlan row missing id');
 
     return MembershipPlan(
       id: id,
@@ -178,12 +189,12 @@ class MembershipPlan {
   }
 
   Map<String, dynamic> toJson() => {
-        'gym_id': gymId,
-        'name': name,
-        'price': price,
-        'billing_interval': billingInterval,
-        'features': features,
-        if (maxClasses != null) 'max_classes': maxClasses,
-        'is_active': isActive,
-      };
+    'gym_id': gymId,
+    'name': name,
+    'price': price,
+    'billing_interval': billingInterval,
+    'features': features,
+    if (maxClasses != null) 'max_classes': maxClasses,
+    'is_active': isActive,
+  };
 }

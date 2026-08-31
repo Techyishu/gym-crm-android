@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_icons.dart';
 
-/// Shared pieces of the login/signup visual language: pill inputs, the
-/// gradient CTA, the Google button and small field label — pure styling,
-/// reused across auth screens so both stay visually consistent.
+/// Shared pieces of the login/signup visual language: inputs, the primary
+/// CTA, the Google button and small field label — pure styling, reused across
+/// auth screens so both stay visually consistent.
+///
+/// Radii and the flat teal fill deliberately match the in-app components
+/// (16px cards, [AppTheme.accent] actions) so signing in doesn't feel like a
+/// different product from the dashboard it lands on.
 
 class AuthFieldLabel extends StatelessWidget {
   final String text;
@@ -72,11 +77,26 @@ class AuthPillField extends StatelessWidget {
         prefixIcon: prefixIcon,
         prefixIconConstraints: prefixIconConstraints,
         suffixIcon: suffixIcon,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: AppTheme.border)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: AppTheme.border)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: AppTheme.accent, width: 1.5)),
-        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: AppTheme.error)),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 15,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppTheme.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppTheme.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppTheme.accent, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppTheme.error),
+        ),
       ),
     );
   }
@@ -92,7 +112,14 @@ class AuthOrDivider extends StatelessWidget {
         const Expanded(child: Divider()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text('OR', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+          child: Text(
+            'OR',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
         const Expanded(child: Divider()),
       ],
@@ -104,7 +131,12 @@ class AuthGoogleButton extends StatelessWidget {
   final bool loading;
   final String label;
   final VoidCallback? onPressed;
-  const AuthGoogleButton({super.key, required this.loading, required this.onPressed, this.label = 'Continue with Google'});
+  const AuthGoogleButton({
+    super.key,
+    required this.loading,
+    required this.onPressed,
+    this.label = 'Continue with Google',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -114,14 +146,20 @@ class AuthGoogleButton extends StatelessWidget {
       child: OutlinedButton.icon(
         onPressed: onPressed,
         icon: loading
-            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
             : const _GoogleIcon(),
         label: Text(label),
         style: OutlinedButton.styleFrom(
           backgroundColor: Colors.white,
           foregroundColor: AppTheme.textPrimary,
           side: BorderSide(color: AppTheme.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),
       ),
@@ -133,7 +171,12 @@ class AuthGradientButton extends StatelessWidget {
   final String label;
   final bool loading;
   final VoidCallback? onPressed;
-  const AuthGradientButton({super.key, required this.label, required this.loading, required this.onPressed});
+  const AuthGradientButton({
+    super.key,
+    required this.label,
+    required this.loading,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -141,22 +184,35 @@ class AuthGradientButton extends StatelessWidget {
       width: double.infinity,
       height: 54,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: onPressed == null
-            ? null
-            : const LinearGradient(colors: [AppTheme.accent, AppTheme.accentDark]),
-        color: onPressed == null ? AppTheme.border : null,
+        borderRadius: BorderRadius.circular(16),
+        color: onPressed == null ? AppTheme.border : AppTheme.accent,
+        boxShadow: onPressed == null ? null : AppTheme.accentShadow,
       ),
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         child: loading
-            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-            : Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
       ),
     );
   }
@@ -187,7 +243,7 @@ class AuthLogoBadge extends StatelessWidget {
         color: AppTheme.accent,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: const Icon(Icons.fitness_center, color: Colors.white, size: 22),
+      child: const Icon(AppIcons.fitnessActive, color: Colors.white, size: 22),
     );
   }
 }

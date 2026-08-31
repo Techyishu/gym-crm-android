@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────────
 
@@ -12,28 +13,33 @@ class _ExData {
   final TextEditingController weight;
   final TextEditingController notes;
 
-  _ExData({String n = '', String s = '', String r = '', String w = '', String nt = ''})
-      : name = TextEditingController(text: n),
-        sets = TextEditingController(text: s),
-        reps = TextEditingController(text: r),
-        weight = TextEditingController(text: w),
-        notes = TextEditingController(text: nt);
+  _ExData({
+    String n = '',
+    String s = '',
+    String r = '',
+    String w = '',
+    String nt = '',
+  }) : name = TextEditingController(text: n),
+       sets = TextEditingController(text: s),
+       reps = TextEditingController(text: r),
+       weight = TextEditingController(text: w),
+       notes = TextEditingController(text: nt);
 
   factory _ExData.fromJson(Map<String, dynamic> j) => _ExData(
-        n: j['name'] as String? ?? '',
-        s: j['sets'] as String? ?? '',
-        r: j['reps'] as String? ?? '',
-        w: j['weight'] as String? ?? '',
-        nt: j['notes'] as String? ?? '',
-      );
+    n: j['name'] as String? ?? '',
+    s: j['sets'] as String? ?? '',
+    r: j['reps'] as String? ?? '',
+    w: j['weight'] as String? ?? '',
+    nt: j['notes'] as String? ?? '',
+  );
 
   Map<String, dynamic> toJson() => {
-        'name': name.text.trim(),
-        'sets': sets.text.trim(),
-        'reps': reps.text.trim(),
-        'weight': weight.text.trim(),
-        'notes': notes.text.trim(),
-      };
+    'name': name.text.trim(),
+    'sets': sets.text.trim(),
+    'reps': reps.text.trim(),
+    'weight': weight.text.trim(),
+    'notes': notes.text.trim(),
+  };
 
   void dispose() {
     name.dispose();
@@ -49,23 +55,23 @@ class _DayData {
   final List<_ExData> exercises;
 
   _DayData({required String labelText, List<_ExData>? exercises})
-      : label = TextEditingController(text: labelText),
-        exercises = exercises ?? [];
+    : label = TextEditingController(text: labelText),
+      exercises = exercises ?? [];
 
   factory _DayData.fromJson(Map<String, dynamic> j) => _DayData(
-        labelText: j['label'] as String? ?? '',
-        exercises: ((j['exercises'] as List?)?.cast<Map<String, dynamic>>() ?? [])
-            .map(_ExData.fromJson)
-            .toList(),
-      );
+    labelText: j['label'] as String? ?? '',
+    exercises: ((j['exercises'] as List?)?.cast<Map<String, dynamic>>() ?? [])
+        .map(_ExData.fromJson)
+        .toList(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'label': label.text.trim(),
-        'exercises': exercises
-            .where((e) => e.name.text.trim().isNotEmpty)
-            .map((e) => e.toJson())
-            .toList(),
-      };
+    'label': label.text.trim(),
+    'exercises': exercises
+        .where((e) => e.name.text.trim().isNotEmpty)
+        .map((e) => e.toJson())
+        .toList(),
+  };
 
   void dispose() {
     label.dispose();
@@ -100,7 +106,13 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
   bool _saving = false;
 
   static const _weekLabels = [
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
   ];
 
   @override
@@ -111,7 +123,10 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
     _type = p?['type'] as String? ?? 'daily';
     final rawDays = p?['days'] as List?;
     if (rawDays != null && rawDays.isNotEmpty) {
-      _days = rawDays.cast<Map<String, dynamic>>().map(_DayData.fromJson).toList();
+      _days = rawDays
+          .cast<Map<String, dynamic>>()
+          .map(_DayData.fromJson)
+          .toList();
     } else {
       _days = _buildDefaultDays(_type);
     }
@@ -122,9 +137,12 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
       return _weekLabels.map((l) => _DayData(labelText: l)).toList();
     }
     if (type == 'monthly') {
-      return ['Week 1', 'Week 2', 'Week 3', 'Week 4']
-          .map((l) => _DayData(labelText: l))
-          .toList();
+      return [
+        'Week 1',
+        'Week 2',
+        'Week 3',
+        'Week 4',
+      ].map((l) => _DayData(labelText: l)).toList();
     }
     return [_DayData(labelText: 'Daily Routine')];
   }
@@ -152,8 +170,9 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a plan name')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a plan name')));
       return;
     }
     final daysJson = _days.map((d) => d.toJson()).toList();
@@ -162,12 +181,15 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
       final client = Supabase.instance.client;
       final planId = widget.plan?['id'] as String?;
       if (planId != null) {
-        await client.from('workout_plans').update({
-          'name': name,
-          'type': _type,
-          'days': daysJson,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        }).eq('id', planId);
+        await client
+            .from('workout_plans')
+            .update({
+              'name': name,
+              'type': _type,
+              'days': daysJson,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .eq('id', planId);
       } else {
         await client.from('workout_plans').insert({
           'member_id': widget.memberId,
@@ -183,8 +205,9 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
       debugPrint('[GymCRM] Save workout plan error: $e');
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Failed to save plan')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to save plan')));
       }
     }
   }
@@ -203,8 +226,12 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
         children: [
           const SizedBox(height: 10),
           Container(
-            width: 36, height: 4,
-            decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
           const SizedBox(height: 14),
           Padding(
@@ -215,18 +242,28 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(widget.memberName,
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.onDarkSoft)),
+                      Text(
+                        widget.memberName,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.onDarkSoft,
+                        ),
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         isEdit ? 'Edit workout plan' : 'New workout plan',
-                        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppTheme.onDark),
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.onDark,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, color: AppTheme.onDark),
+                  icon: const Icon(AppIcons.close, color: AppTheme.onDark),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -249,19 +286,25 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
                     TextFormField(
                       controller: _nameCtrl,
                       textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(hintText: 'e.g. Push · Pull · Legs'),
+                      decoration: const InputDecoration(
+                        hintText: 'e.g. Push · Pull · Legs',
+                      ),
                     ),
                     const SizedBox(height: 16),
                     const FieldLabel('Type'),
                     Row(
-                      children: ['daily', 'weekly', 'monthly'].map((t) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: PillChip(
-                          label: t[0].toUpperCase() + t.substring(1),
-                          selected: _type == t,
-                          onTap: () => _switchType(t),
-                        ),
-                      )).toList(),
+                      children: ['daily', 'weekly', 'monthly']
+                          .map(
+                            (t) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: PillChip(
+                                label: t[0].toUpperCase() + t.substring(1),
+                                selected: _type == t,
+                                onTap: () => _switchType(t),
+                              ),
+                            ),
+                          )
+                          .toList(),
                     ),
                     const SizedBox(height: 20),
                     // Days
@@ -270,11 +313,20 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
                       const SizedBox(height: 4),
                       GestureDetector(
                         onTap: () => setState(
-                            () => _days.add(_DayData(labelText: 'Day ${_days.length + 1}'))),
+                          () => _days.add(
+                            _DayData(labelText: 'Day ${_days.length + 1}'),
+                          ),
+                        ),
                         child: const Padding(
                           padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('+ Add another day',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+                          child: Text(
+                            '+ Add another day',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.accent,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -286,7 +338,9 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
                               height: 20,
                               width: 20,
                               child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
                             )
                           : Text(isEdit ? 'Save changes' : 'Save workout plan'),
                     ),
@@ -316,7 +370,11 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.ink),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                  ),
                 ),
               ),
               if (canRemove)
@@ -327,8 +385,11 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
                   }),
                   child: const Padding(
                     padding: EdgeInsets.all(4),
-                    child: Icon(Icons.remove_circle_outline,
-                        size: 18, color: AppTheme.statusDanger),
+                    child: Icon(
+                      AppIcons.removeCircle,
+                      size: 18,
+                      color: AppTheme.statusDanger,
+                    ),
                   ),
                 ),
             ],
@@ -342,8 +403,14 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
           onTap: () => setState(() => _days[dayIdx].exercises.add(_ExData())),
           child: const Padding(
             padding: EdgeInsets.only(bottom: 20),
-            child: Text('+ Add another exercise',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.accent)),
+            child: Text(
+              '+ Add another exercise',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.accent,
+              ),
+            ),
           ),
         ),
       ],
@@ -364,19 +431,36 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 26, height: 26,
-                decoration: BoxDecoration(color: AppTheme.surface2, borderRadius: BorderRadius.circular(9)),
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: AppTheme.surface2,
+                  borderRadius: BorderRadius.circular(9),
+                ),
                 alignment: Alignment.center,
-                child: Text('${exIdx + 1}',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.inkSoft)),
+                child: Text(
+                  '${exIdx + 1}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: TextFormField(
                   controller: ex.name,
                   textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(hintText: 'Exercise name', isDense: true),
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink),
+                  decoration: const InputDecoration(
+                    hintText: 'Exercise name',
+                    isDense: true,
+                  ),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.ink,
+                  ),
                 ),
               ),
               GestureDetector(
@@ -386,7 +470,7 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
                 }),
                 child: const Padding(
                   padding: EdgeInsets.all(4),
-                  child: Icon(Icons.close, size: 18, color: AppTheme.inkHint),
+                  child: Icon(AppIcons.close, size: 18, color: AppTheme.inkHint),
                 ),
               ),
             ],
@@ -395,11 +479,26 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
           // Sets / Reps / Weight
           Row(
             children: [
-              _statField(label: 'Sets',   ctrl: ex.sets,   hint: '3',     numeric: true),
+              _statField(
+                label: 'Sets',
+                ctrl: ex.sets,
+                hint: '3',
+                numeric: true,
+              ),
               const SizedBox(width: 8),
-              _statField(label: 'Reps',   ctrl: ex.reps,   hint: '12',    numeric: true),
+              _statField(
+                label: 'Reps',
+                ctrl: ex.reps,
+                hint: '12',
+                numeric: true,
+              ),
               const SizedBox(width: 8),
-              _statField(label: 'Weight', ctrl: ex.weight, hint: '20 kg', numeric: false),
+              _statField(
+                label: 'Weight',
+                ctrl: ex.weight,
+                hint: '20 kg',
+                numeric: false,
+              ),
             ],
           ),
         ],
@@ -423,7 +522,11 @@ class _WorkoutPlanSheetState extends State<WorkoutPlanSheet> {
             keyboardType: numeric ? TextInputType.number : TextInputType.text,
             textAlign: TextAlign.center,
             decoration: InputDecoration(isDense: true, hintText: hint),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppTheme.ink),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.ink,
+            ),
           ),
         ],
       ),

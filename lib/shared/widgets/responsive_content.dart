@@ -27,7 +27,9 @@ class ResponsiveContent extends StatelessWidget {
       color: AppTheme.background,
       child: Center(
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: width >= sidebarBreakpoint ? 1100 : maxWidth),
+          constraints: BoxConstraints(
+            maxWidth: width >= sidebarBreakpoint ? 1100 : maxWidth,
+          ),
           child: child,
         ),
       ),

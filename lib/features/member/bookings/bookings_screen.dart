@@ -2,14 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/redesign.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/gym_class.dart';
+import '../../../core/theme/app_icons.dart';
 
 final _myBookingsProvider = FutureProvider<List<Booking>>((ref) async {
   final client = Supabase.instance.client;
   final user = client.auth.currentUser!;
 
-  final member = await client.from('members').select('id').eq('user_id', user.id).maybeSingle();
+  final member = await client
+      .from('members')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
   if (member == null) return [];
 
   final data = await client
@@ -19,14 +25,22 @@ final _myBookingsProvider = FutureProvider<List<Booking>>((ref) async {
       .neq('status', 'cancelled')
       .order('booked_at', ascending: false);
 
-  return (data as List).map((e) => Booking.fromJson(e as Map<String, dynamic>)).toList();
+  return (data as List)
+      .map((e) => Booking.fromJson(e as Map<String, dynamic>))
+      .toList();
 });
 
-final _availableSessionsProvider = FutureProvider<List<ClassSession>>((ref) async {
+final _availableSessionsProvider = FutureProvider<List<ClassSession>>((
+  ref,
+) async {
   final client = Supabase.instance.client;
   final user = client.auth.currentUser!;
 
-  final member = await client.from('members').select('id, gym_id').eq('user_id', user.id).maybeSingle();
+  final member = await client
+      .from('members')
+      .select('id, gym_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
   if (member == null) return [];
 
   final data = await client
@@ -38,7 +52,9 @@ final _availableSessionsProvider = FutureProvider<List<ClassSession>>((ref) asyn
       .order('starts_at')
       .limit(20);
 
-  return (data as List).map((e) => ClassSession.fromJson(e as Map<String, dynamic>)).toList();
+  return (data as List)
+      .map((e) => ClassSession.fromJson(e as Map<String, dynamic>))
+      .toList();
 });
 
 class BookingsScreen extends ConsumerStatefulWidget {
@@ -48,7 +64,8 @@ class BookingsScreen extends ConsumerStatefulWidget {
   ConsumerState<BookingsScreen> createState() => _BookingsScreenState();
 }
 
-class _BookingsScreenState extends ConsumerState<BookingsScreen> with SingleTickerProviderStateMixin {
+class _BookingsScreenState extends ConsumerState<BookingsScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs;
 
   @override
@@ -70,7 +87,10 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> with SingleTick
         title: const Text('Classes & Bookings'),
         bottom: TabBar(
           controller: _tabs,
-          tabs: const [Tab(text: 'My Bookings'), Tab(text: 'Book a Class')],
+          tabs: const [
+            Tab(text: 'My Bookings'),
+            Tab(text: 'Book a Class'),
+          ],
           indicatorColor: AppTheme.primary,
           labelColor: AppTheme.primary,
           unselectedLabelColor: AppTheme.textSecondary,
@@ -80,7 +100,10 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> with SingleTick
         controller: _tabs,
         children: [
           _MyBookingsTab(ref: ref),
-          _AvailableClassesTab(ref: ref, onBooked: () => ref.invalidate(_myBookingsProvider)),
+          _AvailableClassesTab(
+            ref: ref,
+            onBooked: () => ref.invalidate(_myBookingsProvider),
+          ),
         ],
       ),
     );
@@ -97,18 +120,30 @@ class _MyBookingsTab extends StatelessWidget {
 
     return bookings.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (_, _) => const ErrorState(what: 'your bookings'),
       data: (list) => list.isEmpty
-          ? const Center(child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.calendar_today_outlined, size: 64, color: AppTheme.textSecondary),
-                SizedBox(height: 16),
-                Text('No bookings yet', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                SizedBox(height: 8),
-                Text('Book a class from the next tab', style: TextStyle(color: AppTheme.textSecondary)),
-              ],
-            ))
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    AppIcons.calendarToday,
+                    size: 64,
+                    color: AppTheme.textSecondary,
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'No bookings yet',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Book a class from the next tab',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
+                ],
+              ),
+            )
           : RefreshIndicator(
               onRefresh: () async => ref.invalidate(_myBookingsProvider),
               child: ListView.builder(
@@ -130,7 +165,11 @@ class _AvailableClassesTab extends StatelessWidget {
     try {
       final client = Supabase.instance.client;
       final user = client.auth.currentUser!;
-      final member = await client.from('members').select('id').eq('user_id', user.id).single();
+      final member = await client
+          .from('members')
+          .select('id')
+          .eq('user_id', user.id)
+          .single();
 
       await client.from('bookings').insert({
         'session_id': session.id,
@@ -139,12 +178,19 @@ class _AvailableClassesTab extends StatelessWidget {
       });
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Class booked successfully!'), backgroundColor: AppTheme.primary));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Class booked successfully!'),
+            backgroundColor: AppTheme.primary,
+          ),
+        );
       }
       onBooked();
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.error));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.error),
+        );
       }
     }
   }
@@ -155,9 +201,14 @@ class _AvailableClassesTab extends StatelessWidget {
 
     return sessions.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (_, _) => const ErrorState(what: 'your bookings'),
       data: (list) => list.isEmpty
-          ? const Center(child: Text('No upcoming classes', style: TextStyle(color: AppTheme.textSecondary)))
+          ? const Center(
+              child: Text(
+                'No upcoming classes',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+            )
           : RefreshIndicator(
               onRefresh: () async => ref.invalidate(_availableSessionsProvider),
               child: ListView.builder(
@@ -175,21 +226,48 @@ class _AvailableClassesTab extends StatelessWidget {
                       padding: const EdgeInsets.all(14),
                       child: Row(
                         children: [
-                          Container(width: 4, height: 60, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(4))),
+                          Container(
+                            width: 4,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(cls?.name ?? 'Class', style: const TextStyle(fontWeight: FontWeight.w600)),
-                                if (start != null) Text(formatDateTime(start), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                                Text('${cls?.durationMin ?? 60} min', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                                Text(
+                                  cls?.name ?? 'Class',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (start != null)
+                                  Text(
+                                    formatDateTime(start),
+                                    style: const TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                Text(
+                                  '${cls?.durationMin ?? 60} min',
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                           TextButton(
                             onPressed: () => _book(context, session),
-                            style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.primary,
+                            ),
                             child: const Text('Book'),
                           ),
                         ],
@@ -220,7 +298,9 @@ class _BookingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = booking.session;
     final cls = session?.gymClass;
-    final start = session != null ? DateTime.tryParse(session.startsAt)?.toLocal() : null;
+    final start = session != null
+        ? DateTime.tryParse(session.startsAt)?.toLocal()
+        : null;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -228,14 +308,30 @@ class _BookingCard extends StatelessWidget {
         leading: Container(
           width: 4,
           height: 40,
-          decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(4)),
+          decoration: BoxDecoration(
+            color: AppTheme.primary,
+            borderRadius: BorderRadius.circular(4),
+          ),
         ),
-        title: Text(cls?.name ?? 'Class', style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Text(
+          cls?.name ?? 'Class',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
         subtitle: start != null ? Text(formatDateTime(start)) : null,
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(color: AppTheme.primaryLight, borderRadius: BorderRadius.circular(6)),
-          child: Text(booking.status.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryLight,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            booking.status.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.primary,
+            ),
+          ),
         ),
       ),
     );

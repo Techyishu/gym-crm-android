@@ -2,7 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/app_events.dart';
+import '../services/data_refresh.dart';
 import '../utils/formatters.dart';
+import '../../shared/widgets/redesign.dart';
+import '../theme/app_icons.dart';
 
 const partialPaymentHint =
     'Partial payment available — you can collect less than the full amount due.';
@@ -29,32 +32,28 @@ String paymentFailureMessage(Object error) =>
 Future<bool> confirmEarlyRenewalIfNeeded(
   BuildContext context, {
   required String? nextPaymentDate,
+  bool settlingPartialInvoice = false,
 }) async {
+  // Finishing off a bill the member has already part-paid is not an advance,
+  // even though the next renewal date is still in the future. Warning here
+  // told owners they were collecting ahead of schedule while they were only
+  // taking the rest of this month's fee.
+  if (settlingPartialInvoice) return true;
   final date = paymentDate(nextPaymentDate);
   if (date == null || !isFuturePaymentDate(nextPaymentDate)) return true;
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
   final days = date.difference(today).inDays;
   final formatted = MaterialLocalizations.of(context).formatMediumDate(date);
-  final proceed = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Collect renewal early?'),
-      content: Text(
+  final proceed = await showConfirmDialog(
+    context,
+    title: 'Collect renewal early?',
+    body:
         'This renewal is due on $formatted (in $days day${days == 1 ? '' : 's'}). '
         'Continue only if you have received an advance payment.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Collect advance'),
-        ),
-      ],
-    ),
+    confirmLabel: 'Collect advance',
+    icon: AppIcons.schedule,
+    danger: false,
   );
   return proceed ?? false;
 }
@@ -70,25 +69,15 @@ Future<bool> confirmPartialIfNeeded(
 }) async {
   if (enteredAmount >= dueAmount) return true;
   final remaining = dueAmount - enteredAmount;
-  final proceed = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Partial payment'),
-      content: Text(
+  final proceed = await showConfirmDialog(
+    context,
+    title: 'Partial payment',
+    body:
         'Collecting $currencySymbol${enteredAmount.toStringAsFixed(0)} now. '
         '$currencySymbol${remaining.toStringAsFixed(0)} will remain due.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('OK, collect'),
-        ),
-      ],
-    ),
+    confirmLabel: 'OK, collect',
+    icon: AppIcons.payments,
+    danger: false,
   );
   return proceed ?? false;
 }
@@ -153,6 +142,7 @@ Future<bool> recordInvoicePayment({
     );
   }
   unawaited(AppEvents.paymentRecorded());
+  notifyGymDataChanged();
   return result['is_fully_paid'] == true;
 }
 
@@ -188,6 +178,7 @@ Future<bool> collectMembershipRenewal({
     );
   }
   unawaited(AppEvents.paymentRecorded());
+  notifyGymDataChanged();
   return result['is_fully_paid'] == true;
 }
 

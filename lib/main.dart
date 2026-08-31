@@ -41,8 +41,8 @@ Future<void> main() async {
       // crash report leaves the device without that consent. Sentry must still
       // initialise this early to catch startup crashes, so the gate is here at
       // the send hook rather than on init.
-      options.beforeSendTransaction =
-          (transaction, hint) => analyticsConsentGranted ? transaction : null;
+      options.beforeSendTransaction = (transaction, hint) =>
+          analyticsConsentGranted ? transaction : null;
       options.beforeSend = (event, hint) {
         if (!analyticsConsentGranted) return null;
 
@@ -88,10 +88,7 @@ Future<void> main() async {
       // measurement and crash reporting all stay off until /consent.
       await applyStoredConsent(await SharedPreferences.getInstance());
 
-      await Supabase.initialize(
-        url: _supabaseUrl,
-        anonKey: _supabaseAnonKey,
-      );
+      await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
 
       if (kIsWeb) await _handleWebGoogleAuthHandoff();
 
@@ -160,7 +157,10 @@ Future<void> _handleWebGoogleAuthHandoff() async {
   if (accessToken == null || refreshToken == null) return;
 
   try {
-    await Supabase.instance.client.auth.setSession(refreshToken, accessToken: accessToken);
+    await Supabase.instance.client.auth.setSession(
+      refreshToken,
+      accessToken: accessToken,
+    );
   } catch (e, s) {
     Sentry.captureException(e, stackTrace: s);
   }

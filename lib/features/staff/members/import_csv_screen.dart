@@ -11,17 +11,28 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/theme/app_icons.dart';
 
 /// Bulk member import from a CSV file. Mirrors the web import-csv-dialog:
 /// upload → preview (valid/invalid) → assign an optional plan → import.
 /// Replicates the server validation + dedupe from /api/members/import.
 
-const _csvColumns = ['first_name', 'last_name', 'email', 'phone', 'notes', 'status', 'joined_at'];
+const _csvColumns = [
+  'first_name',
+  'last_name',
+  'email',
+  'phone',
+  'notes',
+  'status',
+  'joined_at',
+];
 const _requiredColumns = {'first_name', 'last_name', 'email'};
 const _validStatuses = {'active', 'frozen', 'expired', 'cancelled', ''};
 final _emailRe = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
-final _importPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final _importPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
   final data = await client
@@ -36,7 +47,12 @@ final _importPlansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) as
 String _planLabel(Map<String, dynamic> p) {
   final price = (p['price'] as num?)?.toStringAsFixed(0) ?? '0';
   final interval = p['billing_interval'] as String? ?? '';
-  const short = {'monthly': 'mo', 'quarterly': 'qtr', 'biannual': '6mo', 'annual': 'yr'};
+  const short = {
+    'monthly': 'mo',
+    'quarterly': 'qtr',
+    'biannual': '6mo',
+    'annual': 'yr',
+  };
   final unit = interval == 'custom'
       ? '${p['billing_interval_months'] ?? ''}mo'
       : (short[interval] ?? interval);
@@ -47,7 +63,15 @@ enum _Phase { upload, preview, importing, done }
 
 class _CsvRow {
   final String firstName, lastName, email, phone, notes, status, joinedAt;
-  _CsvRow(this.firstName, this.lastName, this.email, this.phone, this.notes, this.status, this.joinedAt);
+  _CsvRow(
+    this.firstName,
+    this.lastName,
+    this.email,
+    this.phone,
+    this.notes,
+    this.status,
+    this.joinedAt,
+  );
 }
 
 class _Invalid {
@@ -101,10 +125,19 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
   }
 
   List<Map<String, String>> _parseCsv(String text) {
-    final cleaned = text.replaceFirst('﻿', '').replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-    final lines = cleaned.trim().split('\n').where((l) => l.trim().isNotEmpty).toList();
+    final cleaned = text
+        .replaceFirst('﻿', '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n');
+    final lines = cleaned
+        .trim()
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .toList();
     if (lines.length < 2) return [];
-    final headers = _parseLine(lines[0]).map((h) => h.toLowerCase().trim().replaceAll(RegExp(r'\s+'), '_')).toList();
+    final headers = _parseLine(lines[0])
+        .map((h) => h.toLowerCase().trim().replaceAll(RegExp(r'\s+'), '_'))
+        .toList();
     return lines.skip(1).map((line) {
       final values = _parseLine(line);
       final row = <String, String>{};
@@ -142,7 +175,9 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
         continue;
       }
       if (joinedAt.isNotEmpty && DateTime.tryParse(joinedAt) == null) {
-        invalid.add(_Invalid(rowNum, email, 'Invalid joined_at — use YYYY-MM-DD'));
+        invalid.add(
+          _Invalid(rowNum, email, 'Invalid joined_at — use YYYY-MM-DD'),
+        );
         continue;
       }
       if (seen.contains(email.toLowerCase())) {
@@ -150,11 +185,17 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
         continue;
       }
       seen.add(email.toLowerCase());
-      valid.add(_CsvRow(
-        r['first_name']!, r['last_name']!, email,
-        r['phone'] ?? '', r['notes'] ?? '',
-        status.isEmpty ? 'active' : status, joinedAt,
-      ));
+      valid.add(
+        _CsvRow(
+          r['first_name']!,
+          r['last_name']!,
+          email,
+          r['phone'] ?? '',
+          r['notes'] ?? '',
+          status.isEmpty ? 'active' : status,
+          joinedAt,
+        ),
+      );
     }
     setState(() {
       _valid = valid;
@@ -174,7 +215,9 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
     } on MissingPluginException {
       // The file picker ships as native code; an over-the-air patch can't add
       // it. Surface a clear message instead of crashing until the next release.
-      _toast('CSV import needs the latest app version — please update from the ${isIOS ? 'App Store' : 'Play Store'}.');
+      _toast(
+        'CSV import needs the latest app version — please update from the ${isIOS ? 'App Store' : 'Play Store'}.',
+      );
       return;
     } on PlatformException catch (e) {
       _toast('Could not open the file picker: ${e.message ?? e.code}');
@@ -199,7 +242,8 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
 
   void _copyTemplate() {
     final header = _csvColumns.join(',');
-    const example = 'John,Doe,john@example.com,9876543210,Regular member,active,2024-01-15';
+    const example =
+        'John,Doe,john@example.com,9876543210,Regular member,active,2024-01-15';
     Clipboard.setData(ClipboardData(text: '$header\n$example'));
     _toast('Template copied to clipboard');
   }
@@ -232,9 +276,13 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       }
 
       // Dedupe against existing gym emails (same as the server import).
-      final existing = await client.from('members').select('email').eq('gym_id', gymId);
+      final existing = await client
+          .from('members')
+          .select('email')
+          .eq('gym_id', gymId);
       final existingEmails = {
-        for (final m in (existing as List)) (m['email'] as String).toLowerCase(),
+        for (final m in (existing as List))
+          (m['email'] as String).toLowerCase(),
       };
 
       final errors = <_Invalid>[];
@@ -264,13 +312,20 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       for (var i = 0; i < toInsert.length; i += 100) {
         final batch = toInsert.sublist(i, (i + 100).clamp(0, toInsert.length));
         try {
-          final inserted = await client.from('members').insert(batch).select('id, joined_at');
+          final inserted = await client
+              .from('members')
+              .insert(batch)
+              .select('id, joined_at');
           imported += batch.length;
-          insertedMembers.addAll((inserted as List).cast<Map<String, dynamic>>());
+          insertedMembers.addAll(
+            (inserted as List).cast<Map<String, dynamic>>(),
+          );
         } catch (e) {
           debugPrint('[GymCRM] CSV batch insert error: $e');
           for (var j = 0; j < batch.length; j++) {
-            errors.add(_Invalid(i + j + 2, batch[j]['email'] as String, 'Insert failed'));
+            errors.add(
+              _Invalid(i + j + 2, batch[j]['email'] as String, 'Insert failed'),
+            );
           }
         }
       }
@@ -278,14 +333,25 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       if (_planId != null && insertedMembers.isNotEmpty) {
         setState(() => _importingLabel = 'Assigning membership plans…');
         final plans = await ref.read(_importPlansProvider.future);
-        final plan = plans.firstWhere((p) => p['id'] == _planId, orElse: () => {});
-        final months = (plan['billing_interval_months'] as int?) ??
-            const {'monthly': 1, 'quarterly': 3, 'biannual': 6, 'annual': 12}[plan['billing_interval']] ??
+        final plan = plans.firstWhere(
+          (p) => p['id'] == _planId,
+          orElse: () => {},
+        );
+        final months =
+            (plan['billing_interval_months'] as int?) ??
+            const {
+              'monthly': 1,
+              'quarterly': 3,
+              'biannual': 6,
+              'annual': 12,
+            }[plan['billing_interval']] ??
             1;
         // Plan cycle starts on each member's join date, not the import date.
         // Membership is open-ended — next_payment_date tracks renewal, not ends_at.
         final memberships = insertedMembers.map((mem) {
-          final startsAt = DateTime.tryParse(mem['joined_at'] as String) ?? DateTime.now().toUtc();
+          final startsAt =
+              DateTime.tryParse(mem['joined_at'] as String) ??
+              DateTime.now().toUtc();
           return {
             'member_id': mem['id'],
             'plan_id': _planId,
@@ -300,14 +366,22 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           // it from join date + plan duration so imported members show up in
           // upcoming-payments and reminders (both key off next_payment_date).
           for (final mem in insertedMembers) {
-            final startsAt = DateTime.tryParse(mem['joined_at'] as String) ?? DateTime.now().toUtc();
+            final startsAt =
+                DateTime.tryParse(mem['joined_at'] as String) ??
+                DateTime.now().toUtc();
             final joinedStr = startsAt.toIso8601String().split('T').first;
-            final nextPaymentDate = advancePaymentDate(joinedStr, months: months);
+            final nextPaymentDate = advancePaymentDate(
+              joinedStr,
+              months: months,
+            );
             if (nextPaymentDate == null) continue;
-            await client.from('members').update({
-              'next_payment_date': nextPaymentDate,
-              'billing_interval_months': months,
-            }).eq('id', mem['id']);
+            await client
+                .from('members')
+                .update({
+                  'next_payment_date': nextPaymentDate,
+                  'billing_interval_months': months,
+                })
+                .eq('id', mem['id']);
           }
         } catch (e) {
           debugPrint('[GymCRM] CSV plan assignment error: $e');
@@ -315,7 +389,12 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       }
 
       if (countBefore != null) {
-        unawaited(AppEvents.checkMemberMilestones(before: countBefore, after: countBefore + imported));
+        unawaited(
+          AppEvents.checkMemberMilestones(
+            before: countBefore,
+            after: countBefore + imported,
+          ),
+        );
       }
 
       setState(() {
@@ -342,18 +421,20 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       appBar: AppBar(
         title: const Text('Import members'),
         leading: IconButton(
-          icon: const Icon(Icons.close),
+          icon: const Icon(AppIcons.close),
           onPressed: () => Navigator.pop(context, _phase == _Phase.done),
         ),
       ),
       body: Column(
         children: [
-          _StepIndicator(step: switch (_phase) {
-            _Phase.upload => 0,
-            _Phase.preview => 1,
-            _Phase.importing => 1,
-            _Phase.done => 2,
-          }),
+          _StepIndicator(
+            step: switch (_phase) {
+              _Phase.upload => 0,
+              _Phase.preview => 1,
+              _Phase.importing => 1,
+              _Phase.done => 2,
+            },
+          ),
           Expanded(
             child: switch (_phase) {
               _Phase.upload => _buildUpload(),
@@ -381,22 +462,39 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
               decoration: BoxDecoration(
                 color: AppTheme.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.border, width: 2, style: BorderStyle.solid),
+                border: Border.all(
+                  color: AppTheme.border,
+                  width: 2,
+                  style: BorderStyle.solid,
+                ),
               ),
               child: Column(
                 children: [
                   Container(
                     height: 48,
                     width: 48,
-                    decoration: BoxDecoration(color: AppTheme.activeBg, borderRadius: BorderRadius.circular(10)),
-                    child: const Icon(Icons.upload_file_outlined, color: AppTheme.ink),
+                    decoration: BoxDecoration(
+                      color: AppTheme.activeBg,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      AppIcons.uploadFile,
+                      color: AppTheme.ink,
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Choose a CSV file',
-                      style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                  const Text(
+                    'Choose a CSV file',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  const Text('Tap to browse your device',
-                      style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+                  const Text(
+                    'Tap to browse your device',
+                    style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                  ),
                 ],
               ),
             ),
@@ -411,24 +509,40 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                 Row(
                   children: [
                     const Expanded(
-                      child: Text('Not sure about the format?',
-                          style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink, fontSize: 13)),
+                      child: Text(
+                        'Not sure about the format?',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.ink,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                     OutlinedButton.icon(
                       onPressed: _copyTemplate,
                       style: OutlinedButton.styleFrom(
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                       ),
-                      icon: const Icon(Icons.copy, size: 14),
+                      icon: const Icon(AppIcons.copy, size: 14),
                       label: const Text('Copy template'),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                const Text('CSV COLUMNS',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: AppTheme.inkSoft)),
+                const Text(
+                  'CSV COLUMNS',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -436,7 +550,10 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                   children: _csvColumns.map((c) {
                     final req = _requiredColumns.contains(c);
                     return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.background,
                         borderRadius: BorderRadius.circular(6),
@@ -445,13 +562,25 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(req ? 'REQ' : 'OPT',
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: req ? AppTheme.statusDanger : AppTheme.inkHint)),
+                          Text(
+                            req ? 'REQ' : 'OPT',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: req
+                                  ? AppTheme.statusDanger
+                                  : AppTheme.inkHint,
+                            ),
+                          ),
                           const SizedBox(width: 6),
-                          Text(c, style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: AppTheme.ink)),
+                          Text(
+                            c,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontFamily: 'monospace',
+                              color: AppTheme.ink,
+                            ),
+                          ),
                         ],
                       ),
                     );
@@ -476,79 +605,165 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
             children: [
               Row(
                 children: [
-                  Expanded(child: _statBox('${_valid.length}', 'Valid rows', AppTheme.statusActive, AppTheme.statusActiveBg)),
+                  Expanded(
+                    child: _statBox(
+                      '${_valid.length}',
+                      'Valid rows',
+                      AppTheme.statusActive,
+                      AppTheme.statusActiveBg,
+                    ),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(child: _statBox('${_invalid.length}', 'Errors',
-                      _invalid.isEmpty ? AppTheme.inkSoft : AppTheme.statusDanger,
-                      _invalid.isEmpty ? AppTheme.surface2 : AppTheme.statusDangerBg)),
+                  Expanded(
+                    child: _statBox(
+                      '${_invalid.length}',
+                      'Errors',
+                      _invalid.isEmpty
+                          ? AppTheme.inkSoft
+                          : AppTheme.statusDanger,
+                      _invalid.isEmpty
+                          ? AppTheme.surface2
+                          : AppTheme.statusDangerBg,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
               if (_valid.isNotEmpty) ...[
-                Text('Preview — first ${_valid.length < 5 ? _valid.length : 5} of ${_valid.length}',
-                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: AppTheme.inkSoft)),
+                Text(
+                  'Preview — first ${_valid.length < 5 ? _valid.length : 5} of ${_valid.length}',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                ..._valid.take(5).map((r) => Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.all(12),
-                      decoration: AppTheme.cardDecoration(),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('${r.firstName} ${r.lastName}',
-                                    style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink)),
-                                Text(r.email, style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
-                              ],
+                ..._valid
+                    .take(5)
+                    .map(
+                      (r) => Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.all(12),
+                        decoration: AppTheme.cardDecoration(),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${r.firstName} ${r.lastName}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.ink,
+                                    ),
+                                  ),
+                                  Text(
+                                    r.email,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppTheme.inkSoft,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          Text(r.status, style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft)),
-                        ],
+                            Text(
+                              r.status,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.inkSoft,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    )),
+                    ),
               ],
               if (_invalid.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                const Text('ROWS THAT WILL BE SKIPPED',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: AppTheme.statusDanger)),
+                const Text(
+                  'ROWS THAT WILL BE SKIPPED',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppTheme.statusDanger,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                ..._invalid.map((e) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Row ${e.row}',
-                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppTheme.inkHint)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text('${e.email.isNotEmpty ? '${e.email} — ' : ''}${e.reason}',
-                                style: const TextStyle(fontSize: 12, color: AppTheme.statusDanger)),
+                ..._invalid.map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Row ${e.row}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: AppTheme.inkHint,
                           ),
-                        ],
-                      ),
-                    )),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${e.email.isNotEmpty ? '${e.email} — ' : ''}${e.reason}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.statusDanger,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
               if (_valid.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text('ASSIGN A PLAN (OPTIONAL)',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: AppTheme.inkSoft)),
+                const Text(
+                  'ASSIGN A PLAN (OPTIONAL)',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 plans.maybeWhen(
                   data: (list) => list.isEmpty
-                      ? const Text('No active plans. Create one in Billing first.',
-                          style: TextStyle(fontSize: 12, color: AppTheme.inkSoft))
+                      ? const Text(
+                          'No active plans. Create one in Billing first.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.inkSoft,
+                          ),
+                        )
                       : DropdownButtonFormField<String?>(
                           value: _planId,
                           isExpanded: true,
-                          decoration: const InputDecoration(labelText: 'Membership plan'),
+                          decoration: const InputDecoration(
+                            labelText: 'Membership plan',
+                          ),
                           items: [
-                            const DropdownMenuItem<String?>(value: null, child: Text('No plan')),
-                            ...list.map((p) => DropdownMenuItem<String?>(
-                                  value: p['id'] as String,
-                                  child: Text(_planLabel(p), overflow: TextOverflow.ellipsis),
-                                )),
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('No plan'),
+                            ),
+                            ...list.map(
+                              (p) => DropdownMenuItem<String?>(
+                                value: p['id'] as String,
+                                child: Text(
+                                  _planLabel(p),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
                           ],
                           onChanged: (v) => setState(() => _planId = v),
                         ),
@@ -565,14 +780,18 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
               children: [
                 OutlinedButton(
                   onPressed: () => setState(() => _phase = _Phase.upload),
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 50),
+                  ),
                   child: const Text('Back'),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _valid.isEmpty ? null : _import,
-                    child: Text('Import ${_valid.length} member${_valid.length == 1 ? '' : 's'}'),
+                    child: Text(
+                      'Import ${_valid.length} member${_valid.length == 1 ? '' : 's'}',
+                    ),
                   ),
                 ),
               ],
@@ -586,12 +805,29 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
   Widget _statBox(String value, String label, Color fg, Color bg) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: fg)),
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: fg,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: fg,
+            ),
+          ),
         ],
       ),
     );
@@ -604,9 +840,18 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 16),
-          Text(_importingLabel, style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.ink)),
+          Text(
+            _importingLabel,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: AppTheme.ink,
+            ),
+          ),
           const SizedBox(height: 4),
-          const Text('Please wait…', style: TextStyle(fontSize: 13, color: AppTheme.inkSoft)),
+          const Text(
+            'Please wait…',
+            style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+          ),
         ],
       ),
     );
@@ -627,15 +872,30 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.check_circle, color: AppTheme.statusActive, size: 32),
+                    const Icon(
+                      AppIcons.checkCircleActive,
+                      color: AppTheme.statusActive,
+                      size: 32,
+                    ),
                     const SizedBox(width: 14),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('$_imported imported',
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.ink)),
-                        const Text('Members added to your gym',
-                            style: TextStyle(fontSize: 12, color: AppTheme.statusActive)),
+                        Text(
+                          '$_imported imported',
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.ink,
+                          ),
+                        ),
+                        const Text(
+                          'Members added to your gym',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.statusActive,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -643,24 +903,42 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
               ),
               if (_skipped > 0) ...[
                 const SizedBox(height: 16),
-                Text('$_skipped row${_skipped == 1 ? '' : 's'} skipped',
-                    style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.ink)),
+                Text(
+                  '$_skipped row${_skipped == 1 ? '' : 's'} skipped',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.ink,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                ..._errors.map((e) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Row ${e.row}',
-                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppTheme.inkHint)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text('${e.email.isNotEmpty ? '${e.email} — ' : ''}${e.reason}',
-                                style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft)),
+                ..._errors.map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Row ${e.row}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: AppTheme.inkHint,
                           ),
-                        ],
-                      ),
-                    )),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${e.email.isNotEmpty ? '${e.email} — ' : ''}${e.reason}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.inkSoft,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ],
           ),
@@ -700,20 +978,22 @@ class _StepIndicator extends StatelessWidget {
                 color: i == step
                     ? AppTheme.accent
                     : i < step
-                        ? AppTheme.statusActiveBg
-                        : AppTheme.surface,
+                    ? AppTheme.statusActiveBg
+                    : AppTheme.surface,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                i < step ? '${i + 1} ${_labels[i]} ✓' : '${i + 1} ${_labels[i]}',
+                i < step
+                    ? '${i + 1} ${_labels[i]} ✓'
+                    : '${i + 1} ${_labels[i]}',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: i == step
                       ? Colors.white
                       : i < step
-                          ? AppTheme.statusActive
-                          : AppTheme.inkHint,
+                      ? AppTheme.statusActive
+                      : AppTheme.inkHint,
                 ),
               ),
             ),

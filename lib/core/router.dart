@@ -7,10 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'router_refresh.dart';
-import 'access/role_access.dart';
+import 'access/gym_permissions.dart';
+import 'access/permission_gate.dart';
 import '../features/auth/providers/auth_provider.dart';
-import '../features/onboarding/onboarding_screen.dart';
+import '../features/auth/screens/welcome_screen.dart';
 import '../features/auth/screens/login_screen.dart';
+import '../features/auth/screens/member_login_screen.dart';
+import '../features/auth/screens/member_help_screen.dart';
 import '../features/auth/screens/phone_otp_screen.dart';
 import '../features/auth/screens/member_signup_screen.dart';
 import '../features/auth/screens/signup_screen.dart';
@@ -25,18 +28,23 @@ import '../features/staff/billing/billing_screen.dart';
 import '../features/staff/paywall/paywall_screen.dart';
 import '../features/staff/classes/classes_screen.dart';
 import '../features/staff/check_in/check_in_screen.dart';
+import '../features/staff/check_in/attendance_calendar_screen.dart';
 import '../features/staff/leads/leads_screen.dart';
 import '../features/staff/expenses/expenses_screen.dart';
+import '../features/staff/no_access_screen.dart';
 import '../features/staff/reports/reports_screen.dart';
+import '../features/staff/reports/data_export_screen.dart';
 import '../features/staff/settings/settings_screen.dart';
+import '../features/staff/settings/invoice_settings_screen.dart';
 import '../features/staff/settings/reminders_screen.dart';
 import '../features/staff/communications/communications_screen.dart';
 import '../features/staff/staff/staff_screen.dart';
+import '../features/staff/staff/staff_permissions_screen.dart';
+import '../features/staff/activity/activity_log_screen.dart';
 import '../features/staff/workout/staff_workout_plans_screen.dart';
 import '../features/staff/diet/staff_diet_plans_screen.dart';
 import '../features/staff/notifications/notifications_screen.dart';
 import '../features/member/portal/portal_home_screen.dart';
-import '../features/member/bookings/bookings_screen.dart';
 import '../features/member/billing/member_billing_screen.dart';
 import '../features/member/workout/workout_screen.dart';
 import '../features/member/diet/diet_screen.dart';
@@ -61,6 +69,19 @@ final _memberNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'member');
 /// Cleared on sign-out; made moot once setup writes `home_route`.
 String? _gymSetupResolvedFor;
 
+/// Set by setupGym(), cleared when the owner leaves the first-setup wizard.
+/// A plain `context.go('/staff/first-setup')` can't survive the trip: the DPDP
+/// consent gate below outranks it on a first signup, and the consent screen
+/// then lands on `home_route` — so the wizard was skipped every time. Storing
+/// the intent means it also survives a cold start mid-setup.
+const kPendingFirstSetup = 'pending_first_setup';
+
+/// Called by setupGym() the moment a gym exists. Without this the guard above
+/// outlives the condition it stands for: /staff/* skips the `home_route` fast
+/// path (it needs a fresh role lookup), falls through to the guard, and bounces
+/// the brand-new owner back to /gym-setup forever.
+void clearGymSetupResolution() => _gymSetupResolvedFor = null;
+
 /// Cached SharedPreferences instance — avoids re-initialising the plugin on
 /// every router redirect (the getInstance() call is async even when cached
 /// internally, adding unnecessary latency to every navigation event).
@@ -74,7 +95,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   final router = GoRouter(
     navigatorKey: rootNavigatorKey,
-    initialLocation: '/onboarding',
+    initialLocation: '/welcome',
     // Also refresh when the signup handshake guard flips, so the redirect is
     // re-evaluated the moment it releases.
     refreshListenable: Listenable.merge([
@@ -100,34 +121,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         return prefs.getString('home_route') ?? '/login';
       }
 
-      final onboardingDone = prefs.getBool('onboarding_done') ?? false;
       final user = Supabase.instance.client.auth.currentUser;
-
-      // Show onboarding only if not done AND not already logged in.
-      // If user is logged in but flag is missing (e.g. app data cleared),
-      // mark it done and continue so they don't get stuck on onboarding.
-      if (!onboardingDone) {
-        // First install — always show the intro slides.
-        return state.matchedLocation == '/onboarding' ? null : '/onboarding';
-      } else if (state.matchedLocation == '/onboarding') {
-        // Already done — never show again.
-        return '/login';
-      }
-
-      // DPDP consent gate — sits between the intro slides and login, before any
-      // account exists, because that's the point where collection would start.
-      // /legal/* stays reachable so the notice can link out to the policy.
-      if (!(prefs.getBool(kConsentGiven) ?? false) &&
-          !state.matchedLocation.startsWith('/legal/')) {
-        return state.matchedLocation == '/consent' ? null : '/consent';
-      }
 
       final loc = state.matchedLocation;
       final isAuthRoute =
+          loc == '/welcome' ||
           loc.startsWith('/login') ||
           loc.startsWith('/signup') ||
           loc.startsWith('/forgot-password') ||
-          loc == '/onboarding' ||
           loc.startsWith('/legal/');
       final isStaffRoute = loc.startsWith('/staff/');
       final isMemberRoute = loc.startsWith('/portal/');
@@ -135,10 +136,32 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (user == null) {
         // Stale cache from a previous account must not survive sign-out.
         if (prefs.containsKey('home_route')) await prefs.remove('home_route');
+        if (prefs.containsKey(kPendingFirstSetup)) {
+          await prefs.remove(kPendingFirstSetup);
+        }
         _gymSetupResolvedFor = null;
         _sharedPrefs =
             null; // Force re-init next time so the cleared key is visible
-        return isAuthRoute ? null : '/login';
+        // /welcome (canvas "Who is signing in?") is the real landing page —
+        // /login stays reachable directly for deep links and for screens
+        // that already know which path the user is on (e.g. signup's
+        // "Already have an account?" goes straight to owner login).
+        return isAuthRoute ? null : '/welcome';
+      }
+
+      // DPDP consent gate — now sits after signup, once an account exists,
+      // not before it. /legal/* stays reachable so the notice can link out.
+      if (!(prefs.getBool(kConsentGiven) ?? false) &&
+          !loc.startsWith('/legal/')) {
+        return loc == '/consent' ? null : '/consent';
+      }
+
+      // A brand-new owner still owes us the one-time setup wizard. This has to
+      // outrank the `home_route` fast path below — consent (or a cold start)
+      // lands them on the dashboard otherwise, with no plan and no members.
+      if ((prefs.getBool(kPendingFirstSetup) ?? false) &&
+          !loc.startsWith('/legal/')) {
+        return loc == '/staff/first-setup' ? null : '/staff/first-setup';
       }
 
       // Resolve where this user belongs only when it matters (leaving an auth
@@ -187,7 +210,6 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
 
         if (results[0] != null) {
-          final role = (results[0] as Map<String, dynamic>)['role'] as String?;
           await prefs.setString('home_route', '/staff/dashboard');
           // Navigation is a convenience layer, not the security boundary (RLS
           // remains authoritative), but never render a portal or hidden screen
@@ -195,22 +217,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           if (isMemberRoute || loc == '/gym-setup' || isAuthRoute) {
             return '/staff/dashboard';
           }
-          if ((loc.startsWith('/staff/leads') &&
-                  !RoleAccess.canSeeLeads(role)) ||
-              (loc.startsWith('/staff/reports') &&
-                  !RoleAccess.canSeeReports(role)) ||
-              (loc.startsWith('/staff/settings') &&
-                  !RoleAccess.canSeeSettings(role)) ||
-              (loc.startsWith('/staff/reminders') &&
-                  !RoleAccess.canSeeCommunications(role)) ||
-              (loc.startsWith('/staff/communications') &&
-                  !RoleAccess.canSeeCommunications(role)) ||
-              (loc.startsWith('/staff/staff') &&
-                  !RoleAccess.canSeeStaff(role)) ||
-              (loc.startsWith('/staff/expenses') &&
-                  !RoleAccess.canSeeExpenses(role))) {
-            return '/staff/dashboard';
-          }
+          // Per-staff permissions are branch-specific and load through
+          // Riverpod. Route builders below render a meaningful denied state;
+          // Supabase RLS/RPC checks remain the security boundary.
           return null;
         }
         if (results[1] != null) {
@@ -231,15 +240,20 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(
-        path: '/onboarding',
-        builder: (_, __) => const OnboardingScreen(),
-      ),
-      GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/consent',
         builder: (_, __) => const ConsentScreen(),
       ),
+      GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(
+        path: '/login/member',
+        builder: (_, __) => const MemberLoginScreen(),
+      ),
+      GoRoute(
+        path: '/login/member/help',
+        builder: (_, __) => const MemberHelpScreen(),
+      ),
       GoRoute(
         path: '/login/phone-otp',
         builder: (_, __) => const PhoneOtpScreen(),
@@ -274,12 +288,18 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/staff/members',
-                builder: (_, __) => const MembersScreen(),
+                builder: (_, __) => const PermissionGate(
+                  module: GymModule.members,
+                  child: MembersScreen(),
+                ),
                 routes: [
                   GoRoute(
                     path: ':id',
-                    builder: (_, state) => MemberDetailScreen(
-                      memberId: state.pathParameters['id']!,
+                    builder: (_, state) => PermissionGate(
+                      module: GymModule.members,
+                      child: MemberDetailScreen(
+                        memberId: state.pathParameters['id']!,
+                      ),
                     ),
                   ),
                 ],
@@ -291,7 +311,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/staff/billing',
-                builder: (_, __) => const BillingScreen(),
+                builder: (_, __) => const PermissionGate(
+                  module: GymModule.payments,
+                  child: BillingScreen(),
+                ),
               ),
             ],
           ),
@@ -300,7 +323,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/staff/check-in',
-                builder: (_, __) => const CheckInScreen(),
+                builder: (_, __) => const PermissionGate(
+                  module: GymModule.attendance,
+                  child: CheckInScreen(),
+                ),
               ),
             ],
           ),
@@ -316,7 +342,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/upcoming-payments',
-        builder: (_, __) => const UpcomingPaymentsScreen(),
+        builder: (_, state) => PermissionGate(
+          module: GymModule.payments,
+          child: UpcomingPaymentsScreen(
+            initialTabExpiring: state.uri.queryParameters['tab'] == 'expiring',
+          ),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
@@ -326,27 +357,92 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/classes',
-        builder: (_, __) => const ClassesScreen(),
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.batches,
+          child: ClassesScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/leads',
-        builder: (_, __) => const LeadsScreen(),
+        builder: (_, __) =>
+            const PermissionGate(module: GymModule.leads, child: LeadsScreen()),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/expenses',
-        builder: (_, __) => const ExpensesScreen(),
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.expenses,
+          child: ExpensesScreen(),
+        ),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/no-access',
+        builder: (_, state) => NoAccessScreen(
+          feature: state.uri.queryParameters['feature'] ?? 'This area',
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/reports',
-        builder: (_, __) => const ReportsScreen(),
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.reports,
+          child: ReportsScreen(),
+        ),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/exports',
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.reports,
+          action: GymAction.export,
+          child: DataExportScreen(),
+        ),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/activity-log',
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.reports,
+          child: ActivityLogScreen(),
+        ),
+        routes: [
+          GoRoute(
+            path: ':id',
+            builder: (_, state) => PermissionGate(
+              module: GymModule.reports,
+              child: ActivityLogDetailScreen(
+                entryId: state.pathParameters['id']!,
+              ),
+            ),
+          ),
+        ],
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/attendance-calendar',
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.attendance,
+          child: AttendanceCalendarScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/settings',
-        builder: (_, __) => const SettingsScreen(),
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.settings,
+          child: SettingsScreen(),
+        ),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/settings/invoices',
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.settings,
+          action: GymAction.edit,
+          child: InvoiceSettingsScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
@@ -361,17 +457,33 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/staff',
-        builder: (_, __) => const StaffScreen(),
+        builder: (_, __) =>
+            const PermissionGate(module: GymModule.staff, child: StaffScreen()),
+      ),
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/staff/permissions',
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.staff,
+          action: GymAction.edit,
+          child: StaffPermissionsScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/workout-plans',
-        builder: (_, __) => const StaffWorkoutPlansScreen(),
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.pt,
+          child: StaffWorkoutPlansScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/diet-plans',
-        builder: (_, __) => const StaffDietPlansScreen(),
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.services,
+          child: StaffDietPlansScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
@@ -389,14 +501,6 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: '/portal/home',
                 builder: (_, __) => const PortalHomeScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/portal/bookings',
-                builder: (_, __) => const BookingsScreen(),
               ),
             ],
           ),

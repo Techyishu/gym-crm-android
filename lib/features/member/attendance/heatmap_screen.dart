@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/app_icons.dart';
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -49,11 +50,16 @@ class AttendanceHeatmapScreen extends ConsumerWidget {
         error: (e, _) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Text('Failed to load attendance: $e',
-                style: const TextStyle(color: AppTheme.inkHint)),
+            child: Text(
+              'Failed to load attendance: $e',
+              style: const TextStyle(color: AppTheme.inkHint),
+            ),
           ),
         ),
-        data: (dates) => _AttendanceBody(dates: dates),
+        data: (dates) => _AttendanceBody(
+          dates: dates,
+          onRefresh: () async => ref.invalidate(_attendanceDatesProvider),
+        ),
       ),
     );
   }
@@ -63,7 +69,8 @@ class AttendanceHeatmapScreen extends ConsumerWidget {
 
 class _AttendanceBody extends StatelessWidget {
   final List<DateTime> dates;
-  const _AttendanceBody({required this.dates});
+  final Future<void> Function() onRefresh;
+  const _AttendanceBody({required this.dates, required this.onRefresh});
 
   static String _dayKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -75,7 +82,9 @@ class _AttendanceBody extends StatelessWidget {
 
   int get _thisMonthCount {
     final now = _nowIST;
-    return dates.where((d) => d.year == now.year && d.month == now.month).length;
+    return dates
+        .where((d) => d.year == now.year && d.month == now.month)
+        .length;
   }
 
   int get _streak {
@@ -96,10 +105,12 @@ class _AttendanceBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      onRefresh: () async {}, // parent provider handles re-watch on rebuild
+      onRefresh: onRefresh,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _MonthlyAttendanceCalendar(daySet: _daySet, nowIST: _nowIST),
+          const SizedBox(height: 16),
           _StatsRow(
             thisMonth: _thisMonthCount,
             streak: _streak,
@@ -115,6 +126,154 @@ class _AttendanceBody extends StatelessWidget {
     );
   }
 }
+
+class _MonthlyAttendanceCalendar extends StatefulWidget {
+  final Set<String> daySet;
+  final DateTime nowIST;
+
+  const _MonthlyAttendanceCalendar({
+    required this.daySet,
+    required this.nowIST,
+  });
+
+  @override
+  State<_MonthlyAttendanceCalendar> createState() =>
+      _MonthlyAttendanceCalendarState();
+}
+
+class _MonthlyAttendanceCalendarState
+    extends State<_MonthlyAttendanceCalendar> {
+  late DateTime _month;
+
+  @override
+  void initState() {
+    super.initState();
+    _month = DateTime(widget.nowIST.year, widget.nowIST.month);
+  }
+
+  String _key(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final first = DateTime(_month.year, _month.month);
+    final leading = first.weekday - 1;
+    final days = DateUtils.getDaysInMonth(_month.year, _month.month);
+    final currentMonth =
+        _month.year == widget.nowIST.year &&
+        _month.month == widget.nowIST.month;
+    return Container(
+      decoration: AppTheme.cardDecoration(radius: 12),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                onPressed: () => setState(
+                  () => _month = DateTime(_month.year, _month.month - 1),
+                ),
+                icon: const Icon(AppIcons.chevronLeft),
+              ),
+              Expanded(
+                child: Text(
+                  '${_monthNames[_month.month]} ${_month.year}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: currentMonth
+                    ? null
+                    : () => setState(
+                        () => _month = DateTime(_month.year, _month.month + 1),
+                      ),
+                icon: const Icon(AppIcons.chevronRight),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              for (final day in ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+                Expanded(
+                  child: Text(
+                    day,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              childAspectRatio: 1.05,
+            ),
+            itemCount: leading + days,
+            itemBuilder: (_, index) {
+              if (index < leading) return const SizedBox.shrink();
+              final date = DateTime(
+                _month.year,
+                _month.month,
+                index - leading + 1,
+              );
+              final present = widget.daySet.contains(_key(date));
+              final today = DateUtils.isSameDay(date, widget.nowIST);
+              return Container(
+                margin: const EdgeInsets.all(3),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: present ? AppTheme.accent : Colors.transparent,
+                  border: today && !present
+                      ? Border.all(color: AppTheme.accent)
+                      : null,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${date.day}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: present || today
+                        ? FontWeight.w800
+                        : FontWeight.w500,
+                    color: present ? Colors.white : AppTheme.ink,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+const _monthNames = [
+  '',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 // ── Stats row ─────────────────────────────────────────────────────────────────
 
@@ -132,11 +291,17 @@ class _StatsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(child: _StatChip(value: '$thisMonth', label: 'This month')),
+        Expanded(
+          child: _StatChip(value: '$thisMonth', label: 'This month'),
+        ),
         const SizedBox(width: 10),
-        Expanded(child: _StatChip(value: '🔥 $streak', label: 'Day streak')),
+        Expanded(
+          child: _StatChip(value: '🔥 $streak', label: 'Day streak'),
+        ),
         const SizedBox(width: 10),
-        Expanded(child: _StatChip(value: '$total', label: '6-month total')),
+        Expanded(
+          child: _StatChip(value: '$total', label: '6-month total'),
+        ),
       ],
     );
   }
@@ -202,8 +367,21 @@ class _HeatmapCard extends StatelessWidget {
 
     // Build month label positions: (column index, label string)
     final monthLabels = <(int, String)>[];
-    final monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final monthNames = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     int? lastMonth;
     for (int w = 0; w < _weeks; w++) {
       final weekStart = startMonday.add(Duration(days: w * 7));
@@ -235,33 +413,46 @@ class _HeatmapCard extends StatelessWidget {
               children: [
                 // Day-of-week labels
                 Column(
-                  children: List.generate(7, (i) => Padding(
-                    padding: EdgeInsets.only(
-                      bottom: i < 6 ? _cellGap : 0,
-                      right: 4,
-                    ),
-                    child: SizedBox(
-                      width: 12,
-                      height: _cellSize,
-                      child: Text(
-                        _dayLabels[i],
-                        style: const TextStyle(
-                          fontSize: 9,
-                          color: AppTheme.inkHint,
-                          fontWeight: FontWeight.w500,
+                  children: List.generate(
+                    7,
+                    (i) => Padding(
+                      padding: EdgeInsets.only(
+                        bottom: i < 6 ? _cellGap : 0,
+                        right: 4,
+                      ),
+                      child: SizedBox(
+                        width: 12,
+                        height: _cellSize,
+                        child: Text(
+                          _dayLabels[i],
+                          style: const TextStyle(
+                            fontSize: 9,
+                            color: AppTheme.inkHint,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ),
-                  )),
+                  ),
                 ),
                 // Grid columns (one per week)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Month labels row
+                    // Month labels row.
+                    //
+                    // The width matters: every child here is Positioned, so the
+                    // Stack has no intrinsic size, and this sits inside a
+                    // horizontally-scrolling view where the incoming width is
+                    // unbounded. Without an explicit width the Stack could not
+                    // be laid out at all — it threw, took the whole ListView
+                    // down with it, and the Attendance screen rendered as an
+                    // empty page under its app bar.
                     SizedBox(
+                      width: _weeks * (_cellSize + _cellGap),
                       height: 14,
                       child: Stack(
+                        clipBehavior: Clip.none,
                         children: monthLabels.map((t) {
                           final col = t.$1;
                           return Positioned(
@@ -284,14 +475,21 @@ class _HeatmapCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: List.generate(_weeks, (w) {
                         return Padding(
-                          padding: EdgeInsets.only(right: w < _weeks - 1 ? _cellGap : 0),
+                          padding: EdgeInsets.only(
+                            right: w < _weeks - 1 ? _cellGap : 0,
+                          ),
                           child: Column(
                             children: List.generate(7, (d) {
-                              final date = startMonday.add(Duration(days: w * 7 + d));
+                              final date = startMonday.add(
+                                Duration(days: w * 7 + d),
+                              );
                               final isFuture = date.isAfter(nowIST);
-                              final hasVisit = !isFuture && daySet.contains(_key(date));
+                              final hasVisit =
+                                  !isFuture && daySet.contains(_key(date));
                               return Padding(
-                                padding: EdgeInsets.only(bottom: d < 6 ? _cellGap : 0),
+                                padding: EdgeInsets.only(
+                                  bottom: d < 6 ? _cellGap : 0,
+                                ),
                                 child: Container(
                                   width: _cellSize,
                                   height: _cellSize,
@@ -299,8 +497,8 @@ class _HeatmapCard extends StatelessWidget {
                                     color: isFuture
                                         ? Colors.transparent
                                         : hasVisit
-                                            ? AppTheme.accent
-                                            : AppTheme.border,
+                                        ? AppTheme.accent
+                                        : AppTheme.border,
                                     borderRadius: BorderRadius.circular(2),
                                   ),
                                 ),
@@ -319,20 +517,29 @@ class _HeatmapCard extends StatelessWidget {
           // Legend
           Row(
             children: [
-              const Text('Less', style: TextStyle(fontSize: 10, color: AppTheme.inkHint)),
+              const Text(
+                'Less',
+                style: TextStyle(fontSize: 10, color: AppTheme.inkHint),
+              ),
               const SizedBox(width: 6),
-              ...List.generate(4, (i) => Container(
-                width: 11,
-                height: 11,
-                margin: const EdgeInsets.only(right: 3),
-                decoration: BoxDecoration(
-                  color: i == 0
-                      ? AppTheme.border
-                      : AppTheme.accent.withValues(alpha: 0.25 + i * 0.25),
-                  borderRadius: BorderRadius.circular(2),
+              ...List.generate(
+                4,
+                (i) => Container(
+                  width: 11,
+                  height: 11,
+                  margin: const EdgeInsets.only(right: 3),
+                  decoration: BoxDecoration(
+                    color: i == 0
+                        ? AppTheme.border
+                        : AppTheme.accent.withValues(alpha: 0.25 + i * 0.25),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              )),
-              const Text('More', style: TextStyle(fontSize: 10, color: AppTheme.inkHint)),
+              ),
+              const Text(
+                'More',
+                style: TextStyle(fontSize: 10, color: AppTheme.inkHint),
+              ),
             ],
           ),
         ],
@@ -372,8 +579,10 @@ class _RecentListCard extends StatelessWidget {
           if (recent.isEmpty)
             const Padding(
               padding: EdgeInsets.all(24),
-              child: Text('No visits in the last 6 months',
-                  style: TextStyle(color: AppTheme.inkHint, fontSize: 13)),
+              child: Text(
+                'No visits in the last 6 months',
+                style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+              ),
             )
           else
             ListView.separated(
@@ -385,11 +594,21 @@ class _RecentListCard extends StatelessWidget {
               itemBuilder: (_, i) {
                 final dt = recent[i];
                 final months = [
-                  '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+                  '',
+                  'Jan',
+                  'Feb',
+                  'Mar',
+                  'Apr',
+                  'May',
+                  'Jun',
+                  'Jul',
+                  'Aug',
+                  'Sep',
+                  'Oct',
+                  'Nov',
+                  'Dec',
                 ];
-                final dateStr =
-                    '${months[dt.month]} ${dt.day}, ${dt.year}';
+                final dateStr = '${months[dt.month]} ${dt.day}, ${dt.year}';
                 final h = dt.hour;
                 final m = dt.minute.toString().padLeft(2, '0');
                 final period = h >= 12 ? 'PM' : 'AM';
@@ -398,7 +617,9 @@ class _RecentListCard extends StatelessWidget {
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   child: Row(
                     children: [
                       Container(
@@ -409,7 +630,7 @@ class _RecentListCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: const Icon(
-                          Icons.fitness_center_outlined,
+                          AppIcons.fitness,
                           size: 18,
                           color: AppTheme.statusActive,
                         ),
@@ -419,20 +640,29 @@ class _RecentListCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Gym Visit',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.ink)),
-                            Text(dateStr,
-                                style: const TextStyle(
-                                    fontSize: 11, color: AppTheme.inkHint)),
+                            const Text(
+                              'Gym Visit',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.ink,
+                              ),
+                            ),
+                            Text(
+                              dateStr,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.inkHint,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.statusActiveBg,
                           borderRadius: BorderRadius.circular(20),

@@ -93,16 +93,23 @@ class OneSignalService {
 
       final createdAt = DateTime.tryParse(gym['created_at'] as String? ?? '');
       if (createdAt != null) {
-        final ownerSinceDays = DateTime.now().toUtc().difference(createdAt.toUtc()).inDays;
+        final ownerSinceDays = DateTime.now()
+            .toUtc()
+            .difference(createdAt.toUtc())
+            .inDays;
         tags['owner_since_days'] = ownerSinceDays.toString();
       }
 
       // Whichever expiry is active — trial for gyms still trialing, plan
       // renewal date once subscribed.
-      final expiryStr = gym['plan_expires_at'] as String? ?? gym['trial_ends_at'] as String?;
+      final expiryStr =
+          gym['plan_expires_at'] as String? ?? gym['trial_ends_at'] as String?;
       final expiry = expiryStr != null ? DateTime.tryParse(expiryStr) : null;
       if (expiry != null) {
-        final daysLeft = expiry.toUtc().difference(DateTime.now().toUtc()).inDays;
+        final daysLeft = expiry
+            .toUtc()
+            .difference(DateTime.now().toUtc())
+            .inDays;
         tags['plan_expires_in_days'] = daysLeft.toString();
       }
 
