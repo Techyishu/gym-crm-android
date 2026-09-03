@@ -3,10 +3,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/auth_canvas_kit.dart';
 
-/// Canvas `mHelp` — member password recovery runs through the gym, not a
-/// self-serve email reset (there's no member email on file to reset). This
-/// replaces the old one-line "Ask your gym for help" text with the canvas's
-/// real 3-step explanation.
+/// Canvas `mHelp` — member password recovery is self-serve over SMS, not
+/// email (there's no member email on file to reset). It reuses the member
+/// signup flow: gym code -> phone -> SMS OTP -> set password, which
+/// `verify-phone-otp` accepts for an already-claimed member row too.
 class MemberHelpScreen extends StatelessWidget {
   const MemberHelpScreen({super.key});
 
@@ -26,11 +26,10 @@ class MemberHelpScreen extends StatelessWidget {
                   CanvasBack(onTap: () => context.pop()),
                   const SizedBox(height: 16),
                   const CanvasHeading(
-                    title: 'Your gym can reset it',
+                    title: 'Reset it over SMS',
                     subtitle:
-                        'Member passwords are handled at the gym desk. Ask '
-                        'your gym to send a fresh portal invite, then set a '
-                        'new password.',
+                        'Verify your mobile number and set a new password. '
+                        'No need to call the gym.',
                   ),
                   const SizedBox(height: 18),
                   Container(
@@ -45,26 +44,28 @@ class MemberHelpScreen extends StatelessWidget {
                         _HelpStep(
                           number: 1,
                           text:
-                              'Ask the front desk to resend your portal invite.',
+                              'Enter your gym code (ask the front desk if you '
+                              'do not have it).',
                         ),
                         Divider(height: 1, color: AppTheme.border),
                         _HelpStep(
                           number: 2,
                           text:
-                              'Sign in again with your gym code and mobile number.',
+                              'Enter the mobile number your gym has on file.',
                         ),
                         Divider(height: 1, color: AppTheme.border),
                         _HelpStep(
                           number: 3,
                           text:
-                              'Verify the code sent by SMS and set a new password.',
+                              'Enter the code sent by SMS, then set a new '
+                              'password.',
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 18),
                   CanvasButton(
-                    label: 'Sign in with gym code',
+                    label: 'Reset my password',
                     loading: false,
                     onPressed: () => context.push('/login/member-signup'),
                   ),

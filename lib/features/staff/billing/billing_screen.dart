@@ -931,27 +931,10 @@ class _TxnCard extends StatelessWidget {
               ],
             ),
             if (item.isDue && onCollect != null) ...[
-              const SizedBox(height: 11),
-              GestureDetector(
+              const SizedBox(height: 12),
+              WideActionButton(
+                label: item.isUpcoming ? 'Collect early' : 'Collect',
                 onTap: onCollect,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppTheme.accent,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    item.isUpcoming ? 'Collect early' : 'Collect',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
               ),
             ],
           ],
@@ -1018,27 +1001,10 @@ class _DueRow extends StatelessWidget {
             ],
           ),
           if (onCollect != null) ...[
-            const SizedBox(height: 11),
-            GestureDetector(
+            const SizedBox(height: 12),
+            WideActionButton(
+              label: item.isUpcoming ? 'Collect early' : 'Collect',
               onTap: onCollect,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.accent,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  item.isUpcoming ? 'Collect early' : 'Collect',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
             ),
           ],
         ],

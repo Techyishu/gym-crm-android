@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/billing/advance_payment_date.dart';
+import '../../../core/billing/plan_limits.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -322,11 +323,16 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           );
         } catch (e) {
           debugPrint('[GymCRM] CSV batch insert error: $e');
+          // A plan-limit rejection fails the whole batch, not just the row that
+          // crossed the cap — say so, or the importer reports a bare "Insert
+          // failed" against 100 rows and the owner has no idea why.
+          final reason = planLimitMessage(e) ?? 'Insert failed';
           for (var j = 0; j < batch.length; j++) {
             errors.add(
-              _Invalid(i + j + 2, batch[j]['email'] as String, 'Insert failed'),
+              _Invalid(i + j + 2, batch[j]['email'] as String, reason),
             );
           }
+          if (planLimitMessage(e) != null) break;
         }
       }
       // Optionally assign a plan to every imported member.

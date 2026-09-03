@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/access/gym_permissions.dart';
+import '../../../core/billing/plan_limits.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
@@ -168,6 +169,22 @@ class StaffScreen extends ConsumerWidget {
   }
 
   void _showInviteSheet(BuildContext context, WidgetRef ref) {
+    // Invites are created by the web API, so the staff_limit trigger would
+    // reject this server-side and surface its raw message. Stop it here so a
+    // Starter owner gets an upgrade prompt instead of a database error — and
+    // so we don't spend an API round-trip to find out.
+    final limit = staffLimit(ref.read(planTierProvider));
+    final current = ref.read(staffListProvider).valueOrNull?.length ?? 0;
+    if (limit != null && current >= limit) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Starter includes $limit login. Upgrade to Pro to add staff.',
+          ),
+        ),
+      );
+      return;
+    }
     showAdaptiveSheet(
       context: context,
       isScrollControlled: true,

@@ -186,19 +186,32 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
 
 // ── Shared plan body ──────────────────────────────────────────────────────────
 
-class _PlanBody extends StatelessWidget {
+class _PlanBody extends StatefulWidget {
   final Map<String, dynamic>? gym;
 
   const _PlanBody({required this.gym});
 
   @override
+  State<_PlanBody> createState() => _PlanBodyState();
+}
+
+class _PlanBodyState extends State<_PlanBody> {
+  // Tier lives here rather than inside the pricing widget so the hero's
+  // benefit list follows the toggle. A hero promising "unlimited members"
+  // while Starter is selected is the kind of mismatch that gets refunded.
+  String _tier = 'pro';
+
+  @override
   Widget build(BuildContext context) {
+    final gym = widget.gym;
     if (isIOS) {
       return _IosPaywall(gym: gym);
     }
 
     final isLegacy = gym?['legacy_pricing'] == true;
-    final features = isLegacy ? _kLegacyFeatures : _kProFeatures;
+    final features = isLegacy
+        ? _kLegacyFeatures
+        : (_tier == 'starter' ? _kStarterFeatures : _kProFeatures);
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -211,7 +224,11 @@ class _PlanBody extends StatelessWidget {
             if (isLegacy)
               _LegacyPricing(gym: gym)
             else
-              _NewProPricing(gym: gym),
+              _NewProPricing(
+                gym: gym,
+                tier: _tier,
+                onTierChanged: (t) => setState(() => _tier = t),
+              ),
             const SizedBox(height: 22),
             const _TrustFooterRow(),
             const SizedBox(height: 10),
@@ -223,12 +240,17 @@ class _PlanBody extends StatelessWidget {
   }
 }
 
-// ── Hero: identity + status + value, one continuous surface ──────────────────
+// ── Hero: identity + status + value, on the app's own canvas ─────────────────
 
-/// Everything that used to be three stacked containers (gym-stats card, a
-/// colored status banner, a second dark feature-checklist card) merged into
-/// one dark surface with hairline dividers between sections. Two near-identical
-/// dark cards back to back read as an accident, not a decision — this is one.
+/// Was one 24px-padded dark slab carrying four unrelated jobs at once —
+/// identity, headline, stats, status and the feature list — which read as a
+/// wall, sat as the heaviest object on a cream page, and pushed the price
+/// below the fold. Now: status first (it's the urgency), headline on the bare
+/// canvas, proof as a hairline stat strip, and only the feature list earns a
+/// surface of its own.
+///
+/// Depth is hairline borders only — no shadows, no gradients, no second card
+/// competing with the price panel below.
 class _PaywallHero extends ConsumerWidget {
   final Map<String, dynamic>? gym;
   final List<({IconData icon, String text})> features;
@@ -245,106 +267,169 @@ class _PaywallHero extends ConsumerWidget {
     final collected = stats.valueOrNull?['collected'] ?? 0;
     final hasData = members > 0;
 
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: AppTheme.darkCardDecoration(radius: 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            gymName.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.4,
-              color: AppTheme.onDarkSoft,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _HeroStatusRow(gym: gym),
+        const SizedBox(height: 24),
+        Text(
+          gymName.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
+            color: AppTheme.inkSoft,
           ),
-          const SizedBox(height: 10),
-          Text(
-            hasData
-                ? 'Your gym is running\non GymCRM. Keep it that way.'
-                : 'Everything your gym needs,\nin one app.',
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.onDark,
-              height: 1.18,
-              letterSpacing: -0.4,
-            ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          hasData
+              ? 'Your gym already runs\non GymCRM.'
+              : 'Everything your gym needs,\nin one app.',
+          style: const TextStyle(
+            fontSize: 30,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.ink,
+            height: 1.12,
+            letterSpacing: -0.7,
           ),
-          if (hasData) ...[
-            const SizedBox(height: 20),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _HeaderStat(value: '$members', label: 'members'),
-                _HeaderStat(
-                  value: formatCurrencyCompact(collected),
-                  label: 'collected this month',
-                ),
-                if (renewals > 0)
-                  _HeaderStat(
-                    value: '$renewals',
-                    label: 'renewals due',
-                    valueColor: const Color(0xFFEF8B72),
-                  ),
-              ],
-            ),
-          ] else ...[
-            const SizedBox(height: 12),
-            const Text(
-              'Members, fees, dues and check-ins — stop running your gym from a register.',
-              style: TextStyle(
-                fontSize: 13.5,
-                color: AppTheme.onDarkSoft,
-                height: 1.5,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          hasData
+              ? 'Keep it that way — pick a plan below.'
+              : 'Members, fees, dues and check-ins — stop running your gym '
+                    'from a register.',
+          style: const TextStyle(
+            fontSize: 14,
+            color: AppTheme.inkSoft,
+            height: 1.45,
+          ),
+        ),
+        // The gym's own numbers are the strongest argument on this screen, so
+        // they sit on the canvas as a hairline strip rather than inside yet
+        // another container.
+        if (hasData) ...[
+          const SizedBox(height: 22),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: const BoxDecoration(
+              border: Border(
+                top: BorderSide(color: AppTheme.border),
+                bottom: BorderSide(color: AppTheme.border),
               ),
             ),
-          ],
-          const SizedBox(height: 22),
-          _HeroDivider(),
-          const SizedBox(height: 18),
-          _HeroStatusRow(gym: gym),
-          const SizedBox(height: 22),
-          _HeroDivider(),
-          const SizedBox(height: 18),
-          ...features.map(
-            (f) => Padding(
-              padding: const EdgeInsets.only(bottom: 14),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _HeaderStat(value: '$members', label: 'members'),
+                  const _StatRule(),
+                  _HeaderStat(
+                    value: formatCurrencyCompact(collected),
+                    label: 'collected this month',
+                  ),
+                  if (renewals > 0) ...[
+                    const _StatRule(),
+                    _HeaderStat(
+                      value: '$renewals',
+                      label: 'renewals due',
+                      valueColor: AppTheme.statusDanger,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 24),
+        _FeatureList(features: features),
+      ],
+    );
+  }
+}
+
+/// Hairline between stat columns — the only separator in the hero, so the
+/// numbers group without a box around them.
+class _StatRule extends StatelessWidget {
+  const _StatRule();
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    margin: const EdgeInsets.symmetric(horizontal: 14),
+    color: AppTheme.border,
+  );
+}
+
+/// The one surface in the hero. White on cream with a hairline edge, so it
+/// reads as a distinct object without the weight of the old dark panel.
+class _FeatureList extends StatelessWidget {
+  final List<({IconData icon, String text})> features;
+  const _FeatureList({required this.features});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < features.length; i++)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                border: i == features.length - 1
+                    ? null
+                    : const Border(
+                        bottom: BorderSide(color: AppTheme.border),
+                      ),
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(f.icon, size: 17, color: AppTheme.mintOnDark),
-                  const SizedBox(width: 12),
+                  // Tinted square keeps the icons reading as one set at small
+                  // sizes; a bare 17px glyph on white got lost next to the text.
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentSoft,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Icon(
+                      features[i].icon,
+                      size: 16,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 13),
                   Expanded(
-                    child: Text(
-                      f.text,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        color: AppTheme.onDark,
-                        fontWeight: FontWeight.w500,
-                        height: 1.4,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 5),
+                      child: Text(
+                        features[i].text,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: AppTheme.ink,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-          ),
         ],
       ),
     );
   }
-}
-
-class _HeroDivider extends StatelessWidget {
-  const _HeroDivider();
-  @override
-  Widget build(BuildContext context) =>
-      Container(height: 1, color: Colors.white.withValues(alpha: 0.08));
 }
 
 class _HeaderStat extends StatelessWidget {
@@ -360,35 +445,30 @@ class _HeaderStat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.only(right: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                maxLines: 1,
-                style: AppTheme.numberStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: valueColor ?? AppTheme.onDark,
-                ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: AppTheme.numberStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: valueColor ?? AppTheme.ink,
               ),
             ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 11.5,
-                color: AppTheme.onDarkSoft,
-              ),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+          ),
+        ],
       ),
     );
   }
@@ -420,16 +500,21 @@ _StatusInfo _paywallStatus(Map<String, dynamic>? gym) {
       hasExpiry;
 
   if (isActive) {
-    // Only 'pro' is a real paid plan name — anything else (e.g. 'starter')
-    // reaching this branch is a trial row with a stray plan_expires_at, so
-    // don't print the raw plan string.
-    final planName = plan == 'pro' ? 'Pro' : 'Active';
+    // 'starter' and 'pro' are both real paid plan names now — capitalize
+    // either. Anything else that somehow reaches this branch (a stray
+    // plan_expires_at on a trial row) falls back to the generic label rather
+    // than printing a raw plan string.
+    final planName = switch (plan) {
+      'starter' => 'Starter',
+      'pro' => 'Pro',
+      _ => 'Active',
+    };
     String sub = 'You have an active $planName plan.';
     if (planExpiresAt != null) {
       final exp = DateTime.tryParse(planExpiresAt)?.toLocal();
       if (exp != null) {
         sub =
-            'Active $planName plan · renews '
+            '$planName plan · renews '
             '${exp.day}/${exp.month}/${exp.year}';
       }
     }
@@ -479,36 +564,15 @@ class _HeroStatusRow extends StatelessWidget {
   final Map<String, dynamic>? gym;
   const _HeroStatusRow({required this.gym});
 
+  // The hero used to be dark, so this needed its own two-tone palette. Now that
+  // it sits on the cream canvas it is the same object as _StatusBanner — one
+  // status presentation, using the design system's own tonal pairs.
   @override
-  Widget build(BuildContext context) {
-    final info = _paywallStatus(gym);
-    final color = info.tone == _StatusTone.active
-        ? AppTheme.mintOnDark
-        : const Color(0xFFEF8B72);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(info.icon, size: 16, color: color),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            info.message,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: color,
-              height: 1.4,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => _StatusBanner(gym: gym);
 }
 
-/// Standalone light-card version — the only place this still renders on its
-/// own is the iOS "you're already subscribed" management screen, which sits
-/// on the cream background, not inside a dark hero.
+/// Tonal status banner — trial countdown, active plan, or expired. Rendered by
+/// the hero and by the iOS "you're already subscribed" management screen.
 class _StatusBanner extends StatelessWidget {
   final Map<String, dynamic>? gym;
   const _StatusBanner({required this.gym});
@@ -795,6 +859,25 @@ class _TermOption {
   });
 }
 
+// Starter mirrors Pro's discount ladder (7 / 12 / 20%) so the two columns stay
+// comparable on the pricing page.
+// NOTE: the Dodo products for these do not exist yet — checkout will 503 for
+// 'starter' until they're created and mapped in the web repo's
+// /api/billing/mobile/checkout route.
+const _kStarterTerms = [
+  _TermOption('1mo', '1 Month', 299, 1),
+  _TermOption('3mo', '3 Months', 839, 3, discountPct: 7),
+  _TermOption('6mo', '6 Months', 1579, 6, discountPct: 12),
+  _TermOption(
+    '12mo',
+    '12 Months',
+    2870,
+    12,
+    discountPct: 20,
+    badge: '2 months free',
+  ),
+];
+
 const _kProTerms = [
   _TermOption('1mo', '1 Month', 499, 1),
   _TermOption('3mo', '3 Months', 1399, 3, discountPct: 7),
@@ -844,7 +927,7 @@ const _kProFeatures = [
   ),
   (
     icon: AppIcons.qrCode,
-    text: 'Members check in by QR — works even when your internet doesn\'t',
+    text: 'Members check in with a QR code, no register at the door',
   ),
   (
     icon: AppIcons.personAdd,
@@ -856,7 +939,38 @@ const _kProFeatures = [
   ),
   (
     icon: AppIcons.layers,
-    text: 'Up to 500 members, 4 staff logins, 300 WhatsApp reminders a month',
+    text: 'Unlimited members and staff logins, 300 WhatsApp reminders a month',
+  ),
+];
+
+// Starter (₹299) — same core product, with the limits enforced by
+// public.plan_member_limit / plan_staff_limit and lib/core/billing/plan_limits.dart.
+// Keep this list in step with `_starterLockedModules` there: a feature listed
+// as included that the app then locks is a refund request.
+const _kStarterFeatures = [
+  (
+    icon: AppIcons.wallet,
+    text: 'Know exactly who owes you money, today',
+  ),
+  (
+    icon: AppIcons.chat,
+    text: 'WhatsApp your members before fees are due — 100 reminders a month',
+  ),
+  (
+    icon: AppIcons.qrCode,
+    text: 'Members check in with a QR code, no register at the door',
+  ),
+  (
+    icon: AppIcons.showChart,
+    text: 'See what you collected this month without opening a register',
+  ),
+  (
+    icon: AppIcons.personAdd,
+    text: 'Leads, expenses, batches and exports — all included',
+  ),
+  (
+    icon: AppIcons.layers,
+    text: 'Up to 100 members, 1 login',
   ),
 ];
 
@@ -879,7 +993,13 @@ const _kEliteFeatures = [
 
 class _NewProPricing extends StatefulWidget {
   final Map<String, dynamic>? gym;
-  const _NewProPricing({required this.gym});
+  final String tier;
+  final ValueChanged<String> onTierChanged;
+  const _NewProPricing({
+    required this.gym,
+    required this.tier,
+    required this.onTierChanged,
+  });
 
   @override
   State<_NewProPricing> createState() => _NewProPricingState();
@@ -892,31 +1012,39 @@ class _NewProPricingState extends State<_NewProPricing> {
   // as the default ask.
   String _selectedTerm = '1mo';
 
-  List<_TermOption> get _terms => _kProTerms;
+  List<_TermOption> get _terms =>
+      widget.tier == 'starter' ? _kStarterTerms : _kProTerms;
 
   @override
   Widget build(BuildContext context) {
-    final selected = _terms.firstWhere((t) => t.id == _selectedTerm);
+    // Term ids are identical across both ladders, so a tier switch keeps the
+    // duration the owner already chose.
+    final selected = _terms.firstWhere(
+      (t) => t.id == _selectedTerm,
+      orElse: () => _terms.first,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        _TierToggle(tier: widget.tier, onChanged: widget.onTierChanged),
+        const SizedBox(height: 12),
         _DurationSegmented(
           terms: _terms,
-          selected: _selectedTerm,
+          selected: selected.id,
           onChanged: (id) => setState(() => _selectedTerm = id),
         ),
         const SizedBox(height: 14),
         _PricePanel(term: selected),
         const SizedBox(height: 16),
-        _UpgradeButton(gym: widget.gym, plan: 'pro', term: _selectedTerm),
+        _UpgradeButton(gym: widget.gym, plan: widget.tier, term: _selectedTerm),
       ],
     );
   }
 }
 
-// Elite is hidden until plan gating is enforced. Do not delete.
-// ignore: unused_element
+// Starter ₹299 / Pro ₹499. (Elite ₹999 stays defined but unreachable — the
+// scaffold below was written for it and is now used for Starter instead.)
 class _TierToggle extends StatelessWidget {
   final String tier;
   final ValueChanged<String> onChanged;
@@ -935,16 +1063,16 @@ class _TierToggle extends StatelessWidget {
         children: [
           Expanded(
             child: _TierTab(
-              label: 'Pro',
-              selected: tier == 'pro',
-              onTap: () => onChanged('pro'),
+              label: 'Starter',
+              selected: tier == 'starter',
+              onTap: () => onChanged('starter'),
             ),
           ),
           Expanded(
             child: _TierTab(
-              label: 'Elite',
-              selected: tier == 'elite',
-              onTap: () => onChanged('elite'),
+              label: 'Pro',
+              selected: tier == 'pro',
+              onTap: () => onChanged('pro'),
             ),
           ),
         ],
@@ -1315,8 +1443,11 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
   }
 
   /// Names the price so the button restates the commitment instead of the
-  /// generic "Upgrade to Pro" it used to say. Mirrors the term lists the two
+  /// generic "Upgrade to Pro" it used to say. Mirrors the term lists the
   /// pricing bodies render, including the legacy gym's locked-in 1mo rate.
+  ///
+  /// Was hardcoded to _kProTerms regardless of widget.plan — every tier's
+  /// button showed the Pro price even while Starter was selected.
   String get _ctaLabel {
     final isLegacy = widget.gym?['legacy_pricing'] == true;
     final terms = isLegacy
@@ -1329,7 +1460,7 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
             ),
             ..._kLegacyMultiMonthTerms,
           ]
-        : _kProTerms;
+        : (widget.plan == 'starter' ? _kStarterTerms : _kProTerms);
     final match = terms.where((t) => t.id == widget.term);
     if (match.isEmpty) return 'Subscribe';
     return 'Subscribe · ₹${match.first.totalPrice}';

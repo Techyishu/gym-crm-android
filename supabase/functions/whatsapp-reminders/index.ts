@@ -43,6 +43,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { planQuota } from '../_shared/plan_limits.ts'
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -70,13 +71,9 @@ interface GymSettings {
 
 /** Legacy (₹249, pre-price-change) gyms keep the old 100/mo cap regardless of
  * plan value; new tiers get their own cap. Keyed off legacy_pricing rather
- * than plan_price since plan_price is also used ad hoc for manual overrides. */
-function planQuota(gym: { plan: string; legacy_pricing?: boolean }): number {
-  if (gym.legacy_pricing) return 100
-  if (gym.plan === 'pro') return 300
-  if (gym.plan === 'elite') return 1500
-  return 0
-}
+ * than plan_price since plan_price is also used ad hoc for manual overrides.
+ * Lives in _shared/plan_limits.ts — this file and send-whatsapp-invoice spend
+ * the same counter, and had drifted to different Pro ceilings (300 vs 500). */
 
 function dateStr(d: Date) {
   return d.toISOString().split('T')[0]

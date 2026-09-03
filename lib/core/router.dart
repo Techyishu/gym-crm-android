@@ -69,6 +69,12 @@ final _memberNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'member');
 /// Cleared on sign-out; made moot once setup writes `home_route`.
 String? _gymSetupResolvedFor;
 
+/// Which user we've already looked up server-side consent for this session.
+/// Without it a genuine first-timer — who has no row to find — would repeat
+/// that query on every single navigation while sitting on /consent.
+/// Cleared on sign-out, same as the guard above.
+String? _consentCheckedFor;
+
 /// Set by setupGym(), cleared when the owner leaves the first-setup wizard.
 /// A plain `context.go('/staff/first-setup')` can't survive the trip: the DPDP
 /// consent gate below outranks it on a first signup, and the consent screen
@@ -139,7 +145,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         if (prefs.containsKey(kPendingFirstSetup)) {
           await prefs.remove(kPendingFirstSetup);
         }
+        // Consent is per-person, so it must not outlive the session either:
+        // on a shared front-desk device the next user would otherwise be
+        // covered by whoever logged in before them, having never been asked.
+        // Their own record comes back from the server on login — no re-prompt.
+        if (prefs.containsKey(kConsentGiven)) await clearLocalConsent(prefs);
         _gymSetupResolvedFor = null;
+        _consentCheckedFor = null;
         _sharedPrefs =
             null; // Force re-init next time so the cleared key is visible
         // /welcome (canvas "Who is signing in?") is the real landing page —
@@ -153,6 +165,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       // not before it. /legal/* stays reachable so the notice can link out.
       if (!(prefs.getBool(kConsentGiven) ?? false) &&
           !loc.startsWith('/legal/')) {
+        // Consent belongs to the person, not the device: someone who already
+        // agreed must not be asked again after a reinstall, on a second
+        // device, or because a different user last used this one. Checked once
+        // per session per user — a genuine first-timer shouldn't pay for this
+        // round trip on every navigation.
+        if (_consentCheckedFor != user.id) {
+          _consentCheckedFor = user.id;
+          if (await hydrateConsentFromServer(prefs)) return null;
+        }
         return loc == '/consent' ? null : '/consent';
       }
 

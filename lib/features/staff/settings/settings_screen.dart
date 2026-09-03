@@ -14,6 +14,8 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/whats_new.dart';
+import '../../../core/access/gym_permissions.dart';
+import '../../../core/billing/plan_limits.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart' as platform_info;
@@ -2112,6 +2114,16 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
         }
       });
     }
+    // Starter keeps the menu entry — hiding it would leave the owner unable to
+    // discover the feature exists — but gets the upgrade prompt instead of the
+    // device config.
+    if (!allowsBiometric(ref.watch(planTierProvider))) {
+      return const _SheetScaffold(
+        title: 'Biometric Device',
+        child: _BiometricProUpsell(),
+      );
+    }
+
     return _SheetScaffold(
       title: 'Biometric Device',
       child: _loading
@@ -2440,6 +2452,92 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
 
   Future<void> _launchExternal(String url) async {
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+}
+
+/// Shown in place of the device config when the gym is on Starter. Says what
+/// the feature does before asking for money — an upsell that only says
+/// "upgrade" tells the owner nothing about what they'd be buying.
+class _BiometricProUpsell extends StatelessWidget {
+  const _BiometricProUpsell();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: AppTheme.accentSoft,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Icon(
+            AppIcons.fingerprint,
+            size: 24,
+            color: AppTheme.accent,
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Biometric device is a Pro feature',
+          style: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.ink,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Connect a fingerprint machine at your door so members check in '
+          'without anyone at the desk. Attendance lands in GymCRM on its own.',
+          style: TextStyle(
+            fontSize: 13.5,
+            color: AppTheme.inkSoft,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.surface2,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(AppIcons.qrCode, size: 18, color: AppTheme.inkSoft),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'QR check-in works on your plan — members scan at the door '
+                  'from their phone, no hardware needed.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: AppTheme.inkSoft,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              context.push('/staff/subscription');
+            },
+            child: const Text('See Pro plans'),
+          ),
+        ),
+      ],
+    );
   }
 }
 

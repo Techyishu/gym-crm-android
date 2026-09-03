@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/collect_payment.dart';
@@ -273,55 +274,78 @@ class _DueRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              _Avatar(member: member),
-              const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _name(member),
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                              color: AppTheme.ink,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => context.go('/staff/members/${member['id']}'),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          _Avatar(member: member),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        _name(member),
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14,
+                                          color: AppTheme.ink,
+                                        ),
+                                      ),
+                                    ),
+                                    if (isFrozen) ...[
+                                      const SizedBox(width: 6),
+                                      _Badge(
+                                        label: 'Hold',
+                                        bg: const Color(0xFFFFCDD2),
+                                        fg: const Color(0xFFB71C1C),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  dateStr != null
+                                      ? '$subtitle · ${formatDateFromString(dateStr)}'
+                                      : subtitle,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: subtitleColor,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                        if (isFrozen) ...[
-                          const SizedBox(width: 6),
-                          _Badge(
-                            label: 'Hold',
-                            bg: const Color(0xFFFFCDD2),
-                            fg: const Color(0xFFB71C1C),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            AppIcons.chevronRight,
+                            size: 16,
+                            color: AppTheme.inkHint,
                           ),
                         ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      dateStr != null
-                          ? '$subtitle · ${formatDateFromString(dateStr)}'
-                          : subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: subtitleColor,
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
-              if ((member['phone'] as String? ?? '').isNotEmpty)
+              if ((member['phone'] as String? ?? '').isNotEmpty) ...[
+                const SizedBox(width: 8),
                 _WhatsAppButton(member: member, isReminder: !overdue),
+              ],
             ],
           ),
-          const SizedBox(height: 11),
+          const SizedBox(height: 12),
           _CollectButton(
             memberId: member['id'] as String,
             memberName: _name(member),
@@ -454,7 +478,8 @@ class _CollectButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final role = ref.watch(staffRoleProvider).valueOrNull;
     if (!RoleAccess.canRecordPayment(role)) return const SizedBox.shrink();
-    return GestureDetector(
+    return WideActionButton(
+      label: isFuturePaymentDate(nextPaymentDate) ? 'Collect early' : 'Collect',
       onTap: () {
         showAdaptiveSheet(
           context: context,
@@ -469,24 +494,6 @@ class _CollectButton extends ConsumerWidget {
           }
         });
       },
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: AppTheme.accent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          isFuturePaymentDate(nextPaymentDate) ? 'Collect early' : 'Collect',
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-          ),
-        ),
-      ),
     );
   }
 }

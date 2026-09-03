@@ -9,6 +9,7 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/billing/plan_limits.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/services/coachmark_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -69,13 +70,9 @@ const _kWhatsAppTemplates = [
   ),
 ];
 
-int _planQuota(Map<String, dynamic> gym) {
-  if (gym['legacy_pricing'] == true) return 100;
-  final plan = gym['plan'] as String?;
-  if (plan == 'pro') return 300;
-  if (plan == 'elite') return 1500;
-  return 0;
-}
+// Quota lives in lib/core/billing/plan_limits.dart, shared with the DB
+// (plan_whatsapp_quota) and the edge functions (_shared/plan_limits.ts).
+int _planQuota(Map<String, dynamic> gym) => whatsappQuota(gym);
 
 final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>(
   (ref) async {
@@ -798,6 +795,23 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       if (next.length == 1) return;
       next.remove(day);
     } else {
+      // Each offset is one message per member per cycle, so the number of
+      // offsets — not the credit balance — is what multiplies a gym's WhatsApp
+      // cost. Capped by tier here so a Starter gym can't configure a month it
+      // will run out of credits halfway through. Push reminders above are
+      // deliberately uncapped — they cost us nothing.
+      final limit = reminderDaysLimit(planTierOf(widget.gym));
+      if (next.length >= limit) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Starter includes $limit reminder per member. Upgrade to Pro for '
+              'up to ${reminderDaysLimit(PlanTier.pro)}.',
+            ),
+          ),
+        );
+        return;
+      }
       next.add(day);
     }
     _save(days: next);

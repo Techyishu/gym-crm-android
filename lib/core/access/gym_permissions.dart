@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
+import '../billing/plan_limits.dart';
 
 enum GymModule {
   members,
@@ -162,6 +163,17 @@ final staffPermissionsProvider = FutureProvider<GymPermissions>((ref) async {
   return GymPermissions.roleDefaults(role);
 });
 
+/// The gym's current plan tier. `free` until the profile loads, which is the
+/// unrestricted tier — a momentary null must not flash a locked UI at someone
+/// who has paid.
+final planTierProvider = Provider<PlanTier>((ref) {
+  final profile = ref.watch(staffProfileProvider).valueOrNull;
+  return planTierOf(profile?['gyms'] as Map<String, dynamic>?);
+});
+
+/// Role permission only. No plan gating here: Starter and Pro expose the same
+/// modules and actions — they differ by the caps in plan_limits.dart, plus
+/// biometric, which is gated at its own sheet.
 final gymPermissionProvider = Provider.family<bool, (GymModule, GymAction)>((
   ref,
   permission,

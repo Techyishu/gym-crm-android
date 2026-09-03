@@ -18,6 +18,15 @@ class WhatsNewEntry {
 
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
+    version: '1.0.4+1',
+    date: '2 Sep 2026',
+    title: 'Members can reset their own password',
+    bullets: [
+      'A member who forgets their portal password can now reset it themselves — Forgot password? on the member login, then gym code, mobile number, the code we text them, and a new password.',
+      'Nothing for you to do at the desk: no re-invite, no account deletion.',
+    ],
+  ),
+  WhatsNewEntry(
     version: '1.0.3+50',
     date: '30 Aug 2026',
     title: 'GST on invoices, and downloads you can find',

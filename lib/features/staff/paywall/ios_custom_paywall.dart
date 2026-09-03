@@ -158,7 +158,7 @@ const _kIosFeatures = [
   ),
   (
     icon: AppIcons.qrCode,
-    text: 'Members check in by QR — works even when your internet doesn\'t',
+    text: 'Members check in with a QR code, no register at the door',
   ),
   (
     icon: AppIcons.allInclusive,

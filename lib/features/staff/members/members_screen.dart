@@ -10,6 +10,7 @@ import '../../../core/access/role_access.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/plan_limits.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/member_photo_service.dart';
@@ -1731,7 +1732,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
       if (mounted) {
         final msg = (e is PostgrestException && e.code == '23505')
             ? 'Member ID "${_customIdCtrl.text.trim()}" is already in use. Please use a different one.'
-            : 'Failed to add member. Please try again.';
+            : planLimitMessage(e) ?? 'Failed to add member. Please try again.';
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));

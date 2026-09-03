@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:facebook_app_events/facebook_app_events.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/app_icons.dart';
@@ -19,6 +21,56 @@ const kConsentGiven = 'dpdp_consent_v2';
 const kConsentAnalytics = 'consent_analytics';
 const kConsentMarketing = 'consent_marketing';
 const kConsentAds = 'consent_ads';
+
+/// Server-side counterpart of the `_v*` suffix above. Stored on the
+/// `user_consents` row; a mismatch is what re-prompts after a material change.
+/// Bump this and `kConsentGiven` together.
+const kConsentVersion = 'v2';
+
+/// Local keys are per-device, so they must not outlive the session that set
+/// them — otherwise the next person to log in on a shared front-desk device
+/// inherits someone else's consent without ever being asked. Their own choice
+/// comes back from the server on login, so this costs them no extra prompt.
+Future<void> clearLocalConsent(SharedPreferences prefs) async {
+  await prefs.remove(kConsentGiven);
+  await prefs.remove(kConsentAnalytics);
+  await prefs.remove(kConsentMarketing);
+  await prefs.remove(kConsentAds);
+  await applyStoredConsent(prefs);
+}
+
+/// Pulls this user's stored consent into local prefs. Returns true when a
+/// usable record exists, meaning the screen can be skipped.
+///
+/// A row from an older `version` is deliberately treated as absent: they
+/// consented to a different disclosure than the one we would show now.
+Future<bool> hydrateConsentFromServer(SharedPreferences prefs) async {
+  final uid = Supabase.instance.client.auth.currentUser?.id;
+  if (uid == null) return false;
+  try {
+    // This sits on the login path — the router awaits it before the first
+    // screen. On a weak connection an unbounded wait is a hang, so cap it and
+    // fall through to asking instead.
+    final row = await Supabase.instance.client
+        .from('user_consents')
+        .select('version, analytics, marketing, ads')
+        .eq('user_id', uid)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 4));
+    if (row == null || row['version'] != kConsentVersion) return false;
+
+    await prefs.setBool(kConsentAnalytics, row['analytics'] == true);
+    await prefs.setBool(kConsentMarketing, row['marketing'] == true);
+    await prefs.setBool(kConsentAds, row['ads'] == true);
+    await prefs.setBool(kConsentGiven, true);
+    await applyStoredConsent(prefs);
+    return true;
+  } catch (_) {
+    // Offline or RLS hiccup: fall through to asking. Showing the screen an
+    // extra time is recoverable; collecting without consent is not.
+    return false;
+  }
+}
 
 /// Live analytics consent, read by Sentry's `beforeSend` in main.dart.
 ///
@@ -71,16 +123,43 @@ class _ConsentScreenState extends State<ConsentScreen> {
   bool _loaded = false;
   bool _saving = false;
 
+  /// Gym members see a different disclosure: they have no gym record, and the
+  /// Meta ad measurement exists to attribute *gym* signups, so a member is
+  /// never the conversion it measures. Asking them for it would be consent for
+  /// a purpose that does not apply to them.
+  bool _isMember = false;
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// A staff user has a `profiles` row; a member does not. Cheaper than
+  /// resolving the whole portal destination, and this screen only needs to
+  /// know which copy to render.
+  Future<bool> _resolveIsMember() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return false;
+    try {
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('id')
+          .eq('id', uid)
+          .maybeSingle();
+      return profile == null;
+    } catch (_) {
+      // Unknown: fall back to the staff copy, which discloses strictly more.
+      return false;
+    }
+  }
+
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final isMember = await _resolveIsMember();
     if (!mounted) return;
     setState(() {
+      _isMember = isMember;
       // First run defaults to opt-in-looking switches, but nothing is stored
       // (and nothing collected) until the user actually taps a button.
       _analytics = prefs.getBool(kConsentAnalytics) ?? true;
@@ -92,18 +171,53 @@ class _ConsentScreenState extends State<ConsentScreen> {
     });
   }
 
+  /// Records the choice against the user so it survives reinstalls and new
+  /// devices. `granted_at` is left to the column default on insert and left
+  /// alone on update, so it keeps meaning "first consented", while
+  /// `updated_at` tracks the latest change.
+  Future<void> _saveToServer({
+    required bool analytics,
+    required bool marketing,
+    required bool ads,
+  }) async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      await Supabase.instance.client.from('user_consents').upsert({
+        'user_id': uid,
+        'version': kConsentVersion,
+        'analytics': analytics,
+        'marketing': marketing,
+        'ads': ads,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id');
+    } catch (_) {
+      // Local prefs already hold the choice, so the app behaves correctly on
+      // this device; the next save or login re-attempts the write. Never block
+      // the user on this.
+    }
+  }
+
   Future<void> _save({
     required bool analytics,
     required bool marketing,
     required bool ads,
   }) async {
     setState(() => _saving = true);
+    // Members are never shown the ad measurement tile, so they cannot have
+    // agreed to it — never let a stale local `true` ride along.
+    final effectiveAds = _isMember ? false : ads;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kConsentAnalytics, analytics);
     await prefs.setBool(kConsentMarketing, marketing);
-    await prefs.setBool(kConsentAds, ads);
+    await prefs.setBool(kConsentAds, effectiveAds);
     await prefs.setBool(kConsentGiven, true);
     await applyStoredConsent(prefs);
+    await _saveToServer(
+      analytics: analytics,
+      marketing: marketing,
+      ads: effectiveAds,
+    );
     if (!mounted) return;
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
@@ -172,11 +286,17 @@ class _ConsentScreenState extends State<ConsentScreen> {
 
                         _ConsentTile(
                           icon: AppIcons.people,
-                          title: 'Run your gym',
-                          body:
-                              'Your name, email, phone, gym details, member records, '
-                              'attendance and payments. Stored on Supabase servers. '
-                              'The app cannot work without this.',
+                          title: _isMember
+                              ? 'Your membership'
+                              : 'Run your gym',
+                          body: _isMember
+                              ? 'Your name, phone, membership plan, dues, '
+                                    'attendance and check-ins — shared with the gym '
+                                    'you are a member of. Stored on Supabase servers. '
+                                    'The app cannot work without this.'
+                              : 'Your name, email, phone, gym details, member records, '
+                                    'attendance and payments. Stored on Supabase servers. '
+                                    'The app cannot work without this.',
                           value: true,
                           locked: true,
                           onChanged: null,
@@ -197,28 +317,35 @@ class _ConsentScreenState extends State<ConsentScreen> {
                         _ConsentTile(
                           icon: AppIcons.notifications,
                           title: 'Product updates',
-                          body:
-                              'Push notifications about new features, offers and tips, '
-                              'sent through OneSignal.',
+                          body: _isMember
+                              ? 'Push notifications about your gym — renewals, '
+                                    'dues and announcements — sent through OneSignal.'
+                              : 'Push notifications about new features, offers and tips, '
+                                    'sent through OneSignal.',
                           value: _marketing,
                           onChanged: _saving
                               ? null
                               : (v) => setState(() => _marketing = v),
                         ),
-                        const SizedBox(height: 12),
-                        _ConsentTile(
-                          icon: AppIcons.campaign,
-                          title: 'Ad measurement',
-                          body:
-                              'Your device advertising ID and app events — install, '
-                              'sign-up, subscription — shared with Meta (Facebook) so '
-                              'we can see which ads bring gyms to us. Your member and '
-                              'payment records are never shared.',
-                          value: _ads,
-                          onChanged: _saving
-                              ? null
-                              : (v) => setState(() => _ads = v),
-                        ),
+                        // Meta's events attribute gym signups. A member is never
+                        // that conversion, so the purpose does not exist for
+                        // them — the tile is omitted rather than defaulted off.
+                        if (!_isMember) ...[
+                          const SizedBox(height: 12),
+                          _ConsentTile(
+                            icon: AppIcons.campaign,
+                            title: 'Ad measurement',
+                            body:
+                                'Your device advertising ID and app events — install, '
+                                'sign-up, subscription — shared with Meta (Facebook) so '
+                                'we can see which ads bring gyms to us. Your member and '
+                                'payment records are never shared.',
+                            value: _ads,
+                            onChanged: _saving
+                                ? null
+                                : (v) => setState(() => _ads = v),
+                          ),
+                        ],
 
                         const SizedBox(height: 22),
                         _RightsNote(),

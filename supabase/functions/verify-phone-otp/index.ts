@@ -74,12 +74,17 @@ async function verifyMsg91AccessToken(accessToken: string): Promise<string> {
   return normalizePhone(String(verifiedPhone))
 }
 
-// Member self-serve signup: phone must match an existing `members` row for
-// THIS specific gym (staff must have already added the member — just not
-// invited them). Deliberately does not touch `phone_identities` — that table
-// is keyed by phone alone (staff-only), and a member could share a phone
-// with a staff account (e.g. family running the gym); mixing them would let
-// one login resolve to the other's account.
+// Member self-serve signup AND password reset: phone must match an existing
+// `members` row for THIS specific gym (staff must have already added the
+// member — just not invited them). Deliberately does not touch
+// `phone_identities` — that table is keyed by phone alone (staff-only), and a
+// member could share a phone with a staff account (e.g. family running the
+// gym); mixing them would let one login resolve to the other's account.
+//
+// An already-claimed row (user_id set) is NOT an error: the caller has just
+// proved ownership of that phone over SMS, which is exactly the proof a
+// password reset needs, so we hand back the same user and let the client's
+// "set password" step overwrite it.
 async function findOrCreateMemberUserId(phone: string, gymId: string): Promise<{ userId: string; error?: string }> {
   const { data: members, error } = await supabase
     .from('members')
@@ -94,9 +99,7 @@ async function findOrCreateMemberUserId(phone: string, gymId: string): Promise<{
   if (!match) {
     return { userId: '', error: 'No member found with this number at this gym. Ask your gym to add you as a member first.' }
   }
-  if (match.user_id) {
-    return { userId: '', error: 'An account already exists for this number. Please log in instead.' }
-  }
+  if (match.user_id) return { userId: match.user_id }
 
   const digits = phone.replace(/^91/, '').slice(-10)
   const syntheticEmail = `${digits}@member.gymcrm.internal`
@@ -143,13 +146,25 @@ async function findOrCreateUserId(phone: string): Promise<string> {
   return created.user.id
 }
 
+// The web build calls this cross-origin, so the browser sends a CORS
+// preflight first. Without these the OPTIONS gets the 405 below and the real
+// POST is never sent — the member sees a generic failure after already
+// burning an SMS. Native (Android/iOS) sends no preflight, which is why this
+// only ever broke on web.
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
 Deno.serve(async (req: Request) => {
-  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors })
 
   const body = await req.json().catch(() => ({}))
   const accessToken = body?.accessToken as string | undefined
   const gymId = body?.gymId as string | undefined
-  if (!accessToken) return new Response('accessToken is required', { status: 400 })
+  if (!accessToken) return new Response('accessToken is required', { status: 400, headers: cors })
 
   try {
     const phone = await verifyMsg91AccessToken(accessToken)
@@ -160,7 +175,7 @@ Deno.serve(async (req: Request) => {
       if (result.error) {
         return new Response(JSON.stringify({ error: result.error }), {
           status: 400,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
       userId = result.userId
@@ -182,13 +197,13 @@ Deno.serve(async (req: Request) => {
 
     return new Response(
       JSON.stringify({ email: userRecord.user.email, hashedToken }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
+      { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } },
     )
   } catch (e) {
     console.error('[verify-phone-otp] failed', e)
     return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 400,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
 })

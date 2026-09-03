@@ -354,6 +354,44 @@ class PillButton extends StatelessWidget {
   }
 }
 
+// ── Full-width primary action (balanced horizontal and vertical weight) ─────
+
+class WideActionButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onTap;
+
+  const WideActionButton({super.key, required this.label, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: Material(
+          color: AppTheme.accent,
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Center(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.accentFg,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Round icon button (call / whatsapp circles) ──────────────────────────────
 
 class RoundIconButton extends StatelessWidget {

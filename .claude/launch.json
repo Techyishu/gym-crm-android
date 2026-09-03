@@ -5,13 +5,17 @@
       "name": "flutter-web",
       "runtimeExecutable": "flutter",
       "runtimeArgs": [
-        "run", "-d", "web-server", "--web-port", "$PORT",
+        "run",
+        "-d",
+        "web-server",
+        "--web-port",
+        "8080",
+        "--web-hostname",
+        "127.0.0.1",
         "--dart-define=SUPABASE_URL=https://orlqjhqxeyukvfzsursl.supabase.co",
-        "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ybHFqaHF4ZXl1a3ZmenN1cnNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODM2NTgsImV4cCI6MjA5MDk1OTY1OH0.4JXUdbPTkofshaYaYSOJwE9qwQ2zwjUQljuu5cfgzzw",
-        "--dart-define=WEB_APP_BASE_URL=https://b279-2401-4900-1ca8-83b0-45c7-3f92-140c-68ce.ngrok-free.app"
+        "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ybHFqaHF4ZXl1a3ZmenN1cnNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzODM2NTgsImV4cCI6MjA5MDk1OTY1OH0.4JXUdbPTkofshaYaYSOJwE9qwQ2zwjUQljuu5cfgzzw"
       ],
-      "port": 8765,
-      "autoPort": true
+      "port": 8080
     }
   ]
 }

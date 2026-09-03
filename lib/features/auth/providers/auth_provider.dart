@@ -454,13 +454,21 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       _ref.invalidate(memberRecordProvider);
       state = const AsyncValue.data(null);
       return null;
+    } on FunctionException catch (e) {
+      // invoke() throws on any non-2xx, so the edge function's own
+      // {"error": "..."} body never reaches the `data` branch above — surface
+      // that message instead of dumping the raw exception at the user.
+      final details = e.details;
+      final message = details is Map ? details['error'] as String? : null;
+      state = AsyncValue.error(e, StackTrace.current);
+      return message ?? 'Phone verification failed. Please try again.';
     } on AuthException catch (e) {
       state = AsyncValue.error(e, StackTrace.current);
       return e.message;
     } catch (e, st) {
       debugPrint('[GymCRM] verifyPhoneOtpToken error: $e\n$st');
       state = AsyncValue.error(e, StackTrace.current);
-      return 'Phone verification failed: $e';
+      return 'Phone verification failed. Please try again.';
     }
   }
 
