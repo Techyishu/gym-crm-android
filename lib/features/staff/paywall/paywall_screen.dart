@@ -209,9 +209,19 @@ class _PlanBodyState extends State<_PlanBody> {
     }
 
     final isLegacy = gym?['legacy_pricing'] == true;
+    // Not symmetric on purpose: a Pro subscriber must never be shown Starter
+    // — there's nowhere for that tap to go but a downgrade, which the backend
+    // 422s anyway (checkout/route.ts compares per-month price). A Starter
+    // subscriber, on the other hand, SHOULD land on Pro here — that's the
+    // upgrade we want them looking at, not a toggle back to the plan they're
+    // already on. So: once a gym has active billing, this screen always
+    // shows Pro, on both sides of that divide, and the toggle itself is
+    // hidden — there is nothing left for it to switch between.
+    final isActive = _paywallStatus(gym).tone == _StatusTone.active;
+    final effectiveTier = (!_kStarterTierEnabled || isActive) ? 'pro' : _tier;
     final features = isLegacy
         ? _kLegacyFeatures
-        : (_tier == 'starter' ? _kStarterFeatures : _kProFeatures);
+        : (effectiveTier == 'starter' ? _kStarterFeatures : _kProFeatures);
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -226,7 +236,8 @@ class _PlanBodyState extends State<_PlanBody> {
             else
               _NewProPricing(
                 gym: gym,
-                tier: _tier,
+                tier: effectiveTier,
+                showTierToggle: _kStarterTierEnabled && !isActive,
                 onTierChanged: (t) => setState(() => _tier = t),
               ),
             const SizedBox(height: 22),
@@ -859,11 +870,15 @@ class _TermOption {
   });
 }
 
+// Starter is fully wired (Dodo products, DB caps, checkout) but hidden from
+// the paywall for now — flip this back on when ready to sell it again. The
+// rest of the tier — plan_member_limit()/plan_staff_limit() triggers, the
+// whatsapp quota, the biometric gate — is untouched by this flag; it only
+// controls whether _PlanBody ever offers the tier as a choice.
+const _kStarterTierEnabled = false;
+
 // Starter mirrors Pro's discount ladder (7 / 12 / 20%) so the two columns stay
 // comparable on the pricing page.
-// NOTE: the Dodo products for these do not exist yet — checkout will 503 for
-// 'starter' until they're created and mapped in the web repo's
-// /api/billing/mobile/checkout route.
 const _kStarterTerms = [
   _TermOption('1mo', '1 Month', 299, 1),
   _TermOption('3mo', '3 Months', 839, 3, discountPct: 7),
@@ -994,10 +1009,12 @@ const _kEliteFeatures = [
 class _NewProPricing extends StatefulWidget {
   final Map<String, dynamic>? gym;
   final String tier;
+  final bool showTierToggle;
   final ValueChanged<String> onTierChanged;
   const _NewProPricing({
     required this.gym,
     required this.tier,
+    required this.showTierToggle,
     required this.onTierChanged,
   });
 
@@ -1027,8 +1044,10 @@ class _NewProPricingState extends State<_NewProPricing> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _TierToggle(tier: widget.tier, onChanged: widget.onTierChanged),
-        const SizedBox(height: 12),
+        if (widget.showTierToggle) ...[
+          _TierToggle(tier: widget.tier, onChanged: widget.onTierChanged),
+          const SizedBox(height: 12),
+        ],
         _DurationSegmented(
           terms: _terms,
           selected: selected.id,

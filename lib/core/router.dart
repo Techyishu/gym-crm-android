@@ -145,11 +145,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         if (prefs.containsKey(kPendingFirstSetup)) {
           await prefs.remove(kPendingFirstSetup);
         }
-        // Consent is per-person, so it must not outlive the session either:
-        // on a shared front-desk device the next user would otherwise be
-        // covered by whoever logged in before them, having never been asked.
-        // Their own record comes back from the server on login — no re-prompt.
-        if (prefs.containsKey(kConsentGiven)) await clearLocalConsent(prefs);
+        // Consent is taken once, ever, and never re-cleared or re-checked —
+        // not on sign-out, not on a new sign-in. This used to wipe
+        // kConsentGiven every time this branch ran, which includes the
+        // login screen simply sitting idle before anyone has signed out of
+        // anything. That forced a live Supabase consent lookup inside
+        // redirect() on literally every sign-in, racing the auth-state
+        // change from the login itself and leaving the button stuck on
+        // "Logging in…" — the session had actually already been created.
         _gymSetupResolvedFor = null;
         _consentCheckedFor = null;
         _sharedPrefs =

@@ -27,18 +27,6 @@ const kConsentAds = 'consent_ads';
 /// Bump this and `kConsentGiven` together.
 const kConsentVersion = 'v2';
 
-/// Local keys are per-device, so they must not outlive the session that set
-/// them — otherwise the next person to log in on a shared front-desk device
-/// inherits someone else's consent without ever being asked. Their own choice
-/// comes back from the server on login, so this costs them no extra prompt.
-Future<void> clearLocalConsent(SharedPreferences prefs) async {
-  await prefs.remove(kConsentGiven);
-  await prefs.remove(kConsentAnalytics);
-  await prefs.remove(kConsentMarketing);
-  await prefs.remove(kConsentAds);
-  await applyStoredConsent(prefs);
-}
-
 /// Pulls this user's stored consent into local prefs. Returns true when a
 /// usable record exists, meaning the screen can be skipped.
 ///
