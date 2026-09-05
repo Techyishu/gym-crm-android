@@ -1,5 +1,6 @@
+import 'dart:typed_data';
+
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,21 +15,21 @@ class MemberPhotoService {
   static const _workerBase =
       'https://gym-crm-photo-proxy.ishansingh687.workers.dev';
 
+  static const _byteCacheTtl = Duration(minutes: 55);
+  static final Map<String, _CachedBytes> _byteCache = {};
+
   /// Builds the Worker URL for a stored avatar value. Accepts plain paths
   /// ('gymId/file.png') and legacy Supabase public/signed URLs.
   ///
-  /// On web, the token rides as a `?token=` query param instead of (only) an
-  /// Authorization header — CachedNetworkImage renders via a native <img>
-  /// tag on web, which can't carry custom headers at all, so a header-only
-  /// auth request there always 401s. The Worker already accepts either.
+  /// Native platforms pass [authHeaders] straight to [CachedNetworkImage],
+  /// which is enough — this URL never carries the token. On web, use
+  /// [fetchBytes] instead: Flutter Web's image pipeline renders via a
+  /// browser <img> element that silently drops custom headers, so a plain
+  /// URL there has no way to authenticate.
   static String? photoUrl(String? stored) {
     final path = pathFrom(stored);
     if (path == null) return null;
-    if (!kIsWeb) return '$_workerBase/$path';
-
-    final token = Supabase.instance.client.auth.currentSession?.accessToken;
-    if (token == null) return '$_workerBase/$path';
-    return '$_workerBase/$path?token=${Uri.encodeQueryComponent(token)}';
+    return '$_workerBase/$path';
   }
 
   /// Auth header required by the Worker on every request.
@@ -36,6 +37,33 @@ class MemberPhotoService {
     final token = Supabase.instance.client.auth.currentSession?.accessToken;
     if (token == null) return {};
     return {'Authorization': 'Bearer $token'};
+  }
+
+  /// Fetches photo bytes with the auth token in a header (never a URL) —
+  /// the web-safe equivalent of [photoUrl] + [authHeaders]. Cached in
+  /// memory for 55 minutes per path.
+  static Future<Uint8List?> fetchBytes(String? stored) async {
+    final path = pathFrom(stored);
+    if (path == null) return null;
+
+    final hit = _byteCache[path];
+    if (hit != null && DateTime.now().difference(hit.at) < _byteCacheTtl) {
+      return hit.bytes;
+    }
+
+    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    if (token == null) return null;
+    try {
+      final res = await http.get(
+        Uri.parse('$_workerBase/$path'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode != 200) return null;
+      _byteCache[path] = _CachedBytes(res.bodyBytes, DateTime.now());
+      return res.bodyBytes;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Uploads photo bytes to the given storage path via the Worker.
@@ -59,6 +87,7 @@ class MemberPhotoService {
       '$_workerBase/$path',
       cacheKey: path,
     );
+    _byteCache.remove(path);
   }
 
   static String? pathFrom(String? stored) {
@@ -69,4 +98,10 @@ class MemberPhotoService {
     if (i == -1) return null;
     return Uri.decodeFull(stored.substring(i + marker.length).split('?').first);
   }
+}
+
+class _CachedBytes {
+  final Uint8List bytes;
+  final DateTime at;
+  _CachedBytes(this.bytes, this.at);
 }

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +17,7 @@ import '../../../core/services/member_photo_service.dart';
 import '../../../core/services/check_in_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
 import '../../../shared/widgets/member_photo.dart';
+import '../../../shared/widgets/authed_member_image.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -1358,12 +1358,11 @@ class _MemberAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final photoUrl = MemberPhotoService.photoUrl(url);
-    if (photoUrl == null) return _InitialsAvatar(size: size);
-    return CachedNetworkImage(
-      imageUrl: photoUrl,
-      httpHeaders: MemberPhotoService.authHeaders(),
-      cacheKey: MemberPhotoService.pathFrom(url),
+    if (MemberPhotoService.pathFrom(url) == null) {
+      return _InitialsAvatar(size: size);
+    }
+    return AuthedMemberImage(
+      stored: url,
       imageBuilder: (_, img) => Container(
         width: size,
         height: size,
@@ -1372,8 +1371,8 @@ class _MemberAvatar extends StatelessWidget {
           image: DecorationImage(image: img, fit: BoxFit.cover),
         ),
       ),
-      placeholder: (_, __) => _InitialsAvatar(size: size),
-      errorWidget: (_, __, ___) => _InitialsAvatar(size: size),
+      placeholder: (_) => _InitialsAvatar(size: size),
+      errorWidget: (_) => _InitialsAvatar(size: size),
     );
   }
 }

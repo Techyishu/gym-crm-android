@@ -1,7 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/services/member_photo_service.dart';
+import 'authed_member_image.dart';
 
 /// Renders a member photo from its stored value (storage path or legacy
 /// public URL) by resolving a signed URL first — the member-photos bucket is
@@ -21,15 +21,12 @@ class MemberPhoto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = MemberPhotoService.photoUrl(stored);
-    if (url == null) return fallback;
+    if (MemberPhotoService.pathFrom(stored) == null) return fallback;
     return ClipOval(
-      child: CachedNetworkImage(
-        imageUrl: url,
-        httpHeaders: MemberPhotoService.authHeaders(),
-        cacheKey: MemberPhotoService.pathFrom(stored),
+      child: AuthedMemberImage(
+        stored: stored,
         fit: fit,
-        errorWidget: (_, __, ___) => fallback,
+        errorWidget: (_) => fallback,
       ),
     );
   }

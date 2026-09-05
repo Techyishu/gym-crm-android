@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +15,7 @@ import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/member_photo_service.dart';
+import '../../../shared/widgets/authed_member_image.dart';
 import '../../../core/services/check_in_service.dart';
 import 'upcoming_payments_screen.dart' show QuickCollectSheet;
 import '../../../core/theme/app_theme.dart';
@@ -154,8 +154,7 @@ String? _normalizeBiometricId(String raw) {
 }
 
 void _showFullPhoto(BuildContext context, Member m) {
-  final url = MemberPhotoService.photoUrl(m.avatarUrl);
-  if (url == null) return;
+  if (MemberPhotoService.pathFrom(m.avatarUrl) == null) return;
   showDialog(
     context: context,
     barrierColor: Colors.black87,
@@ -169,10 +168,8 @@ void _showFullPhoto(BuildContext context, Member m) {
           ClipRRect(
             borderRadius: BorderRadius.circular(24),
             child: InteractiveViewer(
-              child: CachedNetworkImage(
-                imageUrl: url,
-                httpHeaders: MemberPhotoService.authHeaders(),
-                cacheKey: MemberPhotoService.pathFrom(m.avatarUrl),
+              child: AuthedMemberImage(
+                stored: m.avatarUrl,
                 fit: BoxFit.contain,
               ),
             ),
