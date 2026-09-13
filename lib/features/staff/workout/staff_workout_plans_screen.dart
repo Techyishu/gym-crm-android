@@ -8,6 +8,8 @@ import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import 'workout_plan_sheet.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
+import '../../../shared/widgets/member_multi_picker.dart';
+import '../../../core/services/data_refresh.dart';
 import '../../../core/theme/app_icons.dart';
 
 // All workout plans in the gym, grouped by member.
@@ -37,6 +39,87 @@ final _gymMembersProvider = FutureProvider<List<Map<String, dynamic>>>((
       .order('first_name');
   return (data as List).cast<Map<String, dynamic>>();
 });
+
+/// Copies one workout plan onto several members at once.
+///
+/// Each member gets their own row rather than a shared one, so a trainer can
+/// then adjust one person's copy without touching anybody else's. Editing the
+/// original later does not reach the copies — copy again for that.
+///
+/// Lives at the top level because two places need it: the card's own button
+/// and the prompt shown right after a new plan is saved.
+Future<void> copyWorkoutPlanToMembers({
+  required BuildContext context,
+  required WidgetRef ref,
+  required Map<String, dynamic> plan,
+  required String sourceMemberId,
+  required VoidCallback onDone,
+}) async {
+  final all = await ref.read(_gymMembersProvider.future);
+  if (!context.mounted) return;
+  // The plan's own member is not offered: they already have it.
+  final others = all.where((m) => m['id'] != sourceMemberId).toList();
+  if (others.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No other members to copy this to')),
+    );
+    return;
+  }
+
+  final picked = await showMemberMultiPicker(
+    context: context,
+    members: others,
+    title: 'Copy plan to members',
+    subtitle:
+        'Each member gets their own copy of "${plan['name']}" — edit one later without changing the rest.',
+    confirmLabel: 'Copy plan',
+  );
+  if (picked == null || picked.isEmpty || !context.mounted) return;
+
+  final client = Supabase.instance.client;
+  final ids = picked.map((m) => m['id'] as String).toList();
+  try {
+    // The member portal shows the active plan, so a member can only have one
+    // — retire whatever they were on before the copy lands.
+    await client
+        .from('workout_plans')
+        .update({'is_active': false})
+        .inFilter('member_id', ids)
+        .eq('is_active', true);
+
+    await client.from('workout_plans').insert([
+      for (final id in ids)
+        {
+          'member_id': id,
+          'name': plan['name'],
+          'type': plan['type'],
+          'days': plan['days'],
+          'is_active': true,
+          'created_by': client.auth.currentUser?.id,
+        },
+    ]);
+
+    notifyGymDataChanged();
+    onDone();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Plan copied to ${ids.length} member${ids.length == 1 ? '' : 's'}',
+          ),
+          backgroundColor: AppTheme.statusActive,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('[GymCRM] Copy workout plan error: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not copy the plan')));
+    }
+  }
+}
 
 class StaffWorkoutPlansScreen extends ConsumerStatefulWidget {
   const StaffWorkoutPlansScreen({super.key});
@@ -75,7 +158,35 @@ class _StaffWorkoutPlansScreenState
       builder: (_) =>
           WorkoutPlanSheet(memberId: memberId, memberName: memberName),
     );
-    if (saved == true) ref.invalidate(_gymWorkoutPlansProvider);
+    if (saved != true) return;
+    ref.invalidate(_gymWorkoutPlansProvider);
+
+    // Offer the copy here, while whoever built the plan is still thinking
+    // about who else trains on it.
+    if (!mounted) return;
+    if (!await askToCopyToOthers(context, memberName)) return;
+    if (!mounted) return;
+    final fresh = await ref.read(_gymWorkoutPlansProvider.future);
+    final row = fresh.firstWhere(
+      (m) => m['id'] == memberId,
+      orElse: () => const <String, dynamic>{},
+    );
+    final plans = (row['workout_plans'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    if (plans.isEmpty || !mounted) return;
+    // Newest first — the one just saved.
+    plans.sort(
+      (a, b) => (b['created_at'] as String? ?? '').compareTo(
+        a['created_at'] as String? ?? '',
+      ),
+    );
+    await copyWorkoutPlanToMembers(
+      context: context,
+      ref: ref,
+      plan: plans.first,
+      sourceMemberId: memberId,
+      onDone: () => ref.invalidate(_gymWorkoutPlansProvider),
+    );
   }
 
   @override
@@ -271,11 +382,7 @@ class _MemberPlanGroup extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 8, top: 4),
           child: Row(
             children: [
-              const Icon(
-                AppIcons.person,
-                size: 14,
-                color: AppTheme.inkHint,
-              ),
+              const Icon(AppIcons.person, size: 14, color: AppTheme.inkHint),
               const SizedBox(width: 6),
               Text(
                 memberName,
@@ -321,7 +428,7 @@ class _MemberPlanGroup extends StatelessWidget {
 
 // ── Plan card with edit/delete ────────────────────────────────────────────────
 
-class _StaffPlanCard extends StatefulWidget {
+class _StaffPlanCard extends ConsumerStatefulWidget {
   final Map<String, dynamic> plan;
   final String memberId;
   final String memberName;
@@ -335,10 +442,10 @@ class _StaffPlanCard extends StatefulWidget {
   });
 
   @override
-  State<_StaffPlanCard> createState() => _StaffPlanCardState();
+  ConsumerState<_StaffPlanCard> createState() => _StaffPlanCardState();
 }
 
-class _StaffPlanCardState extends State<_StaffPlanCard> {
+class _StaffPlanCardState extends ConsumerState<_StaffPlanCard> {
   bool _expanded = false;
 
   Future<void> _delete(BuildContext context) async {
@@ -379,6 +486,15 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
     );
     if (saved == true) widget.onChanged();
   }
+
+  Future<void> _assignToOthers(BuildContext context, WidgetRef ref) =>
+      copyWorkoutPlanToMembers(
+        context: context,
+        ref: ref,
+        plan: widget.plan,
+        sourceMemberId: widget.memberId,
+        onDone: widget.onChanged,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -450,6 +566,10 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
                         if (createdAt != null)
                           Text(
                             'Created ${formatDateFromString(createdAt)}',
+                            // Without these the date wraps a letter at a time
+                            // the moment the row runs out of width.
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppTheme.inkHint,
@@ -482,6 +602,7 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
                     padding: EdgeInsets.zero,
                     onSelected: (v) {
                       if (v == 'edit') _edit(context);
+                      if (v == 'assign') _assignToOthers(context, ref);
                       if (v == 'delete') _delete(context);
                     },
                     itemBuilder: (_) => [
@@ -492,6 +613,16 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
                             Icon(AppIcons.edit, size: 16),
                             SizedBox(width: 10),
                             Text('Edit'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'assign',
+                        child: Row(
+                          children: [
+                            Icon(AppIcons.groups, size: 16),
+                            SizedBox(width: 10),
+                            Text('Assign to members'),
                           ],
                         ),
                       ),
@@ -515,6 +646,18 @@ class _StaffPlanCardState extends State<_StaffPlanCard> {
                     ],
                   ),
                 ],
+              ),
+            ),
+          ),
+          // Its own line rather than the header row, which already carries the
+          // type pill, name, date, exercise count and two icons — a labelled
+          // button on top of that has no room left on a phone.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: CopyToOthersButton(
+                onTap: () => _assignToOthers(context, ref),
               ),
             ),
           ),

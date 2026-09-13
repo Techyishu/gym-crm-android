@@ -219,9 +219,18 @@ Deno.serve(async (req: Request) => {
   const todayMs = Date.parse(`${today}T00:00:00Z`)
 
   let sent = 0
+  let exhausted = 0
   for (const gym of gyms ?? []) {
     const days: number[] = gym.whatsapp_reminder_days ?? []
     if (!days.length) continue
+
+    const quota = planQuota(gym)
+    // Nothing left to spend — skip the gym entirely rather than scanning its
+    // members and logging a 'failed' row per member on every daily run.
+    if (quota - gym.whatsapp_monthly_quota_used <= 0 && gym.whatsapp_credits <= 0) {
+      exhausted++
+      continue
+    }
 
     // Window, not exact-date match: anyone due between today and the widest
     // configured offset. An exact match only fired on one calendar day per
@@ -271,7 +280,6 @@ Deno.serve(async (req: Request) => {
     }
 
     const ascDays = [...days].sort((a, b) => a - b)
-    const quota = planQuota(gym)
     // Unknown/removed template name falls back to the default rather than
     // failing every send for that gym.
     const templateName = gym.whatsapp_template && TEMPLATES[gym.whatsapp_template]
@@ -293,34 +301,35 @@ Deno.serve(async (req: Request) => {
       const prior = sentAtByMember.get(member.id) ?? []
       if (prior.some(ts => ts >= bucketStartMs)) continue
 
-      const quotaLeft = quota - gym.whatsapp_monthly_quota_used
-      const usingQuota = quotaLeft > 0
-      if (!usingQuota && gym.whatsapp_credits <= 0) {
+      // Claim the allowance BEFORE sending, atomically. Keeping a running
+      // count in this loop let a concurrent send-whatsapp-invoice invocation
+      // overwrite our increments (and us theirs), so both overshot the cap.
+      const { data: spentFrom, error: consumeErr } = await supabase
+        .rpc('consume_whatsapp_allowance', { p_gym_id: gym.id })
+      if (consumeErr) {
+        console.error('[whatsapp-reminders] allowance rpc failed', gym.id, consumeErr)
+        break
+      }
+      // Ran dry. Every remaining member would hit the same wall, so log it
+      // once for the gym and stop instead of one 'failed' row each.
+      if (!spentFrom) {
         await logSend(gym.id, member.id, 'failed', 'no quota or credits left')
-        continue
+        exhausted++
+        break
       }
 
       try {
         await sendReminder(member.phone, member.first_name, daysLeft, gym.name, templateName)
         sent++
         await logSend(gym.id, member.id, 'sent')
-        if (usingQuota) {
-          gym.whatsapp_monthly_quota_used += 1
-          await supabase.from('gyms')
-            .update({ whatsapp_monthly_quota_used: gym.whatsapp_monthly_quota_used })
-            .eq('id', gym.id)
-        } else {
-          gym.whatsapp_credits -= 1
-          await supabase.from('gyms')
-            .update({ whatsapp_credits: gym.whatsapp_credits })
-            .eq('id', gym.id)
-        }
       } catch (e) {
         console.error('[whatsapp-reminders] send failed', gym.id, e)
+        // Nothing went out — hand the allowance back.
+        await supabase.rpc('refund_whatsapp_allowance', { p_gym_id: gym.id, p_bucket: spentFrom })
         await logSend(gym.id, member.id, 'failed', (e as Error).message)
       }
     }
   }
 
-  return new Response(JSON.stringify({ sent }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify({ sent, exhausted }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 })

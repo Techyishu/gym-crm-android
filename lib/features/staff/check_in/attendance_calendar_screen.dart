@@ -99,6 +99,9 @@ class _AttendanceCalendarScreenState
     }
     final changed = await showModalBottomSheet<bool>(
       context: context,
+      // Above this screen's own Scaffold, or its "Add attendance" button
+      // floats on top of the editor sheet.
+      useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => _AttendanceEditorSheet(date: _selected, record: record),

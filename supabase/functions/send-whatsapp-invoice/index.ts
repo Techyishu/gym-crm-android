@@ -39,7 +39,6 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1'
-import { planQuota } from '../_shared/plan_limits.ts'
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -56,12 +55,10 @@ const TEMPLATE_NAME: Record<InvoiceEvent, string> = {
   paid: 'invoice_paid',
 }
 
-/** Legacy (₹249, pre-price-change) gyms keep the old 100/mo cap regardless of
- * plan value; new tiers get their own cap. Keyed off legacy_pricing rather
- * than plan_price since plan_price is also used ad hoc for manual overrides.
- * Lives in _shared/plan_limits.ts — this file and whatsapp-reminders spend the
- * same counter, and had drifted to different Pro ceilings (500 here vs 300
- * there), so invoice sends kept going after reminders were already cut off. */
+/** Quota/credit accounting now lives entirely in the
+ * consume_whatsapp_allowance() RPC (migration 20260913090000) — plan caps are
+ * read from plan_whatsapp_quota() inside the same atomic statement that spends
+ * the allowance, so this function no longer computes or writes either counter. */
 
 function invoiceNumber(id: string, createdAt: string) {
   const dt = new Date(createdAt)
@@ -236,7 +233,7 @@ Deno.serve(async (req: Request) => {
   const { data: inv, error: invErr } = await supabase
     .from('invoices')
     .select(
-      '*, members(first_name, last_name, phone, email), gyms(id, name, plan, legacy_pricing, whatsapp_credits, whatsapp_monthly_quota_used, whatsapp_invoice_enabled, settings)',
+      '*, members(first_name, last_name, phone, email), gyms(id, name, whatsapp_invoice_enabled, settings)',
     )
     .eq('id', invoiceId)
     .single()
@@ -257,11 +254,16 @@ Deno.serve(async (req: Request) => {
     return new Response('Invoice is not paid', { status: 409 })
   }
 
-  const quota = planQuota(gym as { plan: string; legacy_pricing?: boolean })
-  const quotaUsed = (gym.whatsapp_monthly_quota_used as number) ?? 0
-  const credits = (gym.whatsapp_credits as number) ?? 0
-  const usingQuota = quota - quotaUsed > 0
-  if (!usingQuota && credits <= 0) {
+  // Claim the allowance BEFORE sending. The RPC checks and decrements in one
+  // atomic statement; doing it here in TypeScript let concurrent invocations
+  // read the same counter and send past the cap.
+  const { data: bucket, error: consumeErr } = await supabase
+    .rpc('consume_whatsapp_allowance', { p_gym_id: gym.id as string })
+  if (consumeErr) {
+    console.error('[send-whatsapp-invoice] allowance rpc failed', consumeErr)
+    return new Response(JSON.stringify({ sent: false, error: 'allowance check failed' }), { status: 200 })
+  }
+  if (!bucket) {
     await logSend(gym.id as string, inv.member_id as string, invoiceEvent, 'failed', 'no quota or credits left')
     return new Response(JSON.stringify({ sent: false, reason: 'no quota' }), { status: 200 })
   }
@@ -317,15 +319,12 @@ Deno.serve(async (req: Request) => {
     if (data.hasError) throw new Error(data.errors ?? 'MSG91 send failed')
 
     await logSend(gym.id as string, inv.member_id as string, invoiceEvent, 'sent')
-    if (usingQuota) {
-      await supabase.from('gyms').update({ whatsapp_monthly_quota_used: quotaUsed + 1 }).eq('id', gym.id as string)
-    } else {
-      await supabase.from('gyms').update({ whatsapp_credits: credits - 1 }).eq('id', gym.id as string)
-    }
 
     return new Response(JSON.stringify({ sent: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   } catch (e) {
     console.error('[send-whatsapp-invoice] send failed', gym.id, e)
+    // Nothing went out — hand the allowance back.
+    await supabase.rpc('refund_whatsapp_allowance', { p_gym_id: gym.id as string, p_bucket: bucket })
     await logSend(gym.id as string, inv.member_id as string, invoiceEvent, 'failed', (e as Error).message)
     return new Response(JSON.stringify({ sent: false, error: (e as Error).message }), { status: 200 })
   }

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../../core/access/gym_permissions.dart';
+import 'add_fab.dart';
 import '../../core/billing/billing_access.dart';
 import '../../core/providers/revenue_cat_provider.dart';
 import '../../core/services/coachmark_service.dart';
@@ -231,6 +232,10 @@ class _StaffShellState extends ConsumerState<StaffShell>
         );
 
         return Scaffold(
+          // One floating Add for the whole staff portal. It adapts to the
+          // screen you are on (see AddFab); on wide layouts the side nav
+          // already exposes everything, so it stays a phone affordance.
+          floatingActionButton: isWide ? null : const AddFab(),
           body: isWide
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -175,7 +175,11 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                     color: AppTheme.accent,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Icon(AppIcons.add, size: 22, color: Colors.white),
+                  child: const Icon(
+                    AppIcons.add,
+                    size: 22,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -476,10 +480,7 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
                       borderRadius: BorderRadius.circular(14),
                       child: InputDecorator(
                         decoration: const InputDecoration(
-                          suffixIcon: Icon(
-                            AppIcons.calendarToday,
-                            size: 16,
-                          ),
+                          suffixIcon: Icon(AppIcons.calendarToday, size: 16),
                         ),
                         child: Text(
                           formatDateFromString(_date.toIso8601String()),
@@ -500,10 +501,7 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
                       borderRadius: BorderRadius.circular(14),
                       child: InputDecorator(
                         decoration: const InputDecoration(
-                          suffixIcon: Icon(
-                            AppIcons.accessTime,
-                            size: 16,
-                          ),
+                          suffixIcon: Icon(AppIcons.accessTime, size: 16),
                         ),
                         child: Text(_start.format(context)),
                       ),
@@ -1034,6 +1032,16 @@ class _EmptyBatches extends StatelessWidget {
 
 // ── Class form sheet ──────────────────────────────────────────────────────────
 
+/// Opens the new-batch sheet from anywhere (the shell's Add button, or the
+/// add-member form when the gym has no batches yet), not just this screen.
+Future<void> showClassFormSheet(BuildContext context) =>
+    showAdaptiveSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _ClassFormSheet(),
+    );
+
 class _ClassFormSheet extends ConsumerStatefulWidget {
   final Map<String, dynamic>? cls;
   const _ClassFormSheet({this.cls});
@@ -1257,10 +1265,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                           borderRadius: BorderRadius.circular(14),
                           child: InputDecorator(
                             decoration: const InputDecoration(
-                              suffixIcon: Icon(
-                                AppIcons.accessTime,
-                                size: 16,
-                              ),
+                              suffixIcon: Icon(AppIcons.accessTime, size: 16),
                             ),
                             child: Text(_formatTod(_startTime)),
                           ),
@@ -1279,10 +1284,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                           borderRadius: BorderRadius.circular(14),
                           child: InputDecorator(
                             decoration: const InputDecoration(
-                              suffixIcon: Icon(
-                                AppIcons.accessTime,
-                                size: 16,
-                              ),
+                              suffixIcon: Icon(AppIcons.accessTime, size: 16),
                             ),
                             child: Text(_formatTod(_endTime)),
                           ),

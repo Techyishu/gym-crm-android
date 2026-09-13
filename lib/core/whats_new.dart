@@ -18,6 +18,26 @@ class WhatsNewEntry {
 
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
+    version: '1.0.3+57',
+    date: '12 Sep 2026',
+    title: 'Find members who joined recently',
+    bullets: [
+      'A new Joined filter on Members shows everyone who signed up in the last 7, 30 or 90 days — tap the arrow on the chip to pick the window.',
+      'Sorting no longer starts switched on. The list opens with your newest members first, and Sort stays untouched until you choose an order yourself.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.3+54',
+    date: '10 Sep 2026',
+    title: 'One Add button, birthdays, and plans for a whole group',
+    bullets: [
+      'A floating Add button now sits on every screen. On Home it opens everything you can add — member, invoice, plan, lead, batch, staff, expense. On Members and Money it goes straight to the right form.',
+      'Members can now have a date of birth, blood group and an emergency contact, all under Add more details. Anyone with a birthday today appears on Home with a one-tap WhatsApp wish.',
+      'Batches can be picked while adding a member — and created right there if you have none yet. A member\'s batch now shows on their profile.',
+      'Built a workout or diet plan that suits several people? Copy to others puts a copy on each of them, and you can still adjust one person\'s copy without touching the rest.',
+    ],
+  ),
+  WhatsNewEntry(
     version: '1.0.4+1',
     date: '2 Sep 2026',
     title: 'Members can reset their own password',

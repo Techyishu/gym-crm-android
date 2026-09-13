@@ -18,6 +18,12 @@ Future<T?> showAdaptiveSheet<T>({
   if (!ResponsiveContent.isWide(context)) {
     return showModalBottomSheet<T>(
       context: context,
+      // Root navigator, so the sheet sits above StaffShell's Scaffold rather
+      // than inside its body. On the inner navigator the shell's floating Add
+      // button and bottom nav drew on top of the open sheet — the FAB landed
+      // on the sheet's own footer button, and a nav tab under the barrier was
+      // still tappable.
+      useRootNavigator: true,
       isScrollControlled: isScrollControlled,
       useSafeArea: useSafeArea,
       backgroundColor: backgroundColor,

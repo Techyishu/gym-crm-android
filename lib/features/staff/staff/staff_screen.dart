@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/plan_limits.dart';
+import '../../../core/services/data_refresh.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
@@ -18,6 +19,7 @@ import '../../../core/theme/app_icons.dart';
 final staffListProvider = FutureProvider<List<Map<String, dynamic>>>((
   ref,
 ) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
   return await client
@@ -169,28 +171,7 @@ class StaffScreen extends ConsumerWidget {
   }
 
   void _showInviteSheet(BuildContext context, WidgetRef ref) {
-    // Invites are created by the web API, so the staff_limit trigger would
-    // reject this server-side and surface its raw message. Stop it here so a
-    // Starter owner gets an upgrade prompt instead of a database error — and
-    // so we don't spend an API round-trip to find out.
-    final limit = staffLimit(ref.read(planTierProvider));
-    final current = ref.read(staffListProvider).valueOrNull?.length ?? 0;
-    if (limit != null && current >= limit) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Starter includes $limit login. Upgrade to Pro to add staff.',
-          ),
-        ),
-      );
-      return;
-    }
-    showAdaptiveSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const _InviteStaffSheet(),
-    ).then((_) => ref.invalidate(staffListProvider));
+    showInviteStaffSheet(context).then((_) => ref.invalidate(staffListProvider));
   }
 
   Future<void> _confirmRemove(
@@ -462,6 +443,41 @@ class _RoleBadge extends StatelessWidget {
 }
 
 // ─── Invite staff sheet ───────────────────────────────────────────────────────
+/// Opens the invite-staff sheet from anywhere (the shell's floating Add
+/// button), not just the staff screen.
+///
+/// The plan check lives here rather than at the call sites: invites are
+/// created by the web API, so a Starter gym would otherwise hit the
+/// staff_limit trigger server-side and see its raw database message. The
+/// staff list is awaited instead of read — a caller that never opened the
+/// staff screen has no cached count, and treating that as zero would let the
+/// invite through.
+Future<void> showInviteStaffSheet(BuildContext context) async {
+  final container = ProviderScope.containerOf(context, listen: false);
+  final limit = staffLimit(container.read(planTierProvider));
+  if (limit != null) {
+    final current = (await container.read(staffListProvider.future)).length;
+    if (current >= limit) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Starter includes $limit login. Upgrade to Pro to add staff.',
+          ),
+        ),
+      );
+      return;
+    }
+  }
+  if (!context.mounted) return;
+  await showAdaptiveSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) => const _InviteStaffSheet(),
+  );
+}
+
 class _InviteStaffSheet extends ConsumerStatefulWidget {
   const _InviteStaffSheet();
   @override

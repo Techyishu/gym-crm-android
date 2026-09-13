@@ -8,21 +8,34 @@ import '../../features/legal/consent_screen.dart' show kConsentAds;
 /// The handful of events ad platforms need to optimise for buyers instead of
 /// installs. Every call fans out to Firebase (Google Ads) and Meta.
 ///
-/// Android-only. Firebase gates itself — `setAnalyticsCollectionEnabled(false)`
-/// drops everything at the SDK. Meta does **not**: its
+/// Firebase gates itself — `setAnalyticsCollectionEnabled(false)` drops
+/// everything at the SDK. Meta does **not**: its
 /// `setAutoLogAppEventsEnabled(false)` only suppresses the SDK's own automatic
 /// events, and an explicit `logEvent` still goes out. So every Meta call here
 /// is gated on the stored ads consent first.
 class AppEvents {
   static final _fb = FacebookAppEvents();
 
+  /// Meta runs on both stores — iOS ad campaigns need conversion data too, or
+  /// Aggregated Event Measurement can't be configured. Firebase stays
+  /// Android-only: `firebase_options.dart` has no iOS entry, so main.dart
+  /// never initialises it there and touching the instance would throw.
+  static bool get _meta =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  static bool get _firebase =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
   static Future<bool> _adsConsented() async =>
       (await SharedPreferences.getInstance()).getBool(kConsentAds) ?? false;
 
   static Future<void> _log(String name, [Map<String, Object>? params]) async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    await FirebaseAnalytics.instance.logEvent(name: name, parameters: params);
-    if (await _adsConsented()) {
+    if (_firebase) {
+      await FirebaseAnalytics.instance.logEvent(name: name, parameters: params);
+    }
+    if (_meta && await _adsConsented()) {
       await _fb.logEvent(name: name, parameters: params);
     }
   }
@@ -31,7 +44,7 @@ class AppEvents {
   /// worth bidding on while purchase volume is still too thin to optimise.
   static Future<void> signUpCompleted() async {
     await _log('sign_up_completed');
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_meta) return;
     if (!await _adsConsented()) return;
     await _fb.logCompletedRegistration(registrationMethod: 'email_otp');
   }
@@ -49,12 +62,14 @@ class AppEvents {
     String currency = 'INR',
     String? plan,
   }) async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    await FirebaseAnalytics.instance.logPurchase(
-      value: amount,
-      currency: currency,
-      parameters: plan == null ? null : {'plan': plan},
-    );
+    if (_firebase) {
+      await FirebaseAnalytics.instance.logPurchase(
+        value: amount,
+        currency: currency,
+        parameters: plan == null ? null : {'plan': plan},
+      );
+    }
+    if (!_meta) return;
     if (!await _adsConsented()) return;
     await _fb.logPurchase(amount: amount, currency: currency);
   }

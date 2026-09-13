@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Bumped whenever gym-scoped data is written — a payment, a check-in, a new
 /// member, a plan change.
@@ -15,3 +16,10 @@ import 'package:flutter/foundation.dart';
 final gymDataChanged = ValueNotifier<int>(0);
 
 void notifyGymDataChanged() => gymDataChanged.value++;
+
+/// Riverpod view of [gymDataChanged], so a list provider can simply
+/// `ref.watch(gymDataVersionProvider)` and refetch on the next write instead of
+/// every write site knowing which providers to invalidate.
+final gymDataVersionProvider = ChangeNotifierProvider<ValueNotifier<int>>(
+  (ref) => gymDataChanged,
+);

@@ -11,6 +11,7 @@ import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../core/services/data_refresh.dart';
 
 Future<void> _dialPhone(String phone) async {
   final uri = Uri.parse('tel:$phone');
@@ -30,6 +31,7 @@ Future<void> _openWhatsApp(String phone, {String? text}) async {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 final _leadsProvider = FutureProvider<List<Lead>>((ref) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -637,7 +639,7 @@ class _LeadCard extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => Padding(
+      builder: (ctx) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -651,7 +653,7 @@ class _LeadCard extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 10),
                 child: GestureDetector(
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(ctx);
                     onStatusChange!(s);
                   },
                   child: Container(
@@ -774,6 +776,18 @@ class _ActionIconBtn extends StatelessWidget {
 }
 
 // ── Add Lead Sheet ─────────────────────────────────────────────────────────────
+
+/// Opens the add-lead sheet from anywhere (the shell's floating Add button),
+/// not just the leads list. Resolves when the sheet closes; callers refresh
+/// whatever they own.
+Future<void> showAddLeadSheet(BuildContext context) =>
+    showAdaptiveSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _AddLeadSheet(),
+    );
+
 
 class _AddLeadSheet extends ConsumerStatefulWidget {
   const _AddLeadSheet();

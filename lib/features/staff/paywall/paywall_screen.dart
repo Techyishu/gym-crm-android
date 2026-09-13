@@ -870,15 +870,19 @@ class _TermOption {
   });
 }
 
-// Starter is fully wired (Dodo products, DB caps, checkout) but hidden from
-// the paywall for now — flip this back on when ready to sell it again. The
-// rest of the tier — plan_member_limit()/plan_staff_limit() triggers, the
-// whatsapp quota, the biometric gate — is untouched by this flag; it only
-// controls whether _PlanBody ever offers the tier as a choice.
+// Master switch for whether the paywall offers Starter as a choice at all.
+// The rest of the tier — plan_member_limit()/plan_staff_limit() triggers, the
+// whatsapp quota, the biometric gate, the Dodo products — is untouched by
+// this flag; it only controls whether _PlanBody ever shows the toggle.
 const _kStarterTierEnabled = false;
 
 // Starter mirrors Pro's discount ladder (7 / 12 / 20%) so the two columns stay
 // comparable on the pricing page.
+//
+// These totals are display-only — the charge comes from the Dodo product, and
+// gym-crm/lib/dodopayments.ts mirrors the same prices for its downgrade guard.
+// Change all three together or the paywall quotes one price and checkout
+// charges another.
 const _kStarterTerms = [
   _TermOption('1mo', '1 Month', 299, 1),
   _TermOption('3mo', '3 Months', 839, 3, discountPct: 7),
@@ -1429,6 +1433,16 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final url = data['url'] as String?;
+
+      if (data['alreadyActive'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('You are already subscribed to this plan.')),
+          );
+        }
+        ref.invalidate(staffProfileProvider);
+        return;
+      }
 
       if (url == null) {
         // Plan changed on the existing subscription directly — no checkout redirect.

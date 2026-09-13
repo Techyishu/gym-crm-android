@@ -31,6 +31,7 @@ import '../../../shared/widgets/redesign.dart';
 import 'member_plan_viewer.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../shared/widgets/blood_group_field.dart';
 
 // Active membership plans for the current gym (for assign/change actions).
 final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -105,6 +106,9 @@ final _memberInvoicesProvider =
 
 final _memberBatchesProvider =
     FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      // A batch assigned while adding the member is written by a different
+      // screen, so refetch when anything gym-wide changes.
+      ref.watch(gymDataVersionProvider);
       final data = await Supabase.instance.client
           .from('class_enrollments')
           .select(
@@ -186,7 +190,11 @@ void _showFullPhoto(BuildContext context, Member m) {
                   color: Colors.black,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(AppIcons.close, color: Colors.white, size: 20),
+                child: const Icon(
+                  AppIcons.close,
+                  color: Colors.white,
+                  size: 20,
+                ),
               ),
             ),
           ),
@@ -1093,6 +1101,30 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 _InfoRow(label: 'Member ID', value: m.customId!),
               _InfoRow(label: 'Email', value: m.email),
               _InfoRow(label: 'Phone', value: m.phone ?? '-'),
+              if (m.dob != null && m.dob!.isNotEmpty)
+                _InfoRow(
+                  label: 'Date of birth',
+                  value:
+                      '${formatDateFromString(m.dob)}'
+                      '${_ageFrom(m.dob) != null ? ' · ${_ageFrom(m.dob)} yrs' : ''}',
+                ),
+              if (m.bloodGroup != null && m.bloodGroup!.isNotEmpty)
+                _InfoRow(label: 'Blood group', value: m.bloodGroup!),
+              // Shown together and last in the block: in an emergency, staff
+              // are looking for a name and a number, not scanning a form.
+              if ((m.emergencyContactName ?? '').isNotEmpty ||
+                  (m.emergencyContactPhone ?? '').isNotEmpty)
+                _InfoRow(
+                  label: 'Emergency contact',
+                  value: [
+                    m.emergencyContactName ?? '',
+                    m.emergencyContactPhone ?? '',
+                  ].where((v) => v.isNotEmpty).join(' · '),
+                ),
+              // Which batch they train in is a front-desk question ("is he in
+              // the 6am?"), so it belongs on the first screen rather than only
+              // in the Attendance tab's batch card.
+              _BatchRow(memberId: memberId),
               if (m.notes != null && m.notes!.isNotEmpty)
                 _InfoRow(label: 'Notes', value: m.notes!),
               _BiometricIdRow(
@@ -1366,7 +1398,11 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
               ),
             ),
             IconButton(
-              icon: const Icon(AppIcons.copy, size: 18, color: AppTheme.inkHint),
+              icon: const Icon(
+                AppIcons.copy,
+                size: 18,
+                color: AppTheme.inkHint,
+              ),
               onPressed: () {
                 // Copy to clipboard
                 final data = ClipboardData(text: m.id);
@@ -1757,9 +1793,13 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                 }),
                 const SizedBox(height: 8),
                 ElevatedButton(
+                  // Pops with the sheet's own context, not the screen's. The
+                  // sheet lives on the root navigator; the screen's context
+                  // resolves to the shell's nested one, so popping with it
+                  // closed this screen and left the sheet standing.
                   onPressed: picked == null
                       ? null
-                      : () => Navigator.pop(context, picked),
+                      : () => Navigator.pop(ctx, picked),
                   child: const Text('Switch plan'),
                 ),
               ],
@@ -2286,6 +2326,54 @@ class _StatusChip extends StatelessWidget {
 
 // ── Info Row ──────────────────────────────────────────────────────────────────
 
+/// Whole years from a stored yyyy-MM-dd date of birth, or null if unparseable.
+int? _ageFrom(String? dob) {
+  if (dob == null) return null;
+  final born = DateTime.tryParse(dob);
+  if (born == null) return null;
+  final now = DateTime.now();
+  var age = now.year - born.year;
+  // Birthday hasn't come round yet this year.
+  if (now.month < born.month ||
+      (now.month == born.month && now.day < born.day)) {
+    age--;
+  }
+  return age < 0 ? null : age;
+}
+
+/// The member's batches as one line in the contact card.
+///
+/// The Attendance tab already lists them as full cards with colours and
+/// timings; this is the one-glance version — several batches read as
+/// "Morning 06:00 · Evening 18:00". Renders nothing at all while loading or
+/// on error, so a batch-less gym sees no empty row.
+class _BatchRow extends ConsumerWidget {
+  final String memberId;
+  const _BatchRow({required this.memberId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final batches = ref.watch(_memberBatchesProvider(memberId));
+    final list = batches.valueOrNull;
+    if (list == null || list.isEmpty) return const SizedBox.shrink();
+
+    final names = <String>[];
+    for (final row in list) {
+      final cls = row['classes'] as Map<String, dynamic>?;
+      if (cls == null) continue;
+      final name = cls['name'] as String? ?? 'Batch';
+      final start = cls['default_start_time'] as String?;
+      names.add(
+        start != null && start.length >= 5
+            ? '$name ${start.substring(0, 5)}'
+            : name,
+      );
+    }
+    if (names.isEmpty) return const SizedBox.shrink();
+    return _InfoRow(label: 'Batch', value: names.join(' · '));
+  }
+}
+
 class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
@@ -2407,6 +2495,10 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   // mis-billed members every cycle (2026-08-26 incident).
   late int _billingIntervalMonths;
   String? _joinedAt;
+  String? _dob;
+  String? _bloodGroup;
+  late final TextEditingController _emergencyNameCtrl;
+  late final TextEditingController _emergencyPhoneCtrl;
   File? _avatarFile;
   bool _loading = false;
   bool _moreDetails = false;
@@ -2426,10 +2518,22 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     final m = widget.member;
     _nameCtrl = TextEditingController(text: m.fullName.trim());
     _emailCtrl = TextEditingController(text: m.email);
-    _phoneCtrl = TextEditingController(text: m.phone ?? '');
+    // Strip the stored country code for display: the field shows "+91" as
+    // decoration, so putting "+919812345603" in the box both looked wrong and
+    // failed the 10-digit validator on save. phoneWithCountryCode() puts it
+    // back when saving.
+    _phoneCtrl = TextEditingController(text: localMobileDigits(m.phone));
     _customIdCtrl = TextEditingController(text: m.customId ?? '');
     _biometricIdCtrl = TextEditingController(text: m.biometricId ?? '');
     _notesCtrl = TextEditingController(text: m.notes ?? '');
+    _emergencyNameCtrl = TextEditingController(
+      text: m.emergencyContactName ?? '',
+    );
+    _emergencyPhoneCtrl = TextEditingController(
+      text: m.emergencyContactPhone ?? '',
+    );
+    _dob = m.dob;
+    _bloodGroup = m.bloodGroup;
     _status = m.status;
     _nextPaymentDate = m.nextPaymentDate;
     _billingIntervalMonths =
@@ -2446,23 +2550,25 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     _customIdCtrl.dispose();
     _biometricIdCtrl.dispose();
     _notesCtrl.dispose();
+    _emergencyNameCtrl.dispose();
+    _emergencyPhoneCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _pickAvatar() async {
     final source = await showAdaptiveSheet<ImageSource>(
       context: context,
-      builder: (_) => SafeArea(
+      builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(context, ImageSource.gallery),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
               title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(context, ImageSource.camera),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
           ],
         ),
@@ -2554,12 +2660,28 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                 ? null
                 : _notesCtrl.text.trim(),
             'status': _status,
+            // Written unconditionally, unlike the add form's insert: clearing
+            // a field here has to actually clear it in the row.
+            'dob': _dob,
+            'blood_group': _bloodGroup,
+            'emergency_contact_name': _emergencyNameCtrl.text.trim().isEmpty
+                ? null
+                : _emergencyNameCtrl.text.trim(),
+            'emergency_contact_phone': _emergencyPhoneCtrl.text.trim().isEmpty
+                ? null
+                : phoneWithCountryCode(_emergencyPhoneCtrl.text),
             if (_joinedAt != null) 'joined_at': _joinedAt,
             'next_payment_date': _nextPaymentDate,
             'billing_interval_months': _billingIntervalMonths,
             if (newAvatarUrl != null) 'avatar_url': newAvatarUrl,
           })
           .eq('id', widget.member.id);
+
+      // Every other screen caches its own rows, so an edit made here used to
+      // be invisible until a full restart — a date of birth saved from this
+      // sheet never reached the dashboard's birthday list, and a renamed
+      // member stayed renamed only on this page.
+      notifyGymDataChanged();
 
       if (mounted) Navigator.pop(context);
     } on PostgrestException catch (e) {
@@ -2806,7 +2928,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             SizedBox(width: 8),
             Flexible(
               child: Text(
-                'Email, member ID, biometric, notes',
+                'Email, date of birth, emergency contact, notes',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
@@ -2856,6 +2978,49 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             ),
           ),
           const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: BoxField(
+                  label: 'Date of birth',
+                  value: _dob != null ? formatDateFromString(_dob) : 'Not set',
+                  onTap: _pickDob,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: MemberBloodGroupField(
+                  value: _bloodGroup,
+                  onChanged: (v) => setState(() => _bloodGroup = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('EMERGENCY CONTACT', style: AppTheme.kicker),
+          const SizedBox(height: 8),
+          TextFormField(
+            controller: _emergencyNameCtrl,
+            maxLength: 120,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Name',
+              hintText: 'e.g. Ramesh (father)',
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _emergencyPhoneCtrl,
+            maxLength: 20,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'Number',
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 16),
           TextFormField(
             controller: _notesCtrl,
             maxLines: 2,
@@ -2864,6 +3029,22 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
         ],
       ),
     );
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dob != null
+          ? (DateTime.tryParse(_dob!) ?? DateTime(now.year - 25))
+          : DateTime(now.year - 25, now.month, now.day),
+      firstDate: DateTime(now.year - 100),
+      lastDate: now,
+      initialDatePickerMode: DatePickerMode.year,
+    );
+    if (picked != null && mounted) {
+      setState(() => _dob = picked.toIso8601String().split('T')[0]);
+    }
   }
 }
 
@@ -2979,7 +3160,11 @@ class _QuickLinkRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            const Icon(AppIcons.chevronRight, size: 18, color: AppTheme.inkHint),
+            const Icon(
+              AppIcons.chevronRight,
+              size: 18,
+              color: AppTheme.inkHint,
+            ),
           ],
         ),
       ),

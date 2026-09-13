@@ -16,6 +16,11 @@ class Member {
   final int billingIntervalMonths;
   final Membership? currentMembership;
   final String? biometricId;
+  final String? dob;
+  final String? bloodGroup;
+  final String? emergencyContactName;
+  final String? emergencyContactPhone;
+  final String? phoneAlt;
 
   const Member({
     required this.id,
@@ -35,6 +40,11 @@ class Member {
     this.billingIntervalMonths = 1,
     this.currentMembership,
     this.biometricId,
+    this.dob,
+    this.bloodGroup,
+    this.emergencyContactName,
+    this.emergencyContactPhone,
+    this.phoneAlt,
   });
 
   String get fullName => '$firstName $lastName';
@@ -63,6 +73,11 @@ class Member {
       nextPaymentDate: j['next_payment_date'] as String?,
       billingIntervalMonths: (j['billing_interval_months'] as int?) ?? 1,
       biometricId: j['biometric_id'] as String?,
+      dob: j['dob'] as String?,
+      bloodGroup: j['blood_group'] as String?,
+      emergencyContactName: j['emergency_contact_name'] as String?,
+      emergencyContactPhone: j['emergency_contact_phone'] as String?,
+      phoneAlt: j['phone_alt'] as String?,
       currentMembership: (() {
         final list = j['memberships'] as List?;
         if (list == null || list.isEmpty) return null;

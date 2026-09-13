@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import '../settings/gym_branches_sheet.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/offline_checkin_queue.dart';
+import '../../../core/services/review_prompt.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
@@ -168,6 +171,16 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .select('amount')
           .eq('gym_id', gymId)
           .gte('expense_date', startOfMonth.split('T')[0]),
+      // Birthdays: PostgREST can't filter on month+day of a date column, so
+      // the day match happens below in Dart.
+      // ponytail: fetches every member with a DOB — fine at gym scale
+      // (hundreds), move to an RPC if a chain ever runs tens of thousands.
+      client
+          .from('members')
+          .select('id, first_name, last_name, phone, avatar_url, dob')
+          .eq('gym_id', gymId)
+          .eq('status', 'active')
+          .not('dob', 'is', null),
     ]),
   ]);
 
@@ -253,6 +266,10 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'overdueCount': overdue.length,
     'overdueAmount': overdue.fold<double>(0, (s, i) => s + remainingDue(i)),
     'leadsToFollowUp': rows[8].length,
+    'birthdays': rows[10].where((m) {
+      final dob = DateTime.tryParse(m['dob'] as String? ?? '');
+      return dob != null && dob.month == now.month && dob.day == now.day;
+    }).toList(),
   };
 });
 
@@ -272,6 +289,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     // These totals are cached, so a payment or check-in recorded on any other
     // screen used to leave stale numbers here until the app restarted.
     gymDataChanged.addListener(_refresh);
+    // The dashboard is the first screen of every staff session, so this is
+    // "on app open" — ReviewPrompt itself decides whether asking is due.
+    unawaited(ReviewPrompt.maybeAskOnLaunch());
   }
 
   @override
@@ -341,11 +361,7 @@ class _ErrorBody extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              AppIcons.cloudOff,
-              size: 52,
-              color: AppTheme.inkHint,
-            ),
+            const Icon(AppIcons.cloudOff, size: 52, color: AppTheme.inkHint),
             const SizedBox(height: 16),
             const Text(
               'Failed to load dashboard',
@@ -444,7 +460,14 @@ class _DashboardBody extends ConsumerWidget {
       ),
     ];
 
+    final birthdays = (data['birthdays'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+
     final rightColumn = [
+      if (birthdays.isNotEmpty) ...[
+        _BirthdaysToday(members: birthdays),
+        const SizedBox(height: 16),
+      ],
       _PaymentDueToday(data: data, canCollect: canCollect),
       const SizedBox(height: 16),
       _TodayCheckins(
@@ -473,7 +496,8 @@ class _DashboardBody extends ConsumerWidget {
 
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+      // Bottom room for the shell's floating Add button.
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 96),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -761,6 +785,129 @@ typedef _QuickAction = ({
   bool accent,
   VoidCallback onTap,
 });
+
+// ─── Birthdays ────────────────────────────────────────────────────────────────
+
+/// Renders only on days someone actually has a birthday, so it costs nothing
+/// on the other 300-odd days. Each row opens WhatsApp with the wish already
+/// typed — the whole point is that it takes one tap at the front desk.
+class _BirthdaysToday extends StatelessWidget {
+  final List<Map<String, dynamic>> members;
+  const _BirthdaysToday({required this.members});
+
+  static String _name(Map<String, dynamic> m) =>
+      '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
+
+  Future<void> _wish(BuildContext context, Map<String, dynamic> m) async {
+    final phone = (m['phone'] as String?)?.replaceAll(RegExp(r'[^0-9]'), '');
+    if (phone == null || phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No phone number saved for this member')),
+      );
+      return;
+    }
+    final text = Uri.encodeComponent(
+      'Happy birthday, ${m['first_name'] ?? 'there'}! 🎉',
+    );
+    final uri = Uri.parse('https://wa.me/$phone?text=$text');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open WhatsApp')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'Birthdays today',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.ink,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${members.length}',
+              style: AppTheme.numberStyle(fontSize: 15, color: AppTheme.accent),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: AppTheme.cardDecoration(),
+          child: Column(
+            children: [
+              for (var i = 0; i < members.length; i++) ...[
+                if (i > 0)
+                  const Divider(
+                    height: 1,
+                    indent: 14,
+                    endIndent: 14,
+                    color: AppTheme.border,
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('🎂', style: TextStyle(fontSize: 18)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _name(members[i]),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.ink,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => _wish(context, members[i]),
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.accentSoft,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: const Text(
+                            'Wish',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.accent,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 // ─── Today's check-ins ────────────────────────────────────────────────────────
 

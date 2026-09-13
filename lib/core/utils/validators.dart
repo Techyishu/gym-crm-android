@@ -4,7 +4,22 @@ final _indianMobileRegex = RegExp(r'^[6-9]\d{9}$');
 bool isValidEmail(String value) => _emailRegex.hasMatch(value);
 
 bool isValidIndianMobile(String value) =>
-    _indianMobileRegex.hasMatch(value.replaceAll(RegExp(r'\D'), ''));
+    _indianMobileRegex.hasMatch(localMobileDigits(value));
+
+/// The 10 local digits of a number that may or may not carry a country code.
+///
+/// Numbers are *stored* with the country code (WhatsApp and MSG91 need it),
+/// but every form here asks for the bare 10 digits with "+91" painted beside
+/// the box. Without this, loading a stored "+919812345603" into an edit field
+/// left 12 digits in front of a 10-digit validator, and the member could never
+/// be saved again — 1,019 members were stuck that way.
+String localMobileDigits(String? value, {String dialCode = '91'}) {
+  final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
+  if (digits.length > 10 && digits.startsWith(dialCode)) {
+    return digits.substring(dialCode.length);
+  }
+  return digits;
+}
 
 /// For optional email fields: empty is allowed, anything entered must be valid.
 String? validateOptionalEmail(String? v) {

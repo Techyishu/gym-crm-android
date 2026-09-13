@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/app_events.dart';
 import '../services/data_refresh.dart';
+import '../services/review_prompt.dart';
 import '../utils/formatters.dart';
 import '../../shared/widgets/redesign.dart';
 import '../theme/app_icons.dart';
@@ -142,6 +143,10 @@ Future<bool> recordInvoicePayment({
     );
   }
   unawaited(AppEvents.paymentRecorded());
+  // Money just landed — the single best moment to be asked for a review, and
+  // a far better signal of a happy owner than a QR check-in (a busy gym racks
+  // those up on day one, before the app has done anything for them).
+  unawaited(ReviewPrompt.recordSuccess());
   notifyGymDataChanged();
   return result['is_fully_paid'] == true;
 }
@@ -178,6 +183,10 @@ Future<bool> collectMembershipRenewal({
     );
   }
   unawaited(AppEvents.paymentRecorded());
+  // Money just landed — the single best moment to be asked for a review, and
+  // a far better signal of a happy owner than a QR check-in (a busy gym racks
+  // those up on day one, before the app has done anything for them).
+  unawaited(ReviewPrompt.recordSuccess());
   notifyGymDataChanged();
   return result['is_fully_paid'] == true;
 }

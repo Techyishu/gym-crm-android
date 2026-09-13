@@ -13,6 +13,7 @@ import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/plan_limits.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/services/data_refresh.dart';
+import '../../../core/services/review_prompt.dart';
 import '../../../core/services/member_photo_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/check_in_service.dart';
@@ -29,8 +30,11 @@ import 'import_csv_screen.dart';
 import 'upcoming_payments_screen.dart' show QuickCollectSheet;
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../shared/widgets/blood_group_field.dart';
+import '../classes/classes_screen.dart' show showClassFormSheet;
 
 final _membersProvider = FutureProvider<List<Member>>((ref) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -87,6 +91,20 @@ final _memberPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
   return (data as List).cast<Map<String, dynamic>>();
 });
 
+/// Batches a member can be put into at joining. Same shape as the plan
+/// chips — a gym with no batches simply gets no row.
+final _memberBatchesProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  final gymId = await ref.watch(gymIdProvider.future);
+  final data = await Supabase.instance.client
+      .from('classes')
+      .select('id, name, default_start_time, trainer_name')
+      .eq('gym_id', gymId)
+      .order('default_start_time', nullsFirst: false);
+  return (data as List).cast<Map<String, dynamic>>();
+});
+
 /// "₹1,200 / mo" — the plan chip's second line. Keeps the billing interval
 /// visible, which a plan name alone doesn't always carry.
 String _planPriceLabel(Map<String, dynamic> p) {
@@ -112,6 +130,25 @@ class MembersScreen extends ConsumerStatefulWidget {
 }
 
 const _kLapsingWindows = [3, 7, 15];
+
+/// Windows for the "Joined" filter — this week / this month / this quarter,
+/// the spans an owner actually asks about when reviewing new members.
+const _kJoinedWindows = [7, 30, 90];
+
+/// Whether [joinedAt] falls inside the last [withinDays] days.
+///
+/// Top-level (not a State method) so it can be tested directly. `joined_at`
+/// is a plain date string and falls back to an empty string when the row has
+/// neither a join date nor a created_at, so an unparseable value is simply
+/// not recent rather than an exception.
+bool isRecentlyJoined(String joinedAt, int withinDays, {DateTime? now}) {
+  if (joinedAt.isEmpty) return false;
+  final joined = DateTime.tryParse(joinedAt);
+  if (joined == null) return false;
+  final days = (now ?? DateTime.now()).difference(joined).inDays;
+  // Future-dated joins (a membership starting next week) are not "recent" yet.
+  return days >= 0 && days <= withinDays;
+}
 
 /// Compact single-line filter pill: label + a small count badge, fixed
 /// 34dp height so it never sits taller/bulkier than its neighbours.
@@ -276,10 +313,15 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   String _filter = 'all';
   String _search = '';
   int _lapsingDays = 7;
+  int _joinedDays = 30;
 
   // Sort + plan filter both run client-side over the already-loaded list.
   static const _sorts = ['Expiry soonest', 'Name A–Z', 'Recently joined'];
-  int _sort = 0;
+
+  /// Null until the owner picks one: nothing is pre-selected, so the pill
+  /// never reads as a filter that was switched on without asking. Unsorted
+  /// keeps the server's order, which is already newest-added first.
+  int? _sort;
   String? _planFilter;
   final _searchCtrl = TextEditingController();
 
@@ -304,6 +346,8 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
       'all' => list,
       'due' => list.where((m) => (dueMap[m.id] ?? 0) > 0).toList(),
       'lapsing' => list.where((m) => _isLapsing(m, _lapsingDays)).toList(),
+      'joined' =>
+        list.where((m) => isRecentlyJoined(m.joinedAt, _joinedDays)).toList(),
       _ => list.where((m) => m.status == _filter).toList(),
     };
     if (_planFilter != null) {
@@ -316,6 +360,14 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
   List<Member> _applySort(List<Member> list) {
     final out = [...list];
+    if (_sort == null) {
+      // Nothing picked. Inside the Joined filter, newest-joined first is the
+      // only order that reads sensibly; everywhere else keep the server's.
+      if (_filter == 'joined') {
+        out.sort((a, b) => b.joinedAt.compareTo(a.joinedAt));
+      }
+      return out;
+    }
     switch (_sort) {
       case 1:
         out.sort(
@@ -348,9 +400,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             for (var i = 0; i < _sorts.length; i++)
               ListTile(
                 leading: Icon(
-                  i == _sort
-                      ? AppIcons.radioChecked
-                      : AppIcons.radioUnchecked,
+                  i == _sort ? AppIcons.radioChecked : AppIcons.radioUnchecked,
                   color: i == _sort ? AppTheme.accent : AppTheme.inkHint,
                 ),
                 title: Text(_sorts[i]),
@@ -412,30 +462,55 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
     );
   }
 
-  void _pickLapsingWindow() {
+  void _pickLapsingWindow() => _pickDayWindow(
+    title: 'Lapsing within',
+    windows: _kLapsingWindows,
+    current: _lapsingDays,
+    filterKey: 'lapsing',
+    onPick: (d) => _lapsingDays = d,
+  );
+
+  void _pickJoinedWindow() => _pickDayWindow(
+    title: 'Joined within',
+    windows: _kJoinedWindows,
+    current: _joinedDays,
+    filterKey: 'joined',
+    onPick: (d) => _joinedDays = d,
+  );
+
+  /// Shared day-window picker for the two date-window chips. Picking a window
+  /// also selects that chip's filter — opening the sheet from the chevron is
+  /// only ever done to narrow that filter.
+  void _pickDayWindow({
+    required String title,
+    required List<int> windows,
+    required int current,
+    required String filterKey,
+    required void Function(int) onPick,
+  }) {
     showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => Padding(
+      builder: (ctx) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SheetHeader(title: 'Lapsing within'),
+            SheetHeader(title: title),
             const SizedBox(height: 16),
-            ..._kLapsingWindows.map((d) {
-              final selected = d == _lapsingDays;
+            ...windows.map((d) {
+              final selected = d == current;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: GestureDetector(
                   onTap: () {
                     setState(() {
-                      _lapsingDays = d;
-                      _filter = 'lapsing';
+                      onPick(d);
+                      _filter = filterKey;
                     });
-                    Navigator.pop(context);
+                    Navigator.pop(ctx);
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -508,19 +583,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      floatingActionButton: canAdd
-          ? FloatingActionButton.extended(
-              onPressed: () => _showAddMemberSheet(context),
-              backgroundColor: AppTheme.accent,
-              foregroundColor: Colors.white,
-              elevation: 3,
-              icon: const Icon(AppIcons.add),
-              label: const Text(
-                'Add member',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-            )
-          : null,
       body: SafeArea(
         child: Column(
           children: [
@@ -652,10 +714,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(
-                AppIcons.uploadFile,
-                color: AppTheme.ink,
-              ),
+              leading: const Icon(AppIcons.uploadFile, color: AppTheme.ink),
               title: const Text('Import members'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -693,6 +752,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
       'all': all.length,
       'due': all.where((m) => (dueMap[m.id] ?? 0) > 0).length,
       'lapsing': all.where((m) => _isLapsing(m, _lapsingDays)).length,
+      'joined': all
+          .where((m) => isRecentlyJoined(m.joinedAt, _joinedDays))
+          .length,
       'expired': all.where((m) => m.status == 'expired').length,
       'active': all.where((m) => m.status == 'active').length,
       'frozen': all.where((m) => m.status == 'frozen').length,
@@ -701,6 +763,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
       ('all', 'All', null, null),
       ('due', 'Due', AppTheme.statusDangerBg, AppTheme.statusDanger),
       ('lapsing', 'Expiring', AppTheme.statusWarnBg, AppTheme.statusWarn),
+      ('joined', 'Joined', null, null),
       ('expired', 'Expired', null, null),
       ('active', 'Active', null, null),
       ('frozen', 'On hold', null, null),
@@ -721,7 +784,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
       child: Row(
         children: filters.map((f) {
           final (key, label, tintBg, tintFg) = f;
-          if (key == 'lapsing') {
+          // Both of these filter on a date window, so they carry the same
+          // chevron that opens their day picker.
+          if (key == 'lapsing' || key == 'joined') {
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: _LapsingChip(
@@ -731,7 +796,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
                 tintBg: tintBg,
                 tintFg: tintFg,
                 onTap: () => setState(() => _filter = key),
-                onPickWindow: _pickLapsingWindow,
+                onPickWindow: key == 'joined'
+                    ? _pickJoinedWindow
+                    : _pickLapsingWindow,
               ),
             );
           }
@@ -795,7 +862,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         const SizedBox(width: 8),
         _MiniControl(
           icon: AppIcons.swapVert,
-          label: _sorts[_sort],
+          // No sort is pre-selected, so until the owner picks one this reads
+          // as the control it is rather than a filter already switched on.
+          label: _sort == null ? 'Sort' : _sorts[_sort!],
           onTap: _pickSort,
         ),
         if (_planFilter != null) ...[
@@ -822,10 +891,6 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         ],
       ],
     );
-  }
-
-  void _showAddMemberSheet(BuildContext context) {
-    showAddMemberSheet(context).then((_) => ref.invalidate(_membersProvider));
   }
 
   void _openImportCsv(BuildContext context) {
@@ -992,10 +1057,7 @@ class _MemberRow extends ConsumerWidget {
                 },
               ),
               ListTile(
-                leading: const Icon(
-                  AppIcons.chat,
-                  color: AppTheme.ink,
-                ),
+                leading: const Icon(AppIcons.chat, color: AppTheme.ink),
                 title: const Text('WhatsApp'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1437,8 +1499,13 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   final _customIdCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _paidAmountCtrl = TextEditingController();
+  final _emergencyNameCtrl = TextEditingController();
+  final _emergencyPhoneCtrl = TextEditingController();
 
   String _status = 'active';
+  String? _dob;
+  String? _bloodGroup;
+  String? _batchId;
   String? _joinedAt;
   String? _nextPaymentDate;
   String? _planId;
@@ -1474,6 +1541,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     _customIdCtrl.dispose();
     _notesCtrl.dispose();
     _paidAmountCtrl.dispose();
+    _emergencyNameCtrl.dispose();
+    _emergencyPhoneCtrl.dispose();
     super.dispose();
   }
 
@@ -1510,17 +1579,17 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   Future<void> _pickAvatar() async {
     final source = await showAdaptiveSheet<ImageSource>(
       context: context,
-      builder: (_) => SafeArea(
+      builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(context, ImageSource.gallery),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
               title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(context, ImageSource.camera),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
           ],
         ),
@@ -1571,6 +1640,24 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           _nextPaymentDate = s;
         }
       });
+    }
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      // Opens on a plausible birth year rather than today: scrolling back 25
+      // years one month at a time is the single slowest thing in this form.
+      initialDate: _dob != null
+          ? DateTime.parse(_dob!)
+          : DateTime(now.year - 25, now.month, now.day),
+      firstDate: DateTime(now.year - 100),
+      lastDate: now,
+      initialDatePickerMode: DatePickerMode.year,
+    );
+    if (picked != null && mounted) {
+      setState(() => _dob = picked.toIso8601String().split('T')[0]);
     }
   }
 
@@ -1653,6 +1740,17 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
               'custom_id': _customIdCtrl.text.trim(),
             if (_notesCtrl.text.trim().isNotEmpty)
               'notes': _notesCtrl.text.trim(),
+            if (_dob != null) 'dob': _dob,
+            if (_bloodGroup != null) 'blood_group': _bloodGroup,
+            // Same normalisation as the primary number — a second contact
+            // saved without a country code would silently never receive a
+            // WhatsApp reminder either.
+            if (_emergencyNameCtrl.text.trim().isNotEmpty)
+              'emergency_contact_name': _emergencyNameCtrl.text.trim(),
+            if (_emergencyPhoneCtrl.text.trim().isNotEmpty)
+              'emergency_contact_phone': phoneWithCountryCode(
+                _emergencyPhoneCtrl.text,
+              ),
             'status':
                 (nextPaymentDate != null &&
                     nextPaymentDate.compareTo(
@@ -1680,6 +1778,27 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         'ends_at': null,
         'discount_amount': _planDiscountAmount,
       });
+
+      // Batch is optional and must never cost us the member: the rows above
+      // are already committed by this point, so a failed enrolment is
+      // reported and the member still exists.
+      if (_batchId != null) {
+        try {
+          await client.from('class_enrollments').insert({
+            'class_id': _batchId,
+            'member_id': inserted['id'],
+          });
+        } catch (e) {
+          debugPrint('[GymCRM] AddMember batch enrolment failed: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Member added, but the batch could not be set.'),
+              ),
+            );
+          }
+        }
+      }
 
       if (paidAmount > 0) {
         final invoice = await client
@@ -1711,6 +1830,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         );
       }
 
+      // A member joined — the app just did the job it was bought for.
+      unawaited(ReviewPrompt.recordSuccess());
       notifyGymDataChanged();
 
       // Hand the caller what it needs to show the "member added" confirmation
@@ -1743,6 +1864,10 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // No local input-density override here: shrinking only the TextFormFields
+    // left them shorter than the tap-to-open boxes beside them (joining date,
+    // member ID, blood group, plan), and a form of mismatched box heights
+    // reads worse than a slightly taller one.
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1756,17 +1881,17 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('1 · MEMBER', style: AppTheme.kicker),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   SheetCard(child: _memberSection()),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
                   const Text('2 · MEMBERSHIP', style: AppTheme.kicker),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   SheetCard(child: _membershipSection()),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
                   const Text('3 · PAYMENT', style: AppTheme.kicker),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   SheetCard(child: _paymentSection()),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   _moreDetailsSection(),
                 ],
               ),
@@ -1906,7 +2031,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
               data: (list) {
                 if (list.isEmpty) return _NoPlansBox(onCreate: _createPlan);
                 // A gym with exactly one plan has no choice to make, but the
-                // chip still rendered unselected — so the payment section sat
+                // field still rendered unselected — so the payment section sat
                 // on "Pick a membership plan first" beside what looked like an
                 // already-chosen plan, with nothing saying it needed tapping.
                 // Post-frame because this runs during build.
@@ -1917,18 +2042,21 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                     }
                   });
                 }
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final p in list)
-                      _PlanChip(
-                        name: p['name'] as String? ?? 'Plan',
-                        priceLabel: _planPriceLabel(p),
-                        selected: _planId == p['id'],
-                        onTap: () => setState(() => _selectPlan(p)),
-                      ),
-                  ],
+                // A menu, not chips: chips cost one row per two or three
+                // plans, so a gym running ten of them pushed the rest of the
+                // form off the screen. One row, any number of plans.
+                final selected = list.firstWhere(
+                  (p) => p['id'] == _planId,
+                  orElse: () => const <String, dynamic>{},
+                );
+                return _PlanDropdown(
+                  label: selected.isEmpty
+                      ? 'Choose a plan'
+                      : '${selected['name'] ?? 'Plan'} · ${_planPriceLabel(selected)}',
+                  chosen: selected.isNotEmpty,
+                  plans: list,
+                  priceLabel: _planPriceLabel,
+                  onSelected: (p) => setState(() => _selectPlan(p)),
                 );
               },
               orElse: () => const SizedBox(
@@ -1939,31 +2067,83 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           },
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: BoxField(
-                label: 'Joining date',
-                value: _joinedAt != null
-                    ? formatDateFromString(_joinedAt)
-                    : 'Today, ${formatDateShort(DateTime.now())}',
-                onTap: () => _pickDate(isJoined: true),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: BoxField(
-                label: 'Member ID',
-                value: _customIdCtrl.text.trim().isEmpty
-                    ? 'auto'
-                    : _customIdCtrl.text.trim(),
-                onTap: _editMemberId,
-              ),
-            ),
-          ],
+        _FieldPair(
+          BoxField(
+            label: 'Joining date',
+            value: _joinedAt != null
+                ? formatDateFromString(_joinedAt)
+                : 'Today, ${formatDateShort(DateTime.now())}',
+            onTap: () => _pickDate(isJoined: true),
+          ),
+          BoxField(
+            label: 'Member ID',
+            value: _customIdCtrl.text.trim().isEmpty
+                ? 'auto'
+                : _customIdCtrl.text.trim(),
+            onTap: _editMemberId,
+          ),
         ),
       ],
     );
+  }
+
+  /// Batch chips, plus a way to make the first one.
+  ///
+  /// Without that last part a gym with no batches saw nothing here at all and
+  /// had no idea the feature existed — the same dead end the plan picker
+  /// avoids with its "create a plan" box.
+  Widget _batchPicker() {
+    return Consumer(
+      builder: (context, ref, _) {
+        final batches = ref.watch(_memberBatchesProvider);
+        final list = batches.valueOrNull;
+        if (list == null) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 12),
+            const Text('Batch', style: AppTheme.kicker),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final b in list)
+                  SelectChip(
+                    label: _batchLabel(b),
+                    selected: _batchId == b['id'],
+                    // Tapping the selected chip clears it: batch is optional,
+                    // and there is no other way back to "no batch".
+                    onTap: () => setState(
+                      () => _batchId = _batchId == b['id']
+                          ? null
+                          : b['id'] as String?,
+                    ),
+                  ),
+                SelectChip(
+                  label: list.isEmpty ? '+ Create a batch' : '+ New batch',
+                  selected: false,
+                  // Half-filled member form stays put: the sheet opens over it
+                  // and the chips refresh when it closes, same as "create plan".
+                  onTap: () async {
+                    await showClassFormSheet(context);
+                    ref.invalidate(_memberBatchesProvider);
+                  },
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  static String _batchLabel(Map<String, dynamic> b) {
+    final name = b['name'] as String? ?? 'Batch';
+    final start = b['default_start_time'] as String?;
+    if (start == null || start.length < 5) return name;
+    // "08:00:00" → "08:00". A chip is not the place to invent a time format.
+    return '$name · ${start.substring(0, 5)}';
   }
 
   Future<void> _editMemberId() async {
@@ -2009,43 +2189,31 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: TextFormField(
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Discount',
-                  hintText: '0',
-                  prefixText: '$currencySymbol ',
-                ),
-                onChanged: (v) {
-                  final parsed = double.tryParse(v.trim()) ?? 0.0;
-                  setState(() {
-                    _planDiscountAmount = parsed < 0 ? 0 : parsed;
-                    _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
-                  });
-                },
-              ),
+        _FieldPair(
+          TextFormField(
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Discount',
+              hintText: '0',
+              prefixText: '$currencySymbol ',
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextFormField(
-                controller: _paidAmountCtrl,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Amount paid',
-                  prefixText: '$currencySymbol ',
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
+            onChanged: (v) {
+              final parsed = double.tryParse(v.trim()) ?? 0.0;
+              setState(() {
+                _planDiscountAmount = parsed < 0 ? 0 : parsed;
+                _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
+              });
+            },
+          ),
+          TextFormField(
+            controller: _paidAmountCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Amount paid',
+              prefixText: '$currencySymbol ',
             ),
-          ],
+            onChanged: (_) => setState(() {}),
+          ),
         ),
         const SizedBox(height: 4),
         const Text(
@@ -2125,7 +2293,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             SizedBox(width: 8),
             Flexible(
               child: Text(
-                'Email, next payment date, notes',
+                'Email, DOB, batch, emergency contact',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
@@ -2150,6 +2318,18 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             validator: validateOptionalEmail,
           ),
           const SizedBox(height: 12),
+          _FieldPair(
+            BoxField(
+              label: 'Date of birth',
+              value: _dob != null ? formatDateFromString(_dob) : 'Not set',
+              onTap: _pickDob,
+            ),
+            MemberBloodGroupField(
+              value: _bloodGroup,
+              onChanged: (v) => setState(() => _bloodGroup = v),
+            ),
+          ),
+          const SizedBox(height: 12),
           BoxField(
             label: 'Next payment date',
             value: _nextPaymentDate != null
@@ -2157,7 +2337,33 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 : 'From the plan',
             onTap: () => _pickDate(isJoined: false),
           ),
-          const SizedBox(height: 12),
+          _batchPicker(),
+          const SizedBox(height: 16),
+          const Text('EMERGENCY CONTACT', style: AppTheme.kicker),
+          const SizedBox(height: 8),
+          _FieldPair(
+            TextFormField(
+              controller: _emergencyNameCtrl,
+              maxLength: 120,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'e.g. Ramesh (father)',
+                counterText: '',
+              ),
+            ),
+            TextFormField(
+              controller: _emergencyPhoneCtrl,
+              maxLength: 20,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Number',
+                counterText: '',
+              ),
+              validator: validateOptionalPhone,
+            ),
+          ),
+          const SizedBox(height: 16),
           TextFormField(
             controller: _notesCtrl,
             maxLines: 2,
@@ -2175,50 +2381,132 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
 // ── Add-member sheet parts ───────────────────────────────────────────────────
 
-class _PlanChip extends StatelessWidget {
-  final String name;
-  final String priceLabel;
-  final bool selected;
-  final VoidCallback onTap;
-  const _PlanChip({
-    required this.name,
+/// Two fields side by side when there is room, stacked when there isn't.
+///
+/// The form is one sheet on a 360pt phone and an 820pt dialog on the web, and
+/// a fixed Row crushed short fields on the phone while a fixed Column left the
+/// web version a very long single file. Measured per row rather than per
+/// screen, so a narrow phone still stacks inside a wide dialog.
+class _FieldPair extends StatelessWidget {
+  final Widget first;
+  final Widget second;
+  const _FieldPair(this.first, this.second);
+
+  static const _minSideBySide = 380.0;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, c) => c.maxWidth < _minSideBySide
+        ? Column(
+            // Stretch, or a box sizes itself to its text and the stacked
+            // fields come out half-width and ragged instead of full-bleed.
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [first, const SizedBox(height: 10), second],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: first),
+              const SizedBox(width: 12),
+              Expanded(child: second),
+            ],
+          ),
+  );
+}
+
+/// The membership plan picker: one row whatever the gym's plan count.
+///
+/// Replaced a chip grid, which cost a row per two or three plans — a gym with
+/// ten of them filled the sheet with chips before the first real field.
+class _PlanDropdown extends StatelessWidget {
+  final String label;
+  final bool chosen;
+  final List<Map<String, dynamic>> plans;
+  final String Function(Map<String, dynamic>) priceLabel;
+  final ValueChanged<Map<String, dynamic>> onSelected;
+
+  const _PlanDropdown({
+    required this.label,
+    required this.chosen,
+    required this.plans,
     required this.priceLabel,
-    required this.selected,
-    required this.onTap,
+    required this.onSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+    return PopupMenuButton<Map<String, dynamic>>(
+      onSelected: onSelected,
+      tooltip: '',
+      // Long plan lists scroll inside the menu instead of growing the form.
+      constraints: const BoxConstraints(maxHeight: 320, minWidth: 240),
+      itemBuilder: (_) => [
+        for (final p in plans)
+          PopupMenuItem<Map<String, dynamic>>(
+            value: p,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    p['name'] as String? ?? 'Plan',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  priceLabel(p),
+                  style: AppTheme.numberStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+      // Same reason as the blood-group field: a BoxField's own GestureDetector
+      // sits deeper than the menu's and would eat the tap.
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.accent : AppTheme.surface2,
-          borderRadius: BorderRadius.circular(14),
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
           children: [
-            Text(
-              name,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                color: selected ? Colors.white : AppTheme.ink,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Membership plan',
+                    style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      // An unchosen plan is the one thing blocking the save,
+                      // so it reads as a prompt rather than as a value.
+                      color: chosen ? AppTheme.ink : AppTheme.inkHint,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              priceLabel,
-              style: AppTheme.numberStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: selected ? Colors.white70 : AppTheme.inkSoft,
-              ),
-            ),
+            const Icon(AppIcons.expandMore, size: 16, color: AppTheme.inkHint),
           ],
         ),
       ),

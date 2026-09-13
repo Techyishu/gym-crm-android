@@ -19,6 +19,15 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
   Package? _annual;
   Package? _selected;
 
+  /// Product IDs this Apple ID can still start an intro offer on.
+  ///
+  /// A free trial is once per Apple ID per subscription group, so someone who
+  /// already used it gets charged straight away. We only promise the trial to
+  /// people who will actually receive it — everyone else sees the plain price.
+  /// "Unknown" counts as ineligible, which is what RevenueCat advises: never
+  /// advertise an offer we cannot confirm.
+  final _trialEligible = <String>{};
+
   bool _loadingOfferings = true;
   bool _purchasing = false;
   bool _restoring = false;
@@ -44,6 +53,7 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
         _selected = _monthly ?? _annual;
         _loadingOfferings = false;
       });
+      await _loadTrialEligibility();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -51,6 +61,36 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
             'Could not load plans. Check your connection and try again.';
         _loadingOfferings = false;
       });
+    }
+  }
+
+  Future<void> _loadTrialEligibility() async {
+    final ids = [
+      if (_monthly != null) _monthly!.storeProduct.identifier,
+      if (_annual != null) _annual!.storeProduct.identifier,
+    ];
+    if (ids.isEmpty) return;
+    try {
+      final result = await Purchases.checkTrialOrIntroductoryPriceEligibility(
+        ids,
+      );
+      if (!mounted) return;
+      setState(() {
+        _trialEligible
+          ..clear()
+          ..addAll(
+            result.entries
+                .where(
+                  (e) =>
+                      e.value.status ==
+                      IntroEligibilityStatus.introEligibilityStatusEligible,
+                )
+                .map((e) => e.key),
+          );
+      });
+    } catch (_) {
+      // Never blocks the paywall: prices are already correct on screen, only
+      // the trial wording goes missing.
     }
   }
 
@@ -137,6 +177,7 @@ class _IosCustomPaywallState extends State<IosCustomPaywall> {
               restoring: _restoring,
               errorMessage: _errorMessage,
               onOpenUrl: _openUrl,
+              trialEligible: _trialEligible,
             ),
     );
   }
@@ -148,10 +189,7 @@ const _kIosFeatures = [
     icon: AppIcons.chat,
     text: 'We remind your members before their fees are due — automatically',
   ),
-  (
-    icon: AppIcons.wallet,
-    text: 'Know exactly who owes you money, today',
-  ),
+  (icon: AppIcons.wallet, text: 'Know exactly who owes you money, today'),
   (
     icon: AppIcons.showChart,
     text: 'See what you collected this month without opening a register',
@@ -167,6 +205,66 @@ const _kIosFeatures = [
   (icon: AppIcons.supportAgent, text: 'Priority support'),
 ];
 
+// ── Free trial helpers ───────────────────────────────────────────────────────
+
+/// The free trial on a package, or null when there isn't one or this Apple ID
+/// is no longer eligible for it.
+IntroductoryPrice? _freeTrialFor(Package? pkg, Set<String> eligible) {
+  if (pkg == null) return null;
+  if (!eligible.contains(pkg.storeProduct.identifier)) return null;
+  final intro = pkg.storeProduct.introductoryPrice;
+  // An introductory *price* is not a free trial — only a zero-cost intro
+  // period counts, or the button would say "free" over a discounted charge.
+  if (intro == null || intro.price > 0) return null;
+  return intro;
+}
+
+/// "3-day", "1-week", "1-month" — taken from App Store Connect rather than
+/// hardcoded, so changing the offer there changes every label here.
+String _trialLength(IntroductoryPrice trial) {
+  final unit = switch (trial.periodUnit) {
+    PeriodUnit.day => 'day',
+    PeriodUnit.week => 'week',
+    PeriodUnit.month => 'month',
+    PeriodUnit.year => 'year',
+    PeriodUnit.unknown => 'day',
+  };
+  return '${trial.periodNumberOfUnits}-$unit';
+}
+
+/// "3 days" / "1 day" — the same period as [_trialLength] but written out, for
+/// running text. Pluralised properly: a one-day trial must not read "1 days".
+String _trialPlain(IntroductoryPrice trial) {
+  final n = trial.periodNumberOfUnits;
+  final unit = switch (trial.periodUnit) {
+    PeriodUnit.day => 'day',
+    PeriodUnit.week => 'week',
+    PeriodUnit.month => 'month',
+    PeriodUnit.year => 'year',
+    PeriodUnit.unknown => 'day',
+  };
+  return '$n $unit${n == 1 ? '' : 's'}';
+}
+
+String _ctaLabel(Package? pkg, Set<String> eligible) {
+  if (pkg == null) return 'Select a plan';
+  final trial = _freeTrialFor(pkg, eligible);
+  if (trial != null) return 'Start ${_trialLength(trial)} free trial';
+  return 'Subscribe · ${pkg.storeProduct.priceString}';
+}
+
+/// What Apple requires shown before purchase: the trial length, the price
+/// after it, how often that recurs, and that it renews until cancelled.
+String? _trialDisclosure(Package? pkg, Set<String> eligible) {
+  final trial = _freeTrialFor(pkg, eligible);
+  if (pkg == null || trial == null) return null;
+  final per = pkg.packageType == PackageType.annual ? 'year' : 'month';
+  return 'Free for ${_trialPlain(trial)}, then '
+      '${pkg.storeProduct.priceString} per $per. Renews automatically until '
+      'cancelled — cancel any time in Settings, at least 24 hours before the '
+      'trial ends to avoid being charged.';
+}
+
 // ── Paywall body ──────────────────────────────────────────────────────────────
 
 class _PaywallBody extends StatelessWidget {
@@ -180,6 +278,7 @@ class _PaywallBody extends StatelessWidget {
   final bool restoring;
   final String? errorMessage;
   final Future<void> Function(String) onOpenUrl;
+  final Set<String> trialEligible;
 
   const _PaywallBody({
     required this.monthly,
@@ -192,6 +291,7 @@ class _PaywallBody extends StatelessWidget {
     required this.restoring,
     required this.errorMessage,
     required this.onOpenUrl,
+    required this.trialEligible,
   });
 
   @override
@@ -218,7 +318,11 @@ class _PaywallBody extends StatelessWidget {
                 ),
                 if (monthly != null && annual != null)
                   const SizedBox(height: 14),
-                if (selected != null) _IosPricePanel(package: selected!),
+                if (selected != null)
+                  _IosPricePanel(
+                    package: selected!,
+                    trial: _freeTrialFor(selected, trialEligible),
+                  ),
 
                 // ── Error ────────────────────────────────────────────────────
                 if (errorMessage != null) ...[
@@ -267,7 +371,7 @@ class _PaywallBody extends StatelessWidget {
                             ),
                           )
                         : Text(
-                            _ctaLabel(selected),
+                            _ctaLabel(selected, trialEligible),
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
@@ -275,6 +379,24 @@ class _PaywallBody extends StatelessWidget {
                           ),
                   ),
                 ),
+
+                // Directly under the button and before any purchase: Apple
+                // requires the trial length, the price after it, the billing
+                // period and that it auto-renews, all visible without
+                // scrolling or tapping anything.
+                if (_trialDisclosure(selected, trialEligible)
+                    case final disclosure?) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    disclosure,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      height: 1.45,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 12),
 
@@ -314,11 +436,6 @@ class _PaywallBody extends StatelessWidget {
         ),
       ],
     );
-  }
-
-  String _ctaLabel(Package? pkg) {
-    if (pkg == null) return 'Select a plan';
-    return 'Subscribe · ${pkg.storeProduct.priceString}';
   }
 }
 
@@ -462,7 +579,8 @@ class _IosDurationSegmented extends StatelessWidget {
 
 class _IosPricePanel extends StatelessWidget {
   final Package package;
-  const _IosPricePanel({required this.package});
+  final IntroductoryPrice? trial;
+  const _IosPricePanel({required this.package, this.trial});
 
   bool get _isAnnual => package.packageType == PackageType.annual;
 
@@ -486,6 +604,27 @@ class _IosPricePanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // The offer sits above the price, so what is free and what is
+          // charged read in that order rather than the other way round.
+          if (trial case final t?) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.accentSoft,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '${_trialPlain(t)} free',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.accent,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -658,11 +797,7 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            AppIcons.wifiOff,
-            size: 48,
-            color: AppTheme.inkHint,
-          ),
+          const Icon(AppIcons.wifiOff, size: 48, color: AppTheme.inkHint),
           const SizedBox(height: 16),
           Text(
             message,

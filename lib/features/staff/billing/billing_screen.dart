@@ -20,8 +20,11 @@ import '../../auth/providers/auth_provider.dart';
 import '../members/upcoming_payments_screen.dart' show QuickCollectSheet;
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../core/services/data_refresh.dart';
+import '../../../core/services/review_prompt.dart';
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -58,6 +61,7 @@ const _collectWindowDays = 7;
 // elapsed-length window immediately before it), open due count, and a merged
 // feed of recent payments + open dues (banking-app style).
 final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -506,7 +510,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                         child: feed.when(
                           loading: _loadingList,
                           error: (_, _) => ListView(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
                             children: [
                               StateMessage(
                                 icon: AppIcons.cloudOff,
@@ -535,7 +539,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   }
 
   Widget _loadingList() => ListView.builder(
-    padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
     itemCount: 6,
     itemBuilder: (_, _) => Shimmer.fromColors(
       baseColor: const Color(0xFFE8E8E8),
@@ -569,7 +573,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
       children: [
         Row(
           children: [
@@ -637,7 +641,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
       children: [
         if (_tab == 2 && canAdd) ...[
           GestureDetector(
@@ -1272,6 +1276,16 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
 
 // ── Create Invoice Sheet ──────────────────────────────────────────────────────
 
+/// Opens the create-invoice sheet from anywhere (the shell's floating Add
+/// button), not just the billing screen.
+Future<void> showCreateInvoiceSheet(BuildContext context) =>
+    showAdaptiveSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _CreateInvoiceSheet(),
+    );
+
 class _CreateInvoiceSheet extends ConsumerStatefulWidget {
   const _CreateInvoiceSheet();
 
@@ -1378,6 +1392,11 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
           'p_due_at': _dueAt,
         },
       );
+
+      // An invoice raised is the app doing paperwork the owner used to do by
+      // hand — counts towards the review prompt.
+      unawaited(ReviewPrompt.recordSuccess());
+      notifyGymDataChanged();
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -1734,11 +1753,7 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
                   color: Color(0xFF25D366),
                 ),
               )
-            : const Icon(
-                AppIcons.chat,
-                size: 14,
-                color: Color(0xFF25D366),
-              ),
+            : const Icon(AppIcons.chat, size: 14, color: Color(0xFF25D366)),
         label: const Text('WhatsApp', style: TextStyle(fontSize: 12)),
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFF25D366),
@@ -1768,7 +1783,7 @@ class _PlansBody extends ConsumerWidget {
         color: AppTheme.accent,
         onRefresh: () async => ref.invalidate(_plansProvider),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
           children: [
             if (list.isEmpty)
               const Padding(
@@ -1943,6 +1958,15 @@ class _PlanCard extends StatelessWidget {
 /// Create/edit a membership plan. Public because the add-member sheet opens it
 /// inline when a gym has no plans yet — on create it pops the new plan row so
 /// the caller can select it without a round-trip.
+/// Opens the new-plan sheet from anywhere (the shell's floating Add button),
+/// not just the Money screen's Plans tab.
+Future<void> showPlanFormSheet(BuildContext context) => showAdaptiveSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  builder: (_) => const PlanFormSheet(),
+);
+
 class PlanFormSheet extends ConsumerStatefulWidget {
   final Map<String, dynamic>? plan;
   const PlanFormSheet({super.key, this.plan});

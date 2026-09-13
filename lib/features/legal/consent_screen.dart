@@ -74,10 +74,17 @@ Future<void> applyStoredConsent(SharedPreferences prefs) async {
   // Set before the platform check — Sentry runs on every platform.
   analyticsConsentGranted = prefs.getBool(kConsentAnalytics) ?? false;
 
-  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-  await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
-    prefs.getBool(kConsentAnalytics) ?? false,
-  );
+  if (kIsWeb) return;
+  final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+  final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
+  if (!isAndroid && !isIOS) return;
+
+  // Firebase is initialised on Android only (see main.dart).
+  if (isAndroid) {
+    await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
+      prefs.getBool(kConsentAnalytics) ?? false,
+    );
+  }
 
   // Meta reads the ads consent, not analytics or marketing — its events carry
   // the advertising ID and feed ad attribution, which is its own purpose. The
@@ -88,10 +95,14 @@ Future<void> applyStoredConsent(SharedPreferences prefs) async {
   // Explicit logEvent calls are not covered by it — AppEvents re-checks the same
   // flag before every call. Don't drop either half.
   //
-  // No setAdvertiserTracking here: on Android the plugin's handler is an empty
-  // stub (iOS ATT only), so calling it would just look like a gate.
+  // setAdvertiserTracking is iOS-only — on Android the plugin's handler is an
+  // empty stub, so calling it there would just look like a gate. On iOS it
+  // sets FBSDKSettings.advertiserTrackingEnabled; the app never shows an ATT
+  // prompt, so this doesn't produce an IDFA, it just stops the SDK claiming
+  // tracking consent we don't have.
   final ads = prefs.getBool(kConsentAds) ?? false;
   final fb = FacebookAppEvents();
+  if (isIOS) await fb.setAdvertiserTracking(enabled: ads);
   await fb.setAutoLogAppEventsEnabled(ads);
   await fb.setDataProcessingOptions(ads ? [] : ['LDU'], country: 0, state: 0);
   if (!ads) await fb.clearUserData();

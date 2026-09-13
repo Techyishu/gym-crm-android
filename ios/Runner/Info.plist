@@ -47,6 +47,28 @@
 		</array>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<!-- Meta (Facebook) SDK credentials. Same pair as android/app/src/main/
+		     res/values/strings.xml — one Meta app serves both platforms.
+		     Without these the iOS SDK never initialises, so Meta receives no
+		     conversion data and Aggregated Event Measurement can't be
+		     configured for iOS 14.5+ app-install campaigns. -->
+		<key>FacebookAppID</key>
+		<string>1013410908097301</string>
+		<key>FacebookClientToken</key>
+		<string>73556825fce0f7d8283c5fc374cb08e0</string>
+		<key>FacebookDisplayName</key>
+		<string>GymCRM</string>
+		<!-- Auto-logging ships off, mirroring the Android manifest: nothing
+		     leaves the device until applyStoredConsent() in
+		     lib/features/legal/consent_screen.dart turns it on. ID collection
+		     mirrors Android too — the advertising ID only ever rides along
+		     with an event, and no event is sent without ads consent. On iOS
+		     it additionally yields nothing unless ATT is authorised, which
+		     this app never prompts for. -->
+		<key>FacebookAutoLogAppEventsEnabled</key>
+		<false/>
+		<key>FacebookAdvertiserIDCollectionEnabled</key>
+		<true/>
 		<key>LSApplicationQueriesSchemes</key>
 		<array>
 			<string>https</string>
@@ -64,6 +86,20 @@
 		<string>GymCRM saves QR codes and receipts to your photo library.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>GymCRM needs access to your photos so you can set a member's profile picture.</string>
+		<!-- Meta's SKAdNetwork IDs. This is how iOS 14.5+ attributes an install
+		     to a Meta ad without IDFA; without them Meta can't measure the
+		     install campaign at all. -->
+		<key>SKAdNetworkItems</key>
+		<array>
+			<dict>
+				<key>SKAdNetworkIdentifier</key>
+				<string>v9wttpbfk9.skadnetwork</string>
+			</dict>
+			<dict>
+				<key>SKAdNetworkIdentifier</key>
+				<string>n38lu8286q.skadnetwork</string>
+			</dict>
+		</array>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

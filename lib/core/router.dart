@@ -173,11 +173,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         // device, or because a different user last used this one. Checked once
         // per session per user — a genuine first-timer shouldn't pay for this
         // round trip on every navigation.
+        var consented = false;
         if (_consentCheckedFor != user.id) {
           _consentCheckedFor = user.id;
-          if (await hydrateConsentFromServer(prefs)) return null;
+          consented = await hydrateConsentFromServer(prefs);
         }
-        return loc == '/consent' ? null : '/consent';
+        // Found server-side: fall through and resolve the destination in this
+        // same pass. Returning null here left the user sitting on /login with
+        // the button stuck on "Logging in…" — consent had just been written to
+        // prefs, but nothing fires redirect again, so only a manual refresh
+        // (which re-runs it) reached the dashboard.
+        if (!consented) return loc == '/consent' ? null : '/consent';
       }
 
       // A brand-new owner still owes us the one-time setup wizard. This has to

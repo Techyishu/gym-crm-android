@@ -10,10 +10,12 @@ import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../core/services/data_refresh.dart';
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 final _expensesProvider = FutureProvider<List<Expense>>((ref) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -273,6 +275,17 @@ class _ExpenseCard extends StatelessWidget {
 }
 
 // ── Add Expense Sheet ────────────────────────────────────────────────────────
+
+/// Opens the add-expense sheet from anywhere (the shell's floating Add
+/// button), not just the expenses list.
+Future<void> showAddExpenseSheet(BuildContext context) =>
+    showAdaptiveSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _AddExpenseSheet(),
+    );
+
 
 class _AddExpenseSheet extends ConsumerStatefulWidget {
   const _AddExpenseSheet();
