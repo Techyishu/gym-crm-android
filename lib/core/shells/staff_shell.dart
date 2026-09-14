@@ -185,6 +185,11 @@ class _StaffShellState extends ConsumerState<StaffShell>
     if (state == AppLifecycleState.resumed) {
       ref.invalidate(unreadNotificationCountProvider);
       ref.invalidate(staffNotificationsProvider);
+      // Re-read the gym row so an expiry that happened while the app sat in
+      // the background raises the paywall on resume. Android keeps processes
+      // alive for days — without this the billing gate below only re-runs on
+      // a cold start, so a lapsed gym could keep full access for a week.
+      ref.invalidate(staffProfileProvider);
     }
   }
 

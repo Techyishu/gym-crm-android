@@ -125,6 +125,10 @@ class OfflineCheckInQueue {
         notifyGymDataChanged();
       } catch (e) {
         debugPrint('[GymCRM] Flush checkin error: $e');
+        // `subscription_expired` is permanent — the gym's plan has lapsed, so
+        // retrying can only fail again. Re-queueing it would grow the queue
+        // without bound and re-fail on every reconnect. Drop it instead.
+        if (e.toString().contains('subscription_expired')) continue;
         remaining.add(item);
       }
     }

@@ -117,6 +117,16 @@ Future<CheckInOutcome> checkInMember({
       avatarUrl: avatarUrl,
     );
   } catch (e) {
+    // The trg_checkins_billing_gate trigger rejects the insert when the gym's
+    // own plan has lapsed. Staff would otherwise see the raw Postgres
+    // exception text.
+    if (e.toString().contains('subscription_expired')) {
+      return const CheckInOutcome(
+        success: false,
+        title: 'Subscription expired',
+        subtitle: 'Renew your plan to keep checking members in.',
+      );
+    }
     return CheckInOutcome(success: false, title: 'Error', subtitle: '$e');
   }
 }

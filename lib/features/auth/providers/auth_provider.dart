@@ -187,7 +187,13 @@ final memberRecordProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
 
   final member = await client
       .from('members')
-      .select('*, memberships(*, membership_plans(*)), gyms(name, settings)')
+      // The gym's plan columns ride along on a row we already fetch — the
+      // member shell gates on them the same way StaffShell gates staff.
+      .select(
+        '*, memberships(*, membership_plans(*)), '
+        'gyms(name, settings, plan, plan_expires_at, trial_ends_at, '
+        'dodo_subscription_id, status)',
+      )
       .eq('user_id', user.id)
       .maybeSingle();
 

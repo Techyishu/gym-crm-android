@@ -1,15 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../features/auth/providers/auth_provider.dart';
+import '../../features/member/blocked/gym_inactive_screen.dart';
 import '../../shared/widgets/responsive_content.dart';
+import '../billing/billing_access.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_icons.dart';
 
-class MemberShell extends StatelessWidget {
+class MemberShell extends ConsumerWidget {
   final StatefulNavigationShell shell;
   const MemberShell({super.key, required this.shell});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final memberAsync = ref.watch(memberRecordProvider);
+
+    // Billing gate, mirroring StaffShell: when the member's gym has no active
+    // subscription the portal is replaced wholesale. Only gates once the row
+    // has actually loaded — a pending or failed fetch must not lock out a
+    // paying gym's members.
+    if (memberAsync.hasValue) {
+      final gym = memberAsync.value?['gyms'] as Map<String, dynamic>?;
+      if (gym != null && !hasActiveBillingAccess(gym)) {
+        return GymInactiveScreen(gymName: gym['name'] as String?);
+      }
+    }
+
     return Scaffold(
       body: ResponsiveContent(child: shell),
       bottomNavigationBar: _MemberBottomNav(shell: shell),
