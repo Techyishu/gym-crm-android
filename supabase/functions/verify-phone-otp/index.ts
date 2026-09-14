@@ -103,6 +103,24 @@ async function findOrCreateMemberUserId(phone: string, gymId: string): Promise<{
 
   const digits = phone.replace(/^91/, '').slice(-10)
   const syntheticEmail = `${digits}@member.gymcrm.internal`
+
+  // An account may already exist on this synthetic email while the member row
+  // sits unlinked — an earlier attempt that created the user and then failed
+  // (or was interrupted) before the link. createUser() would just fail on the
+  // duplicate email and leave them stuck forever, so adopt it and link.
+  const { data: existingId } = await supabase.rpc('auth_user_id_for_email', { p_email: syntheticEmail })
+  if (existingId) {
+    const { error: relinkErr } = await supabase
+      .from('members')
+      .update({ user_id: existingId })
+      .eq('id', match.id)
+    if (relinkErr) {
+      console.error('[verify-phone-otp] relink of existing account failed:', relinkErr)
+      return { userId: '', error: 'Could not link your account to your membership. Please try again.' }
+    }
+    return { userId: existingId as string }
+  }
+
   const { data: created, error: createErr } = await supabase.auth.admin.createUser({
     phone,
     email: syntheticEmail,
@@ -111,7 +129,22 @@ async function findOrCreateMemberUserId(phone: string, gymId: string): Promise<{
   })
   if (createErr || !created?.user) return { userId: '', error: createErr?.message ?? 'Failed to create account' }
 
-  await supabase.from('members').update({ user_id: created.user.id }).eq('id', match.id)
+  // The link is what makes this an account for *this member*. If it fails and
+  // we return success anyway, the auth user survives with no members row and
+  // no profile — and the app's router then reads that as a brand-new owner and
+  // offers the gym-setup wizard, so a member can end up creating a gym. Delete
+  // the half-made account instead and let them retry.
+  const { error: linkErr } = await supabase
+    .from('members')
+    .update({ user_id: created.user.id })
+    .eq('id', match.id)
+
+  if (linkErr) {
+    await supabase.auth.admin.deleteUser(created.user.id)
+    console.error('[verify-phone-otp] member link failed, rolled back account:', linkErr)
+    return { userId: '', error: 'Could not link your account to your membership. Please try again.' }
+  }
+
   return { userId: created.user.id }
 }
 

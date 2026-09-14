@@ -260,6 +260,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           return null;
         }
 
+        // No profile and no member row. A brand-new owner mid-signup looks
+        // exactly like a member whose phone login never got linked to its
+        // `members` row — and sending the latter to /gym-setup lets a member
+        // run setup_gym and become an accidental gym owner, which is how
+        // stray duplicate gyms get created. Accounts on
+        // [kMemberEmailDomain] are only ever minted on the member-signup
+        // path (after a matching member row was found), so an unlinked one
+        // belongs back at the gym-code screen to finish linking.
+        if (user.email?.endsWith(kMemberEmailDomain) ?? false) {
+          return loc == '/login/member-signup' ? null : '/login/member-signup';
+        }
+
         // Brand-new owner who signed up but hasn't created a gym yet —
         // don't cache: the route changes as soon as setup_gym completes.
         _gymSetupResolvedFor = user.id;

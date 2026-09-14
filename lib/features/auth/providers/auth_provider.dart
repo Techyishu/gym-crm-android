@@ -23,6 +23,13 @@ const _webAppBaseUrl = String.fromEnvironment(
   defaultValue: 'https://gymcrm.in',
 );
 
+/// Email domain the `verify-phone-otp` edge function gives phone-only members.
+/// It is used *only* on the member-signup path, which runs after a matching
+/// `members` row has already been found — so an account on this domain is
+/// always a member, never an owner mid-signup. `router.dart` leans on that to
+/// tell the two apart.
+const kMemberEmailDomain = '@member.gymcrm.internal';
+
 /// Canonical synthetic identity for phone-only members — must match the
 /// `verify-phone-otp` edge function's member-signup path, or login won't
 /// resolve to the account created there.
@@ -31,7 +38,7 @@ String memberSyntheticEmail(String phone) {
   final last10 = digits.length > 10
       ? digits.substring(digits.length - 10)
       : digits;
-  return '$last10@member.gymcrm.internal';
+  return '$last10$kMemberEmailDomain';
 }
 
 /// True only while [AuthNotifier.signUp]'s create → sign-out → send-OTP handshake
