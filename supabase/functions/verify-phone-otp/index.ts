@@ -110,6 +110,29 @@ async function findOrCreateMemberUserId(phone: string, gymId: string): Promise<{
   // duplicate email and leave them stuck forever, so adopt it and link.
   const { data: existingId } = await supabase.rpc('auth_user_id_for_email', { p_email: syntheticEmail })
   if (existingId) {
+    // The synthetic email is derived from the phone alone, and the same number
+    // legitimately appears on member rows in different gyms (a shared family
+    // phone, or a number the gym reused). So this account may already belong
+    // to a *different* members row — adopting it then leaves one auth user
+    // linked to two member rows, and the portal's single-row lookup
+    // (maybeSingle/single on members.user_id) errors out for both of them.
+    // Only ever adopt a genuine orphan.
+    const { count: linkedCount, error: countErr } = await supabase
+      .from('members')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', existingId)
+
+    if (countErr) {
+      console.error('[verify-phone-otp] could not count existing links:', countErr)
+      return { userId: '', error: 'Could not verify your account. Please try again.' }
+    }
+    if ((linkedCount ?? 0) > 0) {
+      return {
+        userId: '',
+        error: 'This mobile number is already registered to another member account. Please ask your gym to update your number.',
+      }
+    }
+
     const { error: relinkErr } = await supabase
       .from('members')
       .update({ user_id: existingId })
