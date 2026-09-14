@@ -40,9 +40,6 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
       .toIso8601String()
       .split('T')[0];
   final todayDate = now.toIso8601String().split('T')[0];
-  final startOfWeek = now
-      .subtract(Duration(days: now.weekday - 1))
-      .toIso8601String();
 
   final results = await Future.wait([
     Future.wait<PostgrestResponse<List<Map<String, dynamic>>>>([
@@ -74,12 +71,6 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .select('id')
           .eq('gym_id', gymId)
           .eq('is_active', true)
-          .count(CountOption.exact),
-      client
-          .from('leads')
-          .select('id')
-          .eq('gym_id', gymId)
-          .gte('created_at', startOfWeek)
           .count(CountOption.exact),
       client
           .from('members')
@@ -147,15 +138,6 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .gte('checked_in_at', startOfDay)
           .order('checked_in_at', ascending: false)
           .limit(5),
-      // Latest leads.
-      client
-          .from('leads')
-          .select(
-            'id, first_name, last_name, phone, source, status, created_at',
-          )
-          .eq('gym_id', gymId)
-          .order('created_at', ascending: false)
-          .limit(4),
       // Leads whose follow-up date has already passed — the only lead signal
       // that genuinely needs action today.
       client
@@ -249,8 +231,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'newMembersMonth': counts[2].count,
     'allTimeCheckins': counts[3].count,
     'planCount': counts[4].count,
-    'leadsThisWeek': counts[5].count,
-    'memberCount': counts[6].count,
+    'memberCount': counts[5].count,
     'collectedToday': collectedToday,
     'todayPayments': todayPaid.length,
     'pendingRevenue': pendingRevenue,
@@ -259,14 +240,13 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'renewals': rows[4],
     'recentPaid': recentPaid,
     'todayCheckinsList': rows[6],
-    'recentLeads': rows[7],
-    'monthExpenses': sum(rows[9]),
-    'profit': monthRevenue - sum(rows[9]),
+    'monthExpenses': sum(rows[8]),
+    'profit': monthRevenue - sum(rows[8]),
     'dueCount': dueInvoices.where((i) => remainingDue(i) > 0).length,
     'overdueCount': overdue.length,
     'overdueAmount': overdue.fold<double>(0, (s, i) => s + remainingDue(i)),
-    'leadsToFollowUp': rows[8].length,
-    'birthdays': rows[10].where((m) {
+    'leadsToFollowUp': rows[7].length,
+    'birthdays': rows[9].where((m) {
       final dob = DateTime.tryParse(m['dob'] as String? ?? '');
       return dob != null && dob.month == now.month && dob.day == now.day;
     }).toList(),
@@ -451,13 +431,9 @@ class _DashboardBody extends ConsumerWidget {
         canCheckIn: RoleAccess.canCheckIn(role),
       ),
       const SizedBox(height: 16),
-      _TodayStats(
-        checkins: (data['todayCheckins'] as int?) ?? 0,
-        payments: (data['todayPayments'] as int?) ?? 0,
-        active: (data['activeMembers'] as int?) ?? 0,
-        joined: (data['newMembersMonth'] as int?) ?? 0,
-        canReports: RoleAccess.canSeeReports(role),
-      ),
+      _PaymentDueToday(data: data, canCollect: canCollect),
+      const SizedBox(height: 16),
+      _ShortcutPanel(items: _homeShortcuts(context, role)),
     ];
 
     final birthdays = (data['birthdays'] as List<dynamic>? ?? [])
@@ -468,28 +444,11 @@ class _DashboardBody extends ConsumerWidget {
         _BirthdaysToday(members: birthdays),
         const SizedBox(height: 16),
       ],
-      _PaymentDueToday(data: data, canCollect: canCollect),
-      const SizedBox(height: 16),
-      _TodayCheckins(
-        checkins: (data['todayCheckinsList'] as List<dynamic>? ?? [])
-            .cast<Map<String, dynamic>>(),
-        todayCount: (data['todayCheckins'] as int?) ?? 0,
-      ),
-      if (canBilling) ...[
-        const SizedBox(height: 16),
+      if (canBilling)
         _RecentPayments(
           invoices: (data['recentPaid'] as List<dynamic>? ?? [])
               .cast<Map<String, dynamic>>(),
         ),
-      ],
-      if (canLeads) ...[
-        const SizedBox(height: 16),
-        _NewLeads(
-          leads: (data['recentLeads'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>(),
-          leadsThisWeek: (data['leadsThisWeek'] as int?) ?? 0,
-        ),
-      ],
     ];
 
     final isWide = ResponsiveContent.isWide(context);
@@ -909,136 +868,6 @@ class _BirthdaysToday extends StatelessWidget {
   }
 }
 
-// ─── Today's check-ins ────────────────────────────────────────────────────────
-
-class _TodayCheckins extends StatelessWidget {
-  final List<Map<String, dynamic>> checkins;
-  final int todayCount;
-  const _TodayCheckins({required this.checkins, required this.todayCount});
-
-  static String _fmtTime(String? iso) {
-    if (iso == null) return '';
-    final dt = DateTime.tryParse(iso)?.toLocal();
-    if (dt == null) return '';
-    final h = dt.hour;
-    final m = dt.minute.toString().padLeft(2, '0');
-    final period = h >= 12 ? 'PM' : 'AM';
-    final dh = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-    return '$dh:$m $period';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text(
-              'Checked in today',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppTheme.ink,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '$todayCount',
-              style: AppTheme.numberStyle(fontSize: 15, color: AppTheme.accent),
-            ),
-            const Spacer(),
-            GestureDetector(
-              onTap: () => context.push('/staff/check-in'),
-              child: const Text(
-                'See all',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.accent,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (checkins.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            decoration: AppTheme.cardDecoration(),
-            child: const Center(
-              child: Text(
-                'No check-ins yet today',
-                style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
-              ),
-            ),
-          )
-        else
-          CardList(
-            children: checkins.map((ci) {
-              final member = ci['members'] as Map<String, dynamic>?;
-              final name =
-                  '${member?['first_name'] ?? ''} ${member?['last_name'] ?? ''}'
-                      .trim();
-              final label = name.isEmpty ? 'Member' : name;
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                child: Row(
-                  children: [
-                    InitialsAvatar(
-                      name: label,
-                      size: 36,
-                      photo: member?['avatar_url'] as String?,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.ink,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      _fmtTime(ci['checked_in_at'] as String?),
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppTheme.inkSoft,
-                        fontFeatures: AppTheme.tabularFigures,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Container(
-                      width: 24,
-                      height: 24,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.statusActiveBg,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        AppIcons.check,
-                        size: 14,
-                        color: AppTheme.statusActive,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-      ],
-    );
-  }
-}
-
 // ─── Recent payments ──────────────────────────────────────────────────────────
 
 class _RecentPayments extends StatelessWidget {
@@ -1143,141 +972,6 @@ class _RecentPayments extends StatelessWidget {
                         StatusPill.active(label: 'Paid'),
                       ],
                     ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-      ],
-    );
-  }
-}
-
-// ─── New leads ────────────────────────────────────────────────────────────────
-
-class _NewLeads extends StatelessWidget {
-  final List<Map<String, dynamic>> leads;
-  final int leadsThisWeek;
-  const _NewLeads({required this.leads, required this.leadsThisWeek});
-
-  static StatusPill _pillFor(String status) => switch (status.toLowerCase()) {
-    'converted' => StatusPill.active(label: 'Converted'),
-    'lost' => StatusPill.danger(label: 'Lost'),
-    'trial' => StatusPill.warn(label: 'Trial'),
-    'contacted' => StatusPill.neutral(label: 'Contacted'),
-    _ => StatusPill(
-      label: 'New',
-      color: AppTheme.statusDanger,
-      bg: AppTheme.statusDangerBg,
-    ),
-  };
-
-  Future<void> _call(String phone) async {
-    final url = Uri.parse('tel:$phone');
-    if (await canLaunchUrl(url)) await launchUrl(url);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text(
-              'Enquiries',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppTheme.ink,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '$leadsThisWeek this week',
-              style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
-            ),
-            const Spacer(),
-            GestureDetector(
-              onTap: () => context.push('/staff/leads'),
-              child: const Text(
-                'See all',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.accent,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (leads.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            decoration: AppTheme.cardDecoration(),
-            child: const Center(
-              child: Text(
-                'No enquiries yet',
-                style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
-              ),
-            ),
-          )
-        else
-          CardList(
-            children: leads.map((lead) {
-              final name =
-                  '${lead['first_name'] ?? ''} ${lead['last_name'] ?? ''}'
-                      .trim();
-              final label = name.isEmpty ? 'Enquiry' : name;
-              final source = (lead['source'] as String? ?? '').trim();
-              final status = lead['status'] as String? ?? 'new';
-              final phone = lead['phone'] as String?;
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                child: Row(
-                  children: [
-                    InitialsAvatar(name: label, size: 36),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.ink,
-                            ),
-                          ),
-                          if (source.isNotEmpty)
-                            Text(
-                              source[0].toUpperCase() + source.substring(1),
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.inkSoft,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _pillFor(status),
-                    if (phone != null && phone.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      RoundIconButton(
-                        icon: AppIcons.call,
-                        size: 36,
-                        onTap: () => _call(phone),
-                      ),
-                    ],
                   ],
                 ),
               );
@@ -1741,70 +1435,6 @@ class _NeedsAttention extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
         CardList(children: rows),
-      ],
-    );
-  }
-}
-
-// ─── Today ────────────────────────────────────────────────────────────────────
-
-class _TodayStats extends StatelessWidget {
-  final int checkins, payments, active, joined;
-  final bool canReports;
-  const _TodayStats({
-    required this.checkins,
-    required this.payments,
-    required this.active,
-    required this.joined,
-    required this.canReports,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(
-          title: 'Today',
-          actionLabel: canReports ? 'Reports' : null,
-          onAction: canReports ? () => context.push('/staff/reports') : null,
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: MiniStat(
-                label: 'Check-ins',
-                value: '$checkins',
-                onTap: () => context.push('/staff/check-in'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: MiniStat(
-                label: 'Payments',
-                value: '$payments',
-                onTap: () => context.push('/staff/billing'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: MiniStat(
-                label: 'Active',
-                value: '$active',
-                onTap: () => context.push('/staff/members'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: MiniStat(
-                label: 'Joined',
-                value: '$joined',
-                onTap: () => context.push('/staff/members'),
-              ),
-            ),
-          ],
-        ),
       ],
     );
   }
@@ -2371,6 +2001,130 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─── Shortcuts (the More-sheet destinations a front desk actually opens) ──────
+
+typedef _Shortcut = ({IconData icon, String label, VoidCallback onTap});
+
+/// Six destinations, not a second More menu: the ones a front desk opens
+/// mid-shift. Everything else (Workouts, Diet plans, Staff, Export, Activity
+/// log, Settings) stays in the More sheet, which is one tap away and is
+/// already organised for browsing. Same routes and icons as that sheet — this
+/// is a second door, not a second copy. Role gating mirrors
+/// `_visibleMoreItemsFor` in the shell, expressed with RoleAccess because
+/// that's what the dashboard already holds.
+List<_Shortcut> _homeShortcuts(BuildContext context, String? role) => [
+  if (RoleAccess.canSeeReports(role))
+    (
+      icon: AppIcons.barChart,
+      label: 'Reports',
+      onTap: () => context.push('/staff/reports'),
+    ),
+  if (RoleAccess.canCheckIn(role))
+    (
+      icon: AppIcons.calendarMonth,
+      label: 'Attendance',
+      onTap: () => context.push('/staff/attendance-calendar'),
+    ),
+  if (RoleAccess.canSeeBatches(role))
+    (
+      icon: AppIcons.calendarToday,
+      label: 'Batches',
+      onTap: () => context.push('/staff/classes'),
+    ),
+  if (RoleAccess.canSeeLeads(role))
+    (
+      icon: AppIcons.personAdd,
+      label: 'Leads',
+      onTap: () => context.push('/staff/leads'),
+    ),
+  if (RoleAccess.canSeeSettings(role))
+    (
+      icon: AppIcons.campaign,
+      label: 'Reminders',
+      onTap: () => context.push('/staff/reminders'),
+    ),
+  if (RoleAccess.canSeeExpenses(role))
+    (
+      icon: AppIcons.receipt,
+      label: 'Expenses',
+      onTap: () => context.push('/staff/expenses'),
+    ),
+];
+
+/// One unlabelled card, a single row of icon tiles. No section header: four
+/// icons explain themselves, and a "Manage"/"Records" title only invited more
+/// tiles under it. Hidden entirely when a role can reach none of them.
+class _ShortcutPanel extends StatelessWidget {
+  final List<_Shortcut> items;
+  const _ShortcutPanel({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    Widget tile(_Shortcut item) => GestureDetector(
+      onTap: item.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Column(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: AppTheme.accentSoft,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              alignment: Alignment.center,
+              child: Icon(item.icon, size: 24, color: AppTheme.accent),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              item.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.ink,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Rows of three: six tiles crammed into one row leaves ~60px each, too
+    // narrow for both the icon and a label like "Attendance". A trailing short
+    // row keeps the three-column grid (blank slots, not spread-out tiles), but
+    // a role with a single short row gets its tiles spread across the card.
+    final rows = <Widget>[];
+    final columns = items.length <= 3 ? items.length : 3;
+    for (var i = 0; i < items.length; i += columns) {
+      final slice = items.skip(i).take(columns).toList();
+      rows.add(
+        Row(
+          children: [
+            for (var c = 0; c < columns; c++)
+              Expanded(
+                child: c < slice.length
+                    ? tile(slice[c])
+                    : const SizedBox.shrink(),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: AppTheme.cardDecoration(),
+      child: Column(children: rows),
     );
   }
 }

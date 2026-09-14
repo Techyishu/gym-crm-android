@@ -27,6 +27,14 @@
         "dev"
       ],
       "port": 3000
+    },
+    {
+      "name": "flutter-web-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-wiredtechie-Desktop-gym-crm-android/d4221277-1219-4653-96fa-8cfcce2d1c11/scratchpad/spa_server.py"
+      ],
+      "port": 8081
     }
   ]
 }

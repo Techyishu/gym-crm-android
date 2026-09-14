@@ -12,62 +12,112 @@ class WelcomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
+      // Logo stays pinned top-left; the choice itself sits in the middle of
+      // whatever room is left, so it lands under the thumb on a tall phone and
+      // still scrolls on a short one.
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Brand lockup — the real app icon + wordmark.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 30, 24, 0),
+              child: Row(
                 children: [
-                  const Text(
-                    'Who is signing in?',
-                    style: TextStyle(
-                      fontSize: 29,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.9,
-                      height: 1.15,
-                      color: AppTheme.ink,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Image.asset(
+                      'assets/icon/app_icon.png',
+                      width: 34,
+                      height: 34,
+                      filterQuality: FilterQuality.medium,
                     ),
                   ),
-                  const SizedBox(height: 7),
+                  const SizedBox(width: 10),
                   const Text(
-                    'Pick one to continue.',
-                    style: TextStyle(fontSize: 15, color: AppTheme.inkSoft),
-                  ),
-                  const SizedBox(height: 22),
-                  _PathCard(
-                    dark: true,
-                    number: '01',
-                    title: 'I run a gym',
-                    body: 'Owners, managers, trainers and front-desk staff.',
-                    cta: 'Continue →',
-                    onTap: () => context.go('/login'),
-                  ),
-                  const SizedBox(height: 14),
-                  _PathCard(
-                    dark: false,
-                    number: '02',
-                    title: "I'm a gym member",
-                    body: 'See your plan, dues, workouts and check-ins.',
-                    cta: 'Continue →',
-                    onTap: () => context.go('/login/member'),
-                  ),
-                  const SizedBox(height: 18),
-                  const Text(
-                    'Picked the wrong one? Go back anytime. Nothing is saved '
-                    'until you log in.',
+                    'GymCRM',
                     style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.inkHint,
-                      height: 1.6,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                      color: AppTheme.ink,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
+                  child: ConstrainedBox(
+                    // Exactly the room left under the logo, so Center really
+                    // centres; taller content than this simply scrolls.
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight - 28,
+                    ),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 440),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text(
+                              'Who is signing in?',
+                              style: TextStyle(
+                                fontSize: 29,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.9,
+                                height: 1.15,
+                                color: AppTheme.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            const Text(
+                              'Pick one to continue.',
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: AppTheme.inkSoft,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            _PathCard(
+                              filled: true,
+                              icon: Icons.storefront_rounded,
+                              title: 'I run a gym',
+                              body:
+                                  'Owners, managers, trainers and front-desk staff.',
+                              onTap: () => context.go('/login'),
+                            ),
+                            const SizedBox(height: 12),
+                            _PathCard(
+                              filled: false,
+                              icon: Icons.person_rounded,
+                              title: "I'm a gym member",
+                              body:
+                                  'See your plan, dues, workouts and check-ins.',
+                              onTap: () => context.go('/login/member'),
+                            ),
+                            const SizedBox(height: 20),
+                            const Text(
+                              'Picked the wrong one? Go back anytime. Nothing is '
+                              'saved until you log in.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppTheme.inkHint,
+                                height: 1.6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -75,85 +125,88 @@ class WelcomeScreen extends StatelessWidget {
 }
 
 class _PathCard extends StatelessWidget {
-  final bool dark;
-  final String number;
+  /// The owner path is the teal-filled one — most sign-ins are staff.
+  final bool filled;
+  final IconData icon;
   final String title;
   final String body;
-  final String cta;
   final VoidCallback onTap;
   const _PathCard({
-    required this.dark,
-    required this.number,
+    required this.filled,
+    required this.icon,
     required this.title,
     required this.body,
-    required this.cta,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bg = dark ? AppTheme.darkCard : AppTheme.surface;
-    final fg = dark ? AppTheme.onDark : AppTheme.ink;
-    final bodyFg = dark ? AppTheme.onDarkSoft : AppTheme.inkSoft;
-    final ctaFg = dark ? AppTheme.mintOnDark : AppTheme.accent;
-    final badgeBg = dark ? AppTheme.darkCard2 : AppTheme.accentSoft;
-    final badgeFg = dark ? AppTheme.mintOnDark : AppTheme.accent;
+    final bg = filled ? AppTheme.accent : AppTheme.surface;
+    final fg = filled ? AppTheme.accentFg : AppTheme.ink;
+    final bodyFg = filled
+        ? AppTheme.accentFg.withValues(alpha: 0.85)
+        : AppTheme.inkSoft;
+    final iconBg = filled
+        ? AppTheme.accentFg.withValues(alpha: 0.18)
+        : AppTheme.accentSoft;
+    final iconFg = filled ? AppTheme.accentFg : AppTheme.accent;
 
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: dark ? null : Border.all(color: AppTheme.border, width: 1.5),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: badgeBg,
-                borderRadius: BorderRadius.circular(12),
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: filled
+                ? null
+                : Border.all(color: AppTheme.border, width: 1.5),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 21, color: iconFg),
               ),
-              alignment: Alignment.center,
-              child: Text(
-                number,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: badgeFg,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                        color: fg,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      body,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.45,
+                        color: bodyFg,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
-                color: fg,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              body,
-              style: TextStyle(fontSize: 14, height: 1.55, color: bodyFg),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              cta,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w800,
-                color: ctaFg,
-              ),
-            ),
-          ],
+              const SizedBox(width: 8),
+              Icon(Icons.arrow_forward_rounded, size: 20, color: fg),
+            ],
+          ),
         ),
       ),
     );
