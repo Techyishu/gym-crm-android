@@ -187,19 +187,42 @@ final memberRecordProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
 
   final member = await client
       .from('members')
-      // The gym's plan columns ride along on a row we already fetch — the
-      // member shell gates on them the same way StaffShell gates staff.
-      .select(
-        '*, memberships(*, membership_plans(*)), '
-        'gyms(name, settings, plan, plan_expires_at, trial_ends_at, '
-        'dodo_subscription_id, status)',
-      )
+      .select('*, memberships(*, membership_plans(*)), gyms(name, settings)')
       .eq('user_id', user.id)
       .maybeSingle();
 
   final settings = (member?['gyms'] as Map<String, dynamic>?)?['settings'];
   setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
   return member;
+});
+
+/// Whether the member's gym still has an active subscription — what
+/// `MemberShell` gates the whole portal on.
+///
+/// Goes through the `gym_billing_active` RPC rather than reading the gym row,
+/// because the `gyms_select` RLS policy is `id = ANY(auth_gym_ids())` and
+/// `auth_gym_ids()` only covers `staff_gym_access`. A member therefore reads
+/// zero gym rows, and a `gyms(...)` embed silently comes back null — which is
+/// why gating on the embedded row never fired. The RPC is SECURITY DEFINER.
+///
+/// Returns true on any error or missing member row: a transient failure must
+/// not lock out a paying gym's members.
+final memberGymBillingActiveProvider = FutureProvider<bool>((ref) async {
+  final client = ref.watch(supabaseProvider);
+  final member = await ref.watch(memberRecordProvider.future);
+  final gymId = member?['gym_id'] as String?;
+  if (gymId == null) return true;
+
+  try {
+    final active = await client.rpc(
+      'gym_billing_active',
+      params: {'p_gym_id': gymId},
+    );
+    return active != false;
+  } catch (e) {
+    debugPrint('[GymCRM] gym_billing_active check failed: $e');
+    return true;
+  }
 });
 
 class AuthNotifier extends StateNotifier<AsyncValue<void>> {

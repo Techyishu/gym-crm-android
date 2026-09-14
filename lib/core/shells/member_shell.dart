@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/member/blocked/gym_inactive_screen.dart';
 import '../../shared/widgets/responsive_content.dart';
-import '../billing/billing_access.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_icons.dart';
 
@@ -14,17 +13,14 @@ class MemberShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final memberAsync = ref.watch(memberRecordProvider);
-
     // Billing gate, mirroring StaffShell: when the member's gym has no active
-    // subscription the portal is replaced wholesale. Only gates once the row
-    // has actually loaded — a pending or failed fetch must not lock out a
-    // paying gym's members.
-    if (memberAsync.hasValue) {
-      final gym = memberAsync.value?['gyms'] as Map<String, dynamic>?;
-      if (gym != null && !hasActiveBillingAccess(gym)) {
-        return GymInactiveScreen(gymName: gym['name'] as String?);
-      }
+    // subscription the portal is replaced wholesale. The check runs through an
+    // RPC because members cannot read the gyms table under RLS — see
+    // memberGymBillingActiveProvider. Only an explicit false walls the portal;
+    // loading and error states fail open so a paying gym's members are never
+    // locked out by a transient fault.
+    if (ref.watch(memberGymBillingActiveProvider).valueOrNull == false) {
+      return const GymInactiveScreen();
     }
 
     return Scaffold(
