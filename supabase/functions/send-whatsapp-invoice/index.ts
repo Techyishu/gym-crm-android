@@ -38,7 +38,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1'
+import { buildInvoicePdf } from './pdf.ts'
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -60,162 +60,7 @@ const TEMPLATE_NAME: Record<InvoiceEvent, string> = {
  * read from plan_whatsapp_quota() inside the same atomic statement that spends
  * the allowance, so this function no longer computes or writes either counter. */
 
-function invoiceNumber(id: string, createdAt: string) {
-  const dt = new Date(createdAt)
-  const month = `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}`
-  const shortId = id.replace(/-/g, '').slice(0, 6).toUpperCase()
-  return `INV-${month}-${shortId}`
-}
-
-// ponytail: pdf-lib's built-in Helvetica, not the app's Manrope (avoids a
-// network font fetch inside the edge function) — but layout/sections/colors
-// mirror invoice_pdf.dart section-for-section so the PDF a customer gets on
-// WhatsApp matches what staff see in-app: header, status badge, dates,
-// bill-to, line item, discount, total, notes, footer.
-const STATUS_INFO: Record<string, { label: string; color: [number, number, number] }> = {
-  paid: { label: 'PAID', color: [0.0, 0.42, 0.0] },
-  open: { label: 'PENDING', color: [0.85, 0.45, 0.0] },
-  failed: { label: 'FAILED', color: [0.7, 0.1, 0.1] },
-  void: { label: 'VOID', color: [0.4, 0.4, 0.4] },
-}
-
-function fmtDate(d: string | null) {
-  if (!d) return '-'
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-async function buildInvoicePdf(inv: Record<string, unknown>): Promise<Uint8Array> {
-  const member = inv.members as Record<string, unknown> | null
-  const gym = inv.gyms as Record<string, unknown> | null
-  const settings = (gym?.settings as Record<string, unknown>) ?? {}
-
-  const gymName = ((gym?.name as string) ?? 'Gym').toUpperCase()
-  const address = settings.address as string | undefined
-  const phone = settings.phone as string | undefined
-  const website = settings.website as string | undefined
-
-  const memberName = member
-    ? `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()
-    : 'Member'
-  const memberEmail = (member?.email as string) ?? ''
-
-  const status = (inv.status as string) ?? 'open'
-  const amount = (inv.amount as number) ?? 0
-  const originalAmount = inv.original_amount as number | null
-  const discountAmount = (inv.discount_amount as number) ?? 0
-  const hasDiscount = discountAmount > 0
-  const notes = inv.notes as string | null
-  const description = (inv.description as string) || 'Membership fee'
-
-  const invNum = invoiceNumber(inv.id as string, inv.created_at as string)
-  const issueDate = fmtDate(inv.created_at as string)
-  const dueDate = fmtDate(inv.due_at as string | null)
-  const paidOn = inv.paid_at ? fmtDate(inv.paid_at as string) : null
-
-  const statusInfo = STATUS_INFO[status] ?? { label: 'DRAFT', color: [0.4, 0.4, 0.4] }
-
-  const pdf = await PDFDocument.create()
-  const page = pdf.addPage([595, 700])
-  const font = await pdf.embedFont(StandardFonts.Helvetica)
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
-
-  const marginX = 40
-  let y = 650
-
-  const grey = (v: number) => rgb(v, v, v)
-  const text = (
-    t: string,
-    opts: { size?: number; f?: typeof font; x?: number; color?: readonly [number, number, number] } = {},
-  ) => {
-    const [r, g, b] = opts.color ?? [0.1, 0.1, 0.1]
-    page.drawText(t, { x: opts.x ?? marginX, y, size: opts.size ?? 11, font: opts.f ?? font, color: rgb(r, g, b) })
-  }
-  const nl = (h = 16) => { y -= h }
-  const hr = (color = grey(0.85)) => {
-    page.drawLine({ start: { x: marginX, y }, end: { x: 555, y }, thickness: 1, color })
-    nl(14)
-  }
-
-  // Header: gym block (left) + invoice#/status (right)
-  text(gymName, { size: 18, f: bold })
-  const rightX = 400
-  const yStart = y
-  page.drawText('INVOICE', { x: rightX, y: yStart, size: 9, font, color: grey(0.5) })
-  page.drawText(invNum, { x: rightX, y: yStart - 16, size: 13, font: bold })
-  page.drawRectangle({ x: rightX, y: yStart - 36, width: 90, height: 16, color: rgb(...statusInfo.color) })
-  page.drawText(statusInfo.label, { x: rightX + 6, y: yStart - 32, size: 9, font: bold, color: rgb(1, 1, 1) })
-
-  nl(18)
-  if (address) { text(address, { size: 10, color: [0.4, 0.4, 0.4] }); nl(14) }
-  if (phone) { text(phone, { size: 10, color: [0.4, 0.4, 0.4] }); nl(14) }
-  if (website) { text(website, { size: 10, color: [0.4, 0.4, 0.4] }); nl(14) }
-
-  nl(10)
-  page.drawLine({ start: { x: marginX, y }, end: { x: 555, y }, thickness: 2, color: rgb(0.1, 0.1, 0.1) })
-  nl(24)
-
-  // Dates row
-  text('ISSUE DATE', { size: 9, color: [0.5, 0.5, 0.5] })
-  page.drawText('DUE DATE', { x: marginX + 160, y, size: 9, font, color: grey(0.5) })
-  if (paidOn) page.drawText('PAID ON', { x: marginX + 320, y, size: 9, font, color: grey(0.5) })
-  nl(15)
-  text(issueDate, { size: 12, f: bold })
-  page.drawText(dueDate, { x: marginX + 160, y, size: 12, font: bold })
-  if (paidOn) page.drawText(paidOn, { x: marginX + 320, y, size: 12, font: bold, color: rgb(0.0, 0.42, 0.0) })
-  nl(24)
-  hr()
-
-  // Bill to
-  text('BILL TO', { size: 9, color: [0.5, 0.5, 0.5] })
-  nl(16)
-  text(memberName, { size: 14, f: bold })
-  nl(16)
-  if (memberEmail) { text(memberEmail, { size: 11, color: [0.4, 0.4, 0.4] }); nl(16) }
-  nl(6)
-  hr()
-
-  // Line item
-  text('DESCRIPTION', { size: 9, color: [0.5, 0.5, 0.5] })
-  page.drawText('AMOUNT', { x: 480, y, size: 9, font, color: grey(0.5) })
-  nl(16)
-  hr(grey(0.9))
-  text(description, { size: 13 })
-  page.drawText(`Rs. ${originalAmount ?? amount}`, { x: 460, y, size: 13, font: bold })
-  nl(20)
-  hr()
-
-  if (hasDiscount) {
-    text('DISCOUNT', { size: 10, color: [0.0, 0.42, 0.0] })
-    page.drawText(`- Rs. ${discountAmount}`, { x: 460, y, size: 13, font: bold, color: rgb(0.0, 0.42, 0.0) })
-    nl(20)
-    hr()
-  }
-
-  // Total
-  nl(6)
-  text('TOTAL DUE', { size: 10, color: [0.4, 0.4, 0.4] })
-  page.drawText(`Rs. ${amount}`, { x: 430, y: y - 2, size: 22, font: bold })
-  nl(28)
-  hr()
-
-  if (notes) {
-    nl(4)
-    text('NOTES', { size: 9, color: [0.5, 0.5, 0.5] })
-    nl(16)
-    text(notes, { size: 11, color: [0.4, 0.4, 0.4] })
-    nl(18)
-  }
-
-  // Footer, pinned near bottom
-  const footerY = 40
-  page.drawLine({ start: { x: marginX, y: footerY + 14 }, end: { x: 555, y: footerY + 14 }, thickness: 1, color: grey(0.85) })
-  page.drawText(invNum, { x: marginX, y: footerY, size: 9, font, color: grey(0.6) })
-  page.drawText('Powered by GymCRM', { x: 470, y: footerY, size: 9, font, color: grey(0.6) })
-
-  return pdf.save()
-}
-
-Deno.serve(async (req: Request) => {
+Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
   // This endpoint is invoked only by the database triggers. The shared cron
@@ -233,7 +78,7 @@ Deno.serve(async (req: Request) => {
   const { data: inv, error: invErr } = await supabase
     .from('invoices')
     .select(
-      '*, members(first_name, last_name, phone, email), gyms(id, name, whatsapp_invoice_enabled, settings)',
+      '*, members(first_name, last_name, phone, email), gyms(id, name, whatsapp_invoice_enabled)',
     )
     .eq('id', invoiceId)
     .single()
@@ -280,7 +125,7 @@ Deno.serve(async (req: Request) => {
     const to = phone.replace(/\D/g, '')
     const withCountryCode = to.startsWith('91') ? to : `91${to}`
     const firstName = (member?.first_name as string) ?? 'there'
-    const invNum = invoiceNumber(inv.id as string, inv.created_at as string)
+    const invNum = inv.invoice_number as string
 
     // invoice_generated: {{1}} name, {{2}} invoice#, {{3}} amount, {{4}} gym
     // invoice_paid:      {{1}} name, {{2}} amount,   {{3}} invoice#, {{4}} gym

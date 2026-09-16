@@ -20,9 +20,10 @@
  *
  * Credits model:
  *   - Each gym gets a free monthly quota based on plan/legacy status (planQuota() below).
- *     Tracked by whatsapp_monthly_quota_used, reset to 0 on the 1st of each
- *     month by the "whatsapp-quota-monthly-reset" cron job (pure SQL, no
- *     edge function call needed for that part).
+ *     Tracked by whatsapp_monthly_quota_used, reset to 0 on each gym's own
+ *     billing anniversary (plan_started_at, falling back to created_at) by
+ *     the "whatsapp-quota-anniversary-reset" cron job (pure SQL, no edge
+ *     function call needed for that part).
  *   - whatsapp_credits is a purchased top-up balance that never auto-resets
  *     and rolls over — consumed only after the monthly quota runs out.
  *
