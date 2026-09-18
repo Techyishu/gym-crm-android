@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../core/widgets/auth_canvas_kit.dart' show OrbitFormCard;
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
@@ -120,6 +121,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     });
 
     final notifier = ref.read(authNotifierProvider.notifier);
+    final container = ProviderScope.containerOf(context, listen: false);
     // Hold the router guard through verify + gym creation so the redirect
     // doesn't briefly land the user on /gym-setup between the two calls.
     signupHandshakeInProgress.value = true;
@@ -180,8 +182,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     // first-setup screen below is a one-time interstitial, not where a
     // returning session should land.
     await prefs.setString('home_route', '/staff/dashboard');
-    ref.invalidate(userTypeProvider);
-    ref.invalidate(staffProfileProvider);
+    container.invalidate(userTypeProvider);
+    container.invalidate(staffProfileProvider);
     if (!mounted) {
       signupHandshakeInProgress.value = false;
       return;
@@ -279,7 +281,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: AppTheme.surface,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -322,254 +324,270 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'GYM OWNER',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.1,
-              color: AppTheme.accent,
-            ),
+          const AuthLogoBadge(
+            label: 'BUILD WITH GYMCRM',
+            headline: 'Your gym.\nOne place.',
           ),
-          const SizedBox(height: 5),
-          Text(
-            'Create your gym',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: AppTheme.textPrimary,
-              letterSpacing: -0.4,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            'Takes about a minute.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          if (_error != null) ...[
-            _ErrorBanner(message: _error!),
-            const SizedBox(height: 16),
-          ],
-
-          // Continue with Google — hidden on iOS (Apple guideline 4.8
-          // would then require Sign in with Apple too). Shown on web despite
-          // a known Safari-only OAuth bug — Google-only accounts need this
-          // to reach the web dashboard; fix needs a server-side callback.
-          // Google signups finish gym creation on the /gym-setup screen
-          // (they never fill this form).
-          if (!isIOS) ...[
-            AuthGoogleButton(
-              loading: _googleLoading,
-              onPressed: (_googleLoading || _loading)
-                  ? null
-                  : _signUpWithGoogle,
-              label: 'Sign up with Google',
-            ),
-            const SizedBox(height: 20),
-            const AuthOrDivider(),
-            const SizedBox(height: 20),
-          ],
-
-          // Gym name — was a separate onboarding screen; merged in here so
-          // email signups land straight on the dashboard after OTP verify.
-          const AuthFieldLabel('Gym name'),
-          const SizedBox(height: 6),
-          AuthPillField(
-            controller: _gymNameCtrl,
-            textCapitalization: TextCapitalization.words,
-            hint: 'FitZone Gym',
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Gym name is required' : null,
-          ),
-          const SizedBox(height: 16),
-
-          // Country & currency — one pick sets the gym's currency (and the
-          // phone dial code below). Always visible: iOS hides the phone field,
-          // so this is the only place iOS owners set their currency.
-          const AuthFieldLabel('Country & currency'),
-          const SizedBox(height: 6),
-          InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => showCountryPicker(
-              context: context,
-              showPhoneCode: true,
-              exclude: const ['PK', 'BD'],
-              onSelect: _selectCountry,
-            ),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
+          const SizedBox(height: 12),
+          OrbitFormCard(
+            children: [
+              const Text(
+                'GYM OWNER',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.1,
+                  color: AppTheme.accent,
+                ),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${_country.flagEmoji}  ${_country.name}  ($_currencyCode)',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        color: AppTheme.textPrimary,
+              const SizedBox(height: 5),
+              Text(
+                'Create your gym',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                'Takes about a minute.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 24),
+              if (_error != null) ...[
+                _ErrorBanner(message: _error!),
+                const SizedBox(height: 16),
+              ],
+
+              // Continue with Google — hidden on iOS (Apple guideline 4.8
+              // would then require Sign in with Apple too). Shown on web despite
+              // a known Safari-only OAuth bug — Google-only accounts need this
+              // to reach the web dashboard; fix needs a server-side callback.
+              // Google signups finish gym creation on the /gym-setup screen
+              // (they never fill this form).
+              if (!isIOS) ...[
+                AuthGoogleButton(
+                  loading: _googleLoading,
+                  onPressed: (_googleLoading || _loading)
+                      ? null
+                      : _signUpWithGoogle,
+                  label: 'Sign up with Google',
+                ),
+                const SizedBox(height: 20),
+                const AuthOrDivider(),
+                const SizedBox(height: 20),
+              ],
+
+              // Gym name — was a separate onboarding screen; merged in here so
+              // email signups land straight on the dashboard after OTP verify.
+              const AuthFieldLabel('Gym name'),
+              const SizedBox(height: 6),
+              AuthPillField(
+                controller: _gymNameCtrl,
+                textCapitalization: TextCapitalization.words,
+                hint: 'FitZone Gym',
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Gym name is required'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+
+              // Country & currency — one pick sets the gym's currency (and the
+              // phone dial code below). Always visible: iOS hides the phone field,
+              // so this is the only place iOS owners set their currency.
+              const AuthFieldLabel('Country & currency'),
+              const SizedBox(height: 6),
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => showCountryPicker(
+                  context: context,
+                  showPhoneCode: true,
+                  exclude: const ['PK', 'BD'],
+                  onSelect: _selectCountry,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 15,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${_country.flagEmoji}  ${_country.name}  ($_currencyCode)',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        AppIcons.keyboardArrowDown,
+                        color: AppTheme.inkHint,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Labelled "Name" (not "First name") — last name isn't collected
+              // here, so calling this "first" would promise a field that doesn't
+              // exist. Still wired to the same firstName param/column; asked
+              // later in Settings if the owner wants a last name filled in, and
+              // setup_gym already tolerates it being blank.
+              const AuthFieldLabel('Your name'),
+              const SizedBox(height: 6),
+              AuthPillField(
+                controller: _firstCtrl,
+                textCapitalization: TextCapitalization.words,
+                hint: 'Rahul',
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+              ),
+              const SizedBox(height: 16),
+
+              const AuthFieldLabel('Email'),
+              const SizedBox(height: 6),
+              AuthPillField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                hint: 'rahul@ironhouse.in',
+                validator: (v) {
+                  final value = v?.trim() ?? '';
+                  final ok = RegExp(
+                    r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                  ).hasMatch(value);
+                  return ok ? null : 'Enter a valid email address';
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // Mobile number with +91 prefix — hidden on iOS (App Review 5.1.1:
+              // phone is not required for core functionality).
+              if (!isIOS) ...[
+                const AuthFieldLabel('Mobile number (optional)'),
+                const SizedBox(height: 6),
+                AuthPillField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  maxLength: 14,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  hint: '9876543210',
+                  prefixIcon: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
+                    ),
+                    child: GestureDetector(
+                      onTap: () => showCountryPicker(
+                        context: context,
+                        showPhoneCode: true,
+                        exclude: const ['PK', 'BD'],
+                        onSelect: _selectCountry,
+                      ),
+                      child: Text(
+                        '${_country.flagEmoji} +${_country.phoneCode}',
+                        style: const TextStyle(fontSize: 14),
                       ),
                     ),
                   ),
-                  const Icon(
-                    AppIcons.keyboardArrowDown,
-                    color: AppTheme.inkHint,
-                    size: 20,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Labelled "Name" (not "First name") — last name isn't collected
-          // here, so calling this "first" would promise a field that doesn't
-          // exist. Still wired to the same firstName param/column; asked
-          // later in Settings if the owner wants a last name filled in, and
-          // setup_gym already tolerates it being blank.
-          const AuthFieldLabel('Your name'),
-          const SizedBox(height: 6),
-          AuthPillField(
-            controller: _firstCtrl,
-            textCapitalization: TextCapitalization.words,
-            hint: 'Rahul',
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Name is required' : null,
-          ),
-          const SizedBox(height: 16),
-
-          const AuthFieldLabel('Email'),
-          const SizedBox(height: 6),
-          AuthPillField(
-            controller: _emailCtrl,
-            keyboardType: TextInputType.emailAddress,
-            autocorrect: false,
-            hint: 'rahul@ironhouse.in',
-            validator: (v) {
-              final value = v?.trim() ?? '';
-              final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
-              return ok ? null : 'Enter a valid email address';
-            },
-          ),
-          const SizedBox(height: 16),
-
-          // Mobile number with +91 prefix — hidden on iOS (App Review 5.1.1:
-          // phone is not required for core functionality).
-          if (!isIOS) ...[
-            const AuthFieldLabel('Mobile number (optional)'),
-            const SizedBox(height: 6),
-            AuthPillField(
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              maxLength: 14,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              hint: '9876543210',
-              prefixIcon: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 14,
+                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
+                  validator: (v) {
+                    final value = v?.trim() ?? '';
+                    if (value.isEmpty) return null; // optional
+                    return _digitsOnly.hasMatch(value)
+                        ? null
+                        : 'Enter a valid mobile number';
+                  },
                 ),
-                child: GestureDetector(
-                  onTap: () => showCountryPicker(
-                    context: context,
-                    showPhoneCode: true,
-                    exclude: const ['PK', 'BD'],
-                    onSelect: _selectCountry,
-                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 4),
                   child: Text(
-                    '${_country.flagEmoji} +${_country.phoneCode}',
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                ),
-              ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 0),
-              validator: (v) {
-                final value = v?.trim() ?? '';
-                if (value.isEmpty) return null; // optional
-                return _digitsOnly.hasMatch(value)
-                    ? null
-                    : 'Enter a valid mobile number';
-              },
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 4, left: 4),
-              child: Text(
-                'Tap the flag to change country',
-                style: TextStyle(fontSize: 12, color: AppTheme.inkHint),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-
-          // Password + strength meter
-          const AuthFieldLabel('Password'),
-          const SizedBox(height: 6),
-          AuthPillField(
-            controller: _passwordCtrl,
-            obscureText: _obscure,
-            hint: 'Min. 8 characters',
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscure
-                    ? AppIcons.visibility
-                    : AppIcons.visibilityOff,
-                color: AppTheme.inkHint,
-                size: 20,
-              ),
-              onPressed: () => setState(() => _obscure = !_obscure),
-            ),
-            validator: (v) => (v == null || v.length < 8)
-                ? 'Password must be at least 8 characters'
-                : null,
-          ),
-          if (_strength > 0) ...[
-            const SizedBox(height: 8),
-            _StrengthMeter(strength: _strength),
-          ],
-          const SizedBox(height: 20),
-
-          // Terms & privacy acceptance (required)
-          _TermsCheckbox(
-            value: _acceptedTerms,
-            showError: _termsError,
-            onChanged: (v) => setState(() {
-              _acceptedTerms = v;
-              if (v) _termsError = false;
-            }),
-          ),
-          const SizedBox(height: 24),
-
-          AuthGradientButton(
-            label: 'Create your gym',
-            loading: _loading,
-            onPressed: (_loading || _googleLoading) ? null : _submit,
-          ),
-          const SizedBox(height: 24),
-          Center(
-            child: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  'Already on GymCRM? ',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-                ),
-                GestureDetector(
-                  onTap: () => context.go('/login'),
-                  child: const Text(
-                    'Log in',
-                    style: TextStyle(
-                      color: AppTheme.accent,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    'Tap the flag to change country',
+                    style: TextStyle(fontSize: 12, color: AppTheme.inkHint),
                   ),
                 ),
               ],
-            ),
+              const SizedBox(height: 16),
+
+              // Password + strength meter
+              const AuthFieldLabel('Password'),
+              const SizedBox(height: 6),
+              AuthPillField(
+                controller: _passwordCtrl,
+                obscureText: _obscure,
+                hint: 'Min. 8 characters',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscure ? AppIcons.visibility : AppIcons.visibilityOff,
+                    color: AppTheme.inkHint,
+                    size: 20,
+                  ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                ),
+                validator: (v) => (v == null || v.length < 8)
+                    ? 'Password must be at least 8 characters'
+                    : null,
+              ),
+              if (_strength > 0) ...[
+                const SizedBox(height: 8),
+                _StrengthMeter(strength: _strength),
+              ],
+              const SizedBox(height: 20),
+
+              // Terms & privacy acceptance (required)
+              _TermsCheckbox(
+                value: _acceptedTerms,
+                showError: _termsError,
+                onChanged: (v) => setState(() {
+                  _acceptedTerms = v;
+                  if (v) _termsError = false;
+                }),
+              ),
+              const SizedBox(height: 24),
+
+              AuthGradientButton(
+                label: 'Create your gym',
+                loading: _loading,
+                onPressed: (_loading || _googleLoading) ? null : _submit,
+              ),
+              const SizedBox(height: 24),
+              Center(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Already on GymCRM? ',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 14,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => context.go('/login'),
+                      child: const Text(
+                        'Log in',
+                        style: TextStyle(
+                          color: AppTheme.accent,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -612,6 +630,11 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               ),
             ),
           ),
+        ),
+        const SizedBox(height: 16),
+        const AuthLogoBadge(
+          label: 'VERIFY YOUR EMAIL',
+          headline: 'Almost there.',
         ),
         const SizedBox(height: 24),
         Text(

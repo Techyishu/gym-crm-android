@@ -59,135 +59,145 @@ class _MemberLoginScreenState extends ConsumerState<MemberLoginScreen> {
         if (!didPop) context.go('/welcome');
       },
       child: Scaffold(
-        backgroundColor: AppTheme.background,
+        backgroundColor: AppTheme.surface,
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 400),
+                constraints: const BoxConstraints(maxWidth: 420),
                 child: Form(
                   key: _formKey,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       CanvasBack(onTap: () => context.go('/welcome')),
-                      const SizedBox(height: 16),
-                      const CanvasKicker('Gym member'),
-                      const SizedBox(height: 5),
-                      const CanvasHeading(
-                        title: 'Log in',
-                        subtitle: 'Use the mobile number your gym has on file.',
+                      const SizedBox(height: 8),
+                      const OrbitBrandPanel(
+                        label: 'FOR MEMBERS',
+                        headline: 'Your gym.\nIn your pocket.',
                       ),
-                      const SizedBox(height: 20),
-                      if (_error != null) ...[
-                        CanvasBanner(message: _error!),
-                        const SizedBox(height: 16),
-                      ],
-                      CanvasField(
-                        label: 'Mobile number',
-                        child: TextFormField(
-                          controller: _phoneCtrl,
-                          keyboardType: TextInputType.phone,
-                          decoration: canvasFieldDecoration(hint: '98765 43210')
-                              .copyWith(
-                                prefixIcon: const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 14),
-                                  child: Text(
-                                    '+91',
+                      const SizedBox(height: 12),
+                      OrbitFormCard(
+                        children: [
+                          const CanvasKicker('Gym member'),
+                          const SizedBox(height: 5),
+                          const CanvasHeading(
+                            title: 'Log in',
+                            subtitle:
+                                'Use the mobile number your gym has on file.',
+                          ),
+                          const SizedBox(height: 20),
+                          if (_error != null) ...[
+                            CanvasBanner(message: _error!),
+                            const SizedBox(height: 16),
+                          ],
+                          CanvasField(
+                            label: 'Mobile number',
+                            child: TextFormField(
+                              controller: _phoneCtrl,
+                              keyboardType: TextInputType.phone,
+                              decoration:
+                                  canvasFieldDecoration(
+                                    hint: '98765 43210',
+                                  ).copyWith(
+                                    prefixIcon: const Padding(
+                                      padding: EdgeInsets.only(right: 10),
+                                      child: Text(
+                                        '+91',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppTheme.ink,
+                                        ),
+                                      ),
+                                    ),
+                                    prefixIconConstraints: const BoxConstraints(
+                                      minWidth: 0,
+                                    ),
+                                  ),
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Mobile number is required';
+                                }
+                                if (v.replaceAll(RegExp(r'\D'), '').length <
+                                    10) {
+                                  return 'Enter a valid mobile number';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          CanvasField(
+                            label: 'Password',
+                            child: TextFormField(
+                              controller: _passwordCtrl,
+                              obscureText: _obscure,
+                              decoration:
+                                  canvasFieldDecoration(
+                                    hint: '••••••••',
+                                  ).copyWith(
+                                    suffixIcon: CanvasShowToggle(
+                                      obscured: _obscure,
+                                      onTap: () =>
+                                          setState(() => _obscure = !_obscure),
+                                    ),
+                                  ),
+                              validator: (v) => (v == null || v.isEmpty)
+                                  ? 'Password is required'
+                                  : null,
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () =>
+                                  context.push('/login/member/help'),
+                              child: const Text(
+                                'Forgot password?',
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.accent,
+                                ),
+                              ),
+                            ),
+                          ),
+                          CanvasButton(
+                            label: 'Log in',
+                            loadingLabel: 'Logging in…',
+                            loading: _loading,
+                            onPressed: _submit,
+                          ),
+                          const SizedBox(height: 18),
+                          Center(
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                const Text(
+                                  'First time here? ',
+                                  style: TextStyle(
+                                    color: AppTheme.inkSoft,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () =>
+                                      context.push('/login/member-signup'),
+                                  child: const Text(
+                                    'Create your account',
                                     style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.inkSoft,
+                                      color: AppTheme.accent,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
                                     ),
                                   ),
                                 ),
-                                prefixIconConstraints: const BoxConstraints(
-                                  minWidth: 0,
-                                ),
-                              ),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Mobile number is required';
-                            }
-                            if (v.replaceAll(RegExp(r'\D'), '').length < 10) {
-                              return 'Enter a valid mobile number';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      CanvasField(
-                        label: 'Password',
-                        child: TextFormField(
-                          controller: _passwordCtrl,
-                          obscureText: _obscure,
-                          decoration: canvasFieldDecoration(hint: '••••••••')
-                              .copyWith(
-                                suffixIcon: CanvasShowToggle(
-                                  obscured: _obscure,
-                                  onTap: () =>
-                                      setState(() => _obscure = !_obscure),
-                                ),
-                              ),
-                          validator: (v) => (v == null || v.isEmpty)
-                              ? 'Password is required'
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () => context.push('/login/member/help'),
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(0, 0),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: const Text(
-                            'Forgot password?',
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.accent,
+                              ],
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      CanvasButton(
-                        label: 'Log in',
-                        loadingLabel: 'Logging in…',
-                        loading: _loading,
-                        onPressed: _submit,
-                      ),
-                      const SizedBox(height: 20),
-                      Center(
-                        child: Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            const Text(
-                              'First time here? ',
-                              style: TextStyle(
-                                color: AppTheme.inkSoft,
-                                fontSize: 14,
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () => context.push('/login/member-signup'),
-                              child: const Text(
-                                'Create your account',
-                                style: TextStyle(
-                                  color: AppTheme.accent,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
                     ],
                   ),

@@ -114,7 +114,9 @@ flutter:
   uses-material-design: true
   assets:
     - shorebird.yaml
+    - assets/branding/
     - assets/icons/
+    - assets/illustrations/
   fonts:
     - family: Manrope
       fonts:

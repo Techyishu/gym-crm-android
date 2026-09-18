@@ -104,6 +104,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
         'resolve_gym_by_member_code',
         params: {'code': code},
       );
+      if (!mounted) return;
       final rows = res as List<dynamic>;
       if (rows.isEmpty) {
         setState(() {
@@ -120,6 +121,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
         _busy = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Could not look up gym. Please try again.';
         _busy = false;
@@ -139,6 +141,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
     });
     try {
       final response = await OTPWidget.sendOTP({'identifier': _fullIdentifier});
+      if (!mounted) return;
       if (response != null && response['type'] == 'success') {
         setState(() {
           _reqId = response['message'] as String;
@@ -153,6 +156,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Could not send OTP. Please try again.';
         _busy = false;
@@ -164,6 +168,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
     if (_resendCooldown > 0 || _reqId == null) return;
     try {
       await OTPWidget.retryOTP({'reqId': _reqId});
+      if (!mounted) return;
       _startResendTimer();
     } catch (_) {}
   }
@@ -180,6 +185,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
         'reqId': _reqId,
         'otp': code,
       });
+      if (!mounted) return;
       final accessToken =
           response?['access-token'] as String? ??
           (response?['message'] is String
@@ -261,7 +267,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: AppTheme.surface,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -287,42 +293,51 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
       children: [
         CanvasBack(onTap: () => context.pop()),
         const SizedBox(height: 16),
-        const CanvasProgress(total: 4, filled: 1),
-        const SizedBox(height: 18),
-        const CanvasHeading(
-          title: 'Enter your gym code',
-          subtitle:
-              'A 6-digit code from your gym. Ask at the desk if you do not '
-              'have it.',
+        const OrbitBrandPanel(
+          label: 'MEMBER ACCESS',
+          headline: 'Join your gym.\nStay connected.',
         ),
-        const SizedBox(height: 18),
-        if (_error != null) ...[
-          CanvasBanner(message: _error!),
-          const SizedBox(height: 16),
-        ],
-        CanvasField(
-          label: 'Gym code',
-          child: TextField(
-            controller: _codeCtrl,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 6,
+        const SizedBox(height: 12),
+        OrbitFormCard(
+          children: [
+            const CanvasProgress(total: 4, filled: 1),
+            const SizedBox(height: 18),
+            const CanvasHeading(
+              title: 'Enter your gym code',
+              subtitle:
+                  'A 6-digit code from your gym. Ask at the desk if you do not '
+                  'have it.',
             ),
-            decoration: canvasFieldDecoration(
-              hint: '123456',
-            ).copyWith(counterText: ''),
-          ),
-        ),
-        const SizedBox(height: 18),
-        CanvasButton(
-          label: 'Continue',
-          loading: _busy,
-          onPressed: _resolveGymCode,
+            const SizedBox(height: 18),
+            if (_error != null) ...[
+              CanvasBanner(message: _error!),
+              const SizedBox(height: 16),
+            ],
+            CanvasField(
+              label: 'Gym code',
+              child: TextField(
+                controller: _codeCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 6,
+                ),
+                decoration: canvasFieldDecoration(
+                  hint: '123456',
+                ).copyWith(counterText: ''),
+              ),
+            ),
+            const SizedBox(height: 18),
+            CanvasButton(
+              label: 'Continue',
+              loading: _busy,
+              onPressed: _resolveGymCode,
+            ),
+          ],
         ),
       ],
     );
@@ -338,48 +353,56 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
             _error = null;
           }),
         ),
-        const SizedBox(height: 16),
-        const CanvasProgress(total: 4, filled: 2),
-        const SizedBox(height: 18),
-        CanvasKicker(_gymName ?? 'Your gym'),
-        const SizedBox(height: 5),
-        const CanvasHeading(
-          title: 'Your mobile number',
-          subtitle:
-              'Use the number your gym registered. We will text a '
-              'one-time code.',
-        ),
-        const SizedBox(height: 18),
-        if (_error != null) ...[
-          CanvasBanner(message: _error!),
-          const SizedBox(height: 16),
-        ],
-        CanvasField(
-          label: 'Mobile number',
-          child: TextField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
-            maxLength: 10,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: canvasFieldDecoration(hint: '9876543210').copyWith(
-              counterText: '',
-              prefixIcon: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Text(
-                  '+91',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.inkSoft,
+        const SizedBox(height: 12),
+        OrbitFormCard(
+          children: [
+            const CanvasProgress(total: 4, filled: 2),
+            const SizedBox(height: 18),
+            CanvasKicker(_gymName ?? 'Your gym'),
+            const SizedBox(height: 5),
+            const CanvasHeading(
+              title: 'Your mobile number',
+              subtitle:
+                  'Use the number your gym registered. We will text a '
+                  'one-time code.',
+            ),
+            const SizedBox(height: 18),
+            if (_error != null) ...[
+              CanvasBanner(message: _error!),
+              const SizedBox(height: 16),
+            ],
+            CanvasField(
+              label: 'Mobile number',
+              child: TextField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                maxLength: 10,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: canvasFieldDecoration(hint: '9876543210').copyWith(
+                  counterText: '',
+                  prefixIcon: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 14),
+                    child: Text(
+                      '+91',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.inkSoft,
+                      ),
+                    ),
                   ),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
                 ),
               ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 0),
             ),
-          ),
+            const SizedBox(height: 18),
+            CanvasButton(
+              label: 'Send code',
+              loading: _busy,
+              onPressed: _sendOtp,
+            ),
+          ],
         ),
-        const SizedBox(height: 18),
-        CanvasButton(label: 'Send code', loading: _busy, onPressed: _sendOtp),
       ],
     );
   }
@@ -395,65 +418,73 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
             _error = null;
           }),
         ),
-        const SizedBox(height: 16),
-        const CanvasProgress(total: 4, filled: 3),
-        const SizedBox(height: 18),
-        CanvasHeading(
-          title: 'Enter the code',
-          subtitle: 'Sent by SMS to +$_fullIdentifier',
-        ),
-        const SizedBox(height: 18),
-        if (_error != null) ...[
-          CanvasBanner(message: _error!),
-          const SizedBox(height: 16),
-        ],
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: List.generate(
-            6,
-            (i) => _OtpBox(
-              controller: _otpControllers[i],
-              focusNode: _otpFocusNodes[i],
-              onChanged: (v) {
-                if (v.isNotEmpty && i < 5) _otpFocusNodes[i + 1].requestFocus();
-                if (_otpControllers.every((c) => c.text.isNotEmpty)) {
-                  _verifyOtp();
-                } else {
-                  setState(() {});
-                }
-              },
-              onBackspace: () {
-                if (i > 0) {
-                  _otpControllers[i - 1].clear();
-                  _otpFocusNodes[i - 1].requestFocus();
-                  setState(() {});
-                }
-              },
+        const SizedBox(height: 12),
+        OrbitFormCard(
+          children: [
+            const CanvasProgress(total: 4, filled: 3),
+            const SizedBox(height: 18),
+            CanvasHeading(
+              title: 'Enter the code',
+              subtitle: 'Sent by SMS to +$_fullIdentifier',
             ),
-          ),
-        ),
-        const SizedBox(height: 18),
-        CanvasButton(
-          label: 'Verify',
-          loadingLabel: 'Verifying…',
-          loading: _busy,
-          onPressed: allFilled ? _verifyOtp : null,
-        ),
-        const SizedBox(height: 16),
-        Center(
-          child: GestureDetector(
-            onTap: _resendCooldown > 0 ? null : _resendOtp,
-            child: Text(
-              _resendCooldown > 0
-                  ? 'Resend code in ${_resendCooldown}s'
-                  : 'Resend code',
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: _resendCooldown > 0 ? AppTheme.inkHint : AppTheme.accent,
+            const SizedBox(height: 18),
+            if (_error != null) ...[
+              CanvasBanner(message: _error!),
+              const SizedBox(height: 16),
+            ],
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: List.generate(
+                6,
+                (i) => _OtpBox(
+                  controller: _otpControllers[i],
+                  focusNode: _otpFocusNodes[i],
+                  onChanged: (v) {
+                    if (v.isNotEmpty && i < 5) {
+                      _otpFocusNodes[i + 1].requestFocus();
+                    }
+                    if (_otpControllers.every((c) => c.text.isNotEmpty)) {
+                      _verifyOtp();
+                    } else {
+                      setState(() {});
+                    }
+                  },
+                  onBackspace: () {
+                    if (i > 0) {
+                      _otpControllers[i - 1].clear();
+                      _otpFocusNodes[i - 1].requestFocus();
+                      setState(() {});
+                    }
+                  },
+                ),
               ),
             ),
-          ),
+            const SizedBox(height: 18),
+            CanvasButton(
+              label: 'Verify',
+              loadingLabel: 'Verifying…',
+              loading: _busy,
+              onPressed: allFilled ? _verifyOtp : null,
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: GestureDetector(
+                onTap: _resendCooldown > 0 ? null : _resendOtp,
+                child: Text(
+                  _resendCooldown > 0
+                      ? 'Resend code in ${_resendCooldown}s'
+                      : 'Resend code',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: _resendCooldown > 0
+                        ? AppTheme.inkHint
+                        : AppTheme.accent,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -463,35 +494,43 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const CanvasProgress(total: 4, filled: 4),
-        const SizedBox(height: 18),
-        const CanvasHeading(
-          title: 'Set a password',
-          subtitle:
-              'Next time you can log in with your mobile number and this '
-              'password. No code needed.',
+        OrbitFormCard(
+          children: [
+            const CanvasProgress(total: 4, filled: 4),
+            const SizedBox(height: 18),
+            const CanvasHeading(
+              title: 'Set a password',
+              subtitle:
+                  'Next time you can log in with your mobile number and this '
+                  'password. No code needed.',
+            ),
+            const SizedBox(height: 18),
+            if (_error != null) ...[
+              CanvasBanner(message: _error!),
+              const SizedBox(height: 16),
+            ],
+            CanvasField(
+              label: 'Password',
+              child: TextField(
+                controller: _passwordCtrl,
+                obscureText: _obscure,
+                decoration: canvasFieldDecoration(hint: 'Min. 6 characters')
+                    .copyWith(
+                      suffixIcon: CanvasShowToggle(
+                        obscured: _obscure,
+                        onTap: () => setState(() => _obscure = !_obscure),
+                      ),
+                    ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            CanvasButton(
+              label: 'Finish',
+              loading: _busy,
+              onPressed: _setPassword,
+            ),
+          ],
         ),
-        const SizedBox(height: 18),
-        if (_error != null) ...[
-          CanvasBanner(message: _error!),
-          const SizedBox(height: 16),
-        ],
-        CanvasField(
-          label: 'Password',
-          child: TextField(
-            controller: _passwordCtrl,
-            obscureText: _obscure,
-            decoration: canvasFieldDecoration(hint: 'Min. 6 characters')
-                .copyWith(
-                  suffixIcon: CanvasShowToggle(
-                    obscured: _obscure,
-                    onTap: () => setState(() => _obscure = !_obscure),
-                  ),
-                ),
-          ),
-        ),
-        const SizedBox(height: 18),
-        CanvasButton(label: 'Finish', loading: _busy, onPressed: _setPassword),
       ],
     );
   }

@@ -13,7 +13,7 @@ class MemberHelpScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: AppTheme.surface,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -25,54 +25,63 @@ class MemberHelpScreen extends StatelessWidget {
                 children: [
                   CanvasBack(onTap: () => context.pop()),
                   const SizedBox(height: 16),
-                  const CanvasHeading(
-                    title: 'Reset it over SMS',
-                    subtitle:
-                        'Verify your mobile number and set a new password. '
-                        'No need to call the gym.',
+                  const OrbitBrandPanel(
+                    label: 'MEMBER SUPPORT',
+                    headline: 'Reset it.\nKeep moving.',
                   ),
-                  const SizedBox(height: 18),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      border: Border.all(color: AppTheme.border),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: const [
-                        _HelpStep(
-                          number: 1,
-                          text:
-                              'Enter your gym code (ask the front desk if you '
-                              'do not have it).',
+                  const SizedBox(height: 12),
+                  OrbitFormCard(
+                    children: [
+                      const CanvasHeading(
+                        title: 'Reset it over SMS',
+                        subtitle:
+                            'Verify your mobile number and set a new password. '
+                            'No need to call the gym.',
+                      ),
+                      const SizedBox(height: 18),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          border: Border.all(color: AppTheme.border),
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        Divider(height: 1, color: AppTheme.border),
-                        _HelpStep(
-                          number: 2,
-                          text:
-                              'Enter the mobile number your gym has on file.',
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          children: const [
+                            _HelpStep(
+                              number: 1,
+                              text:
+                                  'Enter your gym code (ask the front desk if you '
+                                  'do not have it).',
+                            ),
+                            Divider(height: 1, color: AppTheme.border),
+                            _HelpStep(
+                              number: 2,
+                              text:
+                                  'Enter the mobile number your gym has on file.',
+                            ),
+                            Divider(height: 1, color: AppTheme.border),
+                            _HelpStep(
+                              number: 3,
+                              text:
+                                  'Enter the code sent by SMS, then set a new '
+                                  'password.',
+                            ),
+                          ],
                         ),
-                        Divider(height: 1, color: AppTheme.border),
-                        _HelpStep(
-                          number: 3,
-                          text:
-                              'Enter the code sent by SMS, then set a new '
-                              'password.',
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  CanvasButton(
-                    label: 'Reset my password',
-                    loading: false,
-                    onPressed: () => context.push('/login/member-signup'),
-                  ),
-                  const SizedBox(height: 10),
-                  CanvasSecondaryButton(
-                    label: 'Back to log in',
-                    onPressed: () => context.pop(),
+                      ),
+                      const SizedBox(height: 18),
+                      CanvasButton(
+                        label: 'Reset my password',
+                        loading: false,
+                        onPressed: () => context.push('/login/member-signup'),
+                      ),
+                      const SizedBox(height: 10),
+                      CanvasSecondaryButton(
+                        label: 'Back to log in',
+                        onPressed: () => context.pop(),
+                      ),
+                    ],
                   ),
                 ],
               ),

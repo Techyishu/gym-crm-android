@@ -79,154 +79,157 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         if (!didPop) context.go('/welcome');
       },
       child: Scaffold(
-        backgroundColor: AppTheme.background,
+        backgroundColor: AppTheme.surface,
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 400),
+                constraints: const BoxConstraints(maxWidth: 420),
                 child: Form(
                   key: _formKey,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       CanvasBack(onTap: () => context.go('/welcome')),
-                      const SizedBox(height: 16),
-                      const CanvasKicker('Gym owner'),
-                      const SizedBox(height: 5),
-                      const CanvasHeading(
-                        title: 'Welcome back',
-                        subtitle: "Log in to run today's floor.",
-                      ),
-                      const SizedBox(height: 20),
-                      if (_error != null) ...[
-                        CanvasBanner(message: _error!),
-                        const SizedBox(height: 16),
-                      ],
-                      CanvasField(
-                        label: 'Email',
-                        child: TextFormField(
-                          controller: _emailCtrl,
-                          keyboardType: TextInputType.emailAddress,
-                          autocorrect: false,
-                          decoration: canvasFieldDecoration(
-                            hint: 'rahul@ironhouse.in',
-                          ),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Email is required';
-                            }
-                            if (!v.contains('@')) return 'Enter a valid email';
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      CanvasField(
-                        label: 'Password',
-                        child: TextFormField(
-                          controller: _passwordCtrl,
-                          obscureText: _obscure,
-                          decoration: canvasFieldDecoration(hint: '••••••••')
-                              .copyWith(
-                                suffixIcon: CanvasShowToggle(
-                                  obscured: _obscure,
-                                  onTap: () =>
-                                      setState(() => _obscure = !_obscure),
-                                ),
-                              ),
-                          validator: (v) => (v == null || v.isEmpty)
-                              ? 'Password is required'
-                              : null,
-                        ),
-                      ),
                       const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () => context.push('/forgot-password'),
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(0, 0),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: const Text(
-                            'Forgot password?',
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.accent,
-                            ),
-                          ),
-                        ),
+                      const OrbitBrandPanel(
+                        label: 'FOR GYM TEAMS',
+                        headline: 'Run the floor.\nOwn the day.',
                       ),
-                      const SizedBox(height: 8),
-                      CanvasButton(
-                        label: 'Log in',
-                        loadingLabel: 'Logging in…',
-                        loading: _loading,
-                        onPressed: _submit,
-                      ),
-                      // Google sign-in is hidden on iOS: Apple guideline 4.8
-                      // would then require Sign in with Apple too, so iOS
-                      // uses email/password only. Shown on web despite a
-                      // known Safari-only OAuth bug (client-side PKCE
-                      // exchange collides with ITP) — Google-only accounts
-                      // need this to reach the web dashboard at all; Safari
-                      // fix needs a server-side callback, not done yet.
-                      if (!isIOS) ...[
-                        const SizedBox(height: 20),
-                        Row(
-                          children: const [
-                            Expanded(child: Divider(color: AppTheme.border)),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 12),
-                              child: Text(
-                                'OR',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.inkHint,
-                                ),
-                              ),
-                            ),
-                            Expanded(child: Divider(color: AppTheme.border)),
+                      const SizedBox(height: 12),
+                      OrbitFormCard(
+                        children: [
+                          const CanvasKicker('Gym owner'),
+                          const SizedBox(height: 5),
+                          const CanvasHeading(
+                            title: 'Welcome back',
+                            subtitle: "Log in to run today's floor.",
+                          ),
+                          const SizedBox(height: 20),
+                          if (_error != null) ...[
+                            CanvasBanner(message: _error!),
+                            const SizedBox(height: 16),
                           ],
-                        ),
-                        const SizedBox(height: 20),
-                        AuthGoogleButton(
-                          loading: _googleLoading,
-                          onPressed: (_loading || _googleLoading)
-                              ? null
-                              : _signInWithGoogle,
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                      Center(
-                        child: Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            const Text(
-                              'New gym? ',
-                              style: TextStyle(
-                                color: AppTheme.inkSoft,
-                                fontSize: 14,
+                          CanvasField(
+                            label: 'Email',
+                            child: TextFormField(
+                              controller: _emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
+                              autocorrect: false,
+                              decoration: canvasFieldDecoration(
+                                hint: 'rahul@ironhouse.in',
                               ),
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Email is required';
+                                }
+                                if (!v.contains('@')) {
+                                  return 'Enter a valid email';
+                                }
+                                return null;
+                              },
                             ),
-                            GestureDetector(
-                              onTap: () => context.go('/signup'),
+                          ),
+                          const SizedBox(height: 12),
+                          CanvasField(
+                            label: 'Password',
+                            child: TextFormField(
+                              controller: _passwordCtrl,
+                              obscureText: _obscure,
+                              decoration:
+                                  canvasFieldDecoration(
+                                    hint: '••••••••',
+                                  ).copyWith(
+                                    suffixIcon: CanvasShowToggle(
+                                      obscured: _obscure,
+                                      onTap: () =>
+                                          setState(() => _obscure = !_obscure),
+                                    ),
+                                  ),
+                              validator: (v) => (v == null || v.isEmpty)
+                                  ? 'Password is required'
+                                  : null,
+                            ),
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => context.push('/forgot-password'),
                               child: const Text(
-                                'Create an account',
+                                'Forgot password?',
                                 style: TextStyle(
-                                  color: AppTheme.accent,
-                                  fontSize: 14,
+                                  fontSize: 13.5,
                                   fontWeight: FontWeight.w800,
+                                  color: AppTheme.accent,
                                 ),
                               ),
                             ),
+                          ),
+                          CanvasButton(
+                            label: 'Log in',
+                            loadingLabel: 'Logging in…',
+                            loading: _loading,
+                            onPressed: _submit,
+                          ),
+                          if (!isIOS) ...[
+                            const SizedBox(height: 18),
+                            const Row(
+                              children: [
+                                Expanded(
+                                  child: Divider(color: AppTheme.border),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 12),
+                                  child: Text(
+                                    'OR',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppTheme.inkHint,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Divider(color: AppTheme.border),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            AuthGoogleButton(
+                              loading: _googleLoading,
+                              onPressed: (_loading || _googleLoading)
+                                  ? null
+                                  : _signInWithGoogle,
+                            ),
                           ],
-                        ),
+                          const SizedBox(height: 18),
+                          Center(
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                const Text(
+                                  'New gym? ',
+                                  style: TextStyle(
+                                    color: AppTheme.inkSoft,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () => context.go('/signup'),
+                                  child: const Text(
+                                    'Create an account',
+                                    style: TextStyle(
+                                      color: AppTheme.accent,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),

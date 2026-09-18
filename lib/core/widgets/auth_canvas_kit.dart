@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// Shared pieces for the `Auth & Gym Setup.dc.html` canvas restyle — a
-/// boxier, less-rounded look (12px radius, bordered fields with a label
-/// above) than the older [AuthPillField] kit, used consistently across the
-/// welcome/login/signup/forgot-password/member screens redesigned
-/// 2026-08-28. See [[canvas-auth-gym-setup]].
+/// Shared auth pieces, styled to match the Orbit welcome screen.
 
 /// "← Back" text button, top-left of a screen.
 class CanvasBack extends StatelessWidget {
@@ -20,8 +16,8 @@ class CanvasBack extends StatelessWidget {
         onPressed: onTap,
         style: TextButton.styleFrom(
           padding: EdgeInsets.zero,
-          minimumSize: const Size(0, 0),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          minimumSize: const Size(44, 44),
+          alignment: Alignment.centerLeft,
         ),
         child: const Text(
           '← Back',
@@ -70,10 +66,10 @@ class CanvasHeading extends StatelessWidget {
         Text(
           title,
           style: const TextStyle(
-            fontSize: 27,
+            fontSize: 30,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-            height: 1.2,
+            letterSpacing: -1,
+            height: 1.12,
             color: AppTheme.ink,
           ),
         ),
@@ -93,6 +89,154 @@ class CanvasHeading extends StatelessWidget {
   }
 }
 
+class OrbitBrandPanel extends StatelessWidget {
+  final String label;
+  final String headline;
+
+  const OrbitBrandPanel({
+    super.key,
+    this.label = 'WELCOME TO GYMCRM',
+    this.headline = 'Move your gym forward.',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 164,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppTheme.accentSoft,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            width: 190,
+            height: 190,
+            right: -44,
+            top: -70,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppTheme.accent.withValues(alpha: .16),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            width: 132,
+            height: 132,
+            right: -8,
+            top: -18,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppTheme.accent.withValues(alpha: .12),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: -18,
+            bottom: -24,
+            width: 210,
+            height: 180,
+            child: Image.asset(
+              'assets/illustrations/gymcrm_welcome_hero.png',
+              fit: BoxFit.contain,
+              alignment: Alignment.bottomRight,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ),
+          Positioned(
+            left: 18,
+            top: 14,
+            child: Image.asset(
+              'assets/branding/gymcrm-logo-horizontal-theme.png',
+              width: 122,
+              height: 40,
+              fit: BoxFit.contain,
+              alignment: Alignment.centerLeft,
+              errorBuilder: (_, _, _) => const Text(
+                'GymCRM',
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 18,
+            right: 170,
+            bottom: 17,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.accent,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: .8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  headline,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontSize: 20,
+                    height: 1.04,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -.7,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class OrbitFormCard extends StatelessWidget {
+  final List<Widget> children;
+  const OrbitFormCard({super.key, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppTheme.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D1D1B16),
+            blurRadius: 22,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+}
+
 /// Label above a bordered 12px-radius field — the canvas's field pattern,
 /// boxier than [AuthPillField]'s full pill shape.
 class CanvasField extends StatelessWidget {
@@ -108,60 +252,56 @@ class CanvasField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.ink,
-              ),
-            ),
-            if (optional) ...[
-              const SizedBox(width: 6),
-              const Text(
-                '— optional',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.inkHint,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 11, 6, 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F7F7),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.accent.withValues(alpha: .11)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                label.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: .75,
+                  color: AppTheme.accent,
                 ),
               ),
+              if (optional) ...[
+                const SizedBox(width: 6),
+                const Text(
+                  'OPTIONAL',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.inkHint,
+                  ),
+                ),
+              ],
             ],
-          ],
-        ),
-        const SizedBox(height: 6),
-        child,
-      ],
+          ),
+          child,
+        ],
+      ),
     );
   }
 }
 
 InputDecoration canvasFieldDecoration({String? hint}) => InputDecoration(
   hintText: hint,
-  filled: true,
-  fillColor: AppTheme.surface,
-  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-  border: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(12),
-    borderSide: const BorderSide(color: AppTheme.border),
-  ),
-  enabledBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(12),
-    borderSide: const BorderSide(color: AppTheme.border),
-  ),
-  focusedBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(12),
-    borderSide: const BorderSide(color: AppTheme.accent, width: 1.5),
-  ),
-  errorBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(12),
-    borderSide: const BorderSide(color: AppTheme.statusDanger),
-  ),
+  filled: false,
+  contentPadding: const EdgeInsets.fromLTRB(0, 7, 10, 10),
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
 );
 
 /// Full-width teal button with an inline "Verifying…"-style loading overlay,
@@ -182,19 +322,40 @@ class CanvasButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 52,
+      height: 56,
       child: Stack(
         children: [
           ElevatedButton(
             onPressed: loading ? null : onPressed,
-            child: Text(label),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: AppTheme.accentFg,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 15.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Center(child: Text(label)),
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: Icon(Icons.arrow_forward_rounded, size: 21),
+                ),
+              ],
+            ),
           ),
           if (loading)
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: AppTheme.accentDark,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -239,14 +400,14 @@ class CanvasSecondaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 50,
+      height: 54,
       child: OutlinedButton(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
           foregroundColor: AppTheme.ink,
           side: const BorderSide(color: AppTheme.border),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(18),
           ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),

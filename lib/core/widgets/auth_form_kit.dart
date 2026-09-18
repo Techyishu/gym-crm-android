@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../theme/app_theme.dart';
-import '../theme/app_icons.dart';
+import 'auth_canvas_kit.dart' show OrbitBrandPanel;
 
 /// Shared pieces of the login/signup visual language: inputs, the primary
 /// CTA, the Google button and small field label — pure styling, reused across
@@ -21,10 +21,10 @@ class AuthFieldLabel extends StatelessWidget {
     return Text(
       text.toUpperCase(),
       style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        color: AppTheme.inkHint,
-        letterSpacing: 0.6,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w800,
+        color: AppTheme.accent,
+        letterSpacing: 0.8,
       ),
     );
   }
@@ -74,6 +74,8 @@ class AuthPillField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hint,
         counterText: maxLength != null ? '' : null,
+        filled: true,
+        fillColor: const Color(0xFFF3F7F7),
         prefixIcon: prefixIcon,
         prefixIconConstraints: prefixIconConstraints,
         suffixIcon: suffixIcon,
@@ -83,15 +85,15 @@ class AuthPillField extends StatelessWidget {
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppTheme.border),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppTheme.border),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppTheme.accent, width: 1.5),
+          borderSide: const BorderSide(color: AppTheme.accent, width: 1.2),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -142,7 +144,7 @@ class AuthGoogleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 52,
+      height: 56,
       child: OutlinedButton.icon(
         onPressed: onPressed,
         icon: loading
@@ -158,7 +160,7 @@ class AuthGoogleButton extends StatelessWidget {
           foregroundColor: AppTheme.textPrimary,
           side: BorderSide(color: AppTheme.border),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
           ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
         ),
@@ -182,11 +184,10 @@ class AuthGradientButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: 54,
+      height: 56,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         color: onPressed == null ? AppTheme.border : AppTheme.accent,
-        boxShadow: onPressed == null ? null : AppTheme.accentShadow,
       ),
       child: ElevatedButton(
         onPressed: onPressed,
@@ -194,7 +195,7 @@ class AuthGradientButton extends StatelessWidget {
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
           ),
         ),
         child: loading
@@ -206,12 +207,23 @@ class AuthGradientButton extends StatelessWidget {
                   strokeWidth: 2,
                 ),
               )
-            : Text(
-                label,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                ),
+            : Stack(
+                alignment: Alignment.center,
+                children: [
+                  Center(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  const Align(
+                    alignment: Alignment.centerRight,
+                    child: Icon(Icons.arrow_forward_rounded, size: 21),
+                  ),
+                ],
               ),
       ),
     );
@@ -232,18 +244,17 @@ class _GoogleIcon extends StatelessWidget {
 }
 
 class AuthLogoBadge extends StatelessWidget {
-  const AuthLogoBadge({super.key});
+  final String label;
+  final String headline;
+
+  const AuthLogoBadge({
+    super.key,
+    this.label = 'WELCOME TO GYMCRM',
+    this.headline = 'Move your gym forward.',
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: AppTheme.accent,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: const Icon(AppIcons.fitnessActive, color: Colors.white, size: 22),
-    );
+    return OrbitBrandPanel(label: label, headline: headline);
   }
 }

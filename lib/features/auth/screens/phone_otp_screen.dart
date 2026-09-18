@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:country_picker/country_picker.dart';
 import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/auth_blob_background.dart';
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
@@ -96,6 +95,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
 
     try {
       final response = await OTPWidget.sendOTP({'identifier': _fullIdentifier});
+      if (!mounted) return;
       if (response != null && response['type'] == 'success') {
         setState(() {
           _reqId = response['message'] as String;
@@ -109,6 +109,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Could not send OTP. Please try again.';
         _sending = false;
@@ -120,8 +121,8 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
     if (_resendCooldown > 0 || _reqId == null) return;
     try {
       await OTPWidget.retryOTP({'reqId': _reqId});
-      _startResendTimer();
       if (!mounted) return;
+      _startResendTimer();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Code resent via SMS.')));
@@ -148,6 +149,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         'reqId': _reqId,
         'otp': code,
       });
+      if (!mounted) return;
       final accessToken =
           response?['access-token'] as String? ??
           (response?['message'] is String
@@ -194,16 +196,14 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: AuthBlobBackground(
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 400),
-                child: _reqId != null ? _buildOtpStep() : _buildPhoneStep(),
-              ),
+      backgroundColor: AppTheme.surface,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: _reqId != null ? _buildOtpStep() : _buildPhoneStep(),
             ),
           ),
         ),
@@ -224,7 +224,10 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
           ],
         ),
         const SizedBox(height: 8),
-        const AuthLogoBadge(),
+        const AuthLogoBadge(
+          label: 'MOBILE ACCESS',
+          headline: 'One code.\nYou are in.',
+        ),
         const SizedBox(height: 28),
         Text(
           'Log in with mobile',
@@ -288,7 +291,10 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(height: 24),
-        const AuthLogoBadge(),
+        const AuthLogoBadge(
+          label: 'VERIFY YOUR NUMBER',
+          headline: 'Check your messages.',
+        ),
         const SizedBox(height: 28),
         Container(
           height: 56,
@@ -297,11 +303,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
             color: AppTheme.accentSoft,
             shape: BoxShape.circle,
           ),
-          child: const Icon(
-            AppIcons.sms,
-            color: AppTheme.accent,
-            size: 26,
-          ),
+          child: const Icon(AppIcons.sms, color: AppTheme.accent, size: 26),
         ),
         const SizedBox(height: 16),
         Text(
