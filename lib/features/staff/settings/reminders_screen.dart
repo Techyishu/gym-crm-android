@@ -98,6 +98,7 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
   @override
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_remindersGymProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -111,7 +112,7 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
           error: (_, _) => const ErrorState(what: 'your message settings'),
           data: (gym) {
             if (gym == null) return const Center(child: Text('Gym not found'));
-            void onChanged() => ref.invalidate(_remindersGymProvider);
+            void onChanged() => container.invalidate(_remindersGymProvider);
             final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
             final showInvoiceBadge =
                 coachmark?.shouldShow('feature_invoice_whatsapp') ?? false;

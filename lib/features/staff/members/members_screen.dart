@@ -894,10 +894,11 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   }
 
   void _openImportCsv(BuildContext context) {
+    final container = ProviderScope.containerOf(context, listen: false);
     Navigator.of(context)
         .push<bool>(MaterialPageRoute(builder: (_) => const ImportCsvScreen()))
         .then((imported) {
-          if (imported == true) ref.invalidate(_membersProvider);
+          if (imported == true) container.invalidate(_membersProvider);
         });
   }
 }
@@ -1566,14 +1567,16 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   // Gym has no plans yet — let staff make one without losing the half-filled
   // member form. Reuses the Billing screen's sheet, which pops the new row.
   Future<void> _createPlan() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final created = await showAdaptiveSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => const PlanFormSheet(),
     );
-    ref.invalidate(_memberPlansProvider);
-    if (created != null && mounted) setState(() => _selectPlan(created));
+    container.invalidate(_memberPlansProvider);
+    if (!mounted) return;
+    if (created != null) setState(() => _selectPlan(created));
   }
 
   Future<void> _pickAvatar() async {
@@ -1682,6 +1685,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         enteredAmount: paidAmount,
         dueAmount: _planAmount,
       );
+      if (!mounted) return;
       if (!ok) return;
     }
     setState(() => _loading = true);
@@ -2126,8 +2130,12 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                   // Half-filled member form stays put: the sheet opens over it
                   // and the chips refresh when it closes, same as "create plan".
                   onTap: () async {
+                    final container = ProviderScope.containerOf(
+                      context,
+                      listen: false,
+                    );
                     await showClassFormSheet(context);
-                    ref.invalidate(_memberBatchesProvider);
+                    container.invalidate(_memberBatchesProvider);
                   },
                 ),
               ],

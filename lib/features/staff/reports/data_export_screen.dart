@@ -122,6 +122,7 @@ class _DataExportScreenState extends ConsumerState<DataExportScreen> {
       lastDate: DateTime.now(),
       initialDateRange: _range,
     );
+    if (!mounted) return;
     if (picked != null) {
       setState(() => _range = picked);
       _filtersChanged();

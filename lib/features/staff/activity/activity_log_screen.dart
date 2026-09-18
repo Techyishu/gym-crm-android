@@ -136,6 +136,7 @@ class _ActivityLogScreenState extends ConsumerState<ActivityLogScreen> {
       lastDate: DateTime.now(),
       initialDateRange: _range,
     );
+    if (!mounted) return;
     if (picked == null) return;
     setState(() {
       _range = picked;

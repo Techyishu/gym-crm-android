@@ -134,6 +134,7 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final container = ProviderScope.containerOf(context, listen: false);
     final classesAsync = ref.watch(_classesProvider);
     final sessionsAsync = ref.watch(_upcomingSessionsProvider);
     final canAdd = ref.watch(
@@ -153,8 +154,8 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
           useSafeArea: true,
           builder: (_) => const _ClassFormSheet(),
         ).then((_) {
-          ref.invalidate(_classesProvider);
-          ref.invalidate(_upcomingSessionsProvider);
+          container.invalidate(_classesProvider);
+          container.invalidate(_upcomingSessionsProvider);
         });
 
     return Scaffold(
@@ -254,15 +255,17 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                             },
                           ),
                         ).then((_) {
-                          ref.invalidate(_classesProvider);
-                          ref.invalidate(_upcomingSessionsProvider);
+                          container.invalidate(_classesProvider);
+                          container.invalidate(_upcomingSessionsProvider);
                         }),
                     onAddSession: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
                       useSafeArea: true,
                       builder: (_) => _AddSessionSheet(gymClass: classes[i]),
-                    ).then((_) => ref.invalidate(_upcomingSessionsProvider)),
+                    ).then(
+                      (_) => container.invalidate(_upcomingSessionsProvider),
+                    ),
                     onEnroll: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -279,14 +282,15 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                         confirmLabel: 'Delete',
                         icon: AppIcons.delete,
                       );
+                      if (!mounted) return;
                       if (confirmed != true) return;
                       try {
                         await Supabase.instance.client
                             .from('classes')
                             .delete()
                             .eq('id', classes[i].id);
-                        ref.invalidate(_classesProvider);
-                        ref.invalidate(_upcomingSessionsProvider);
+                        container.invalidate(_classesProvider);
+                        container.invalidate(_upcomingSessionsProvider);
                       } catch (e) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -1497,6 +1501,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
   }
 
   Future<void> _enroll(Map<String, dynamic> member) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     setState(() => _busyMemberId = member['id'] as String);
     try {
       final conflict = await _findScheduleConflict(member['id'] as String);
@@ -1518,7 +1523,8 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
         'class_id': widget.gymClass.id,
         'member_id': member['id'],
       });
-      ref.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
+      container.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
+      if (!mounted) return;
       _searchCtrl.clear();
       setState(() => _search = '');
     } catch (e) {
@@ -1540,6 +1546,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
   }
 
   Future<void> _remove(String memberId, String name) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final confirmed = await showConfirmDialog(
       context,
       title: 'Remove from batch',
@@ -1547,6 +1554,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
       confirmLabel: 'Remove',
       icon: AppIcons.personRemove,
     );
+    if (!mounted) return;
     if (confirmed != true) return;
 
     setState(() => _busyMemberId = memberId);
@@ -1556,7 +1564,7 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
           .delete()
           .eq('class_id', widget.gymClass.id)
           .eq('member_id', memberId);
-      ref.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
+      container.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

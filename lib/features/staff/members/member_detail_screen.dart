@@ -415,15 +415,20 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                     size: 21,
                     color: AppTheme.onDark,
                   ),
-                  onPressed: () =>
-                      showAdaptiveSheet(
+                  onPressed: () {
+                    final container = ProviderScope.containerOf(
+                      context,
+                      listen: false,
+                    );
+                    showAdaptiveSheet(
                         context: context,
                         isScrollControlled: true,
                         useSafeArea: true,
                         builder: (_) => _EditMemberSheet(member: m),
-                      ).then(
-                        (_) => ref.invalidate(_memberDetailProvider(memberId)),
-                      ),
+                      ).then((_) {
+                        container.invalidate(_memberDetailProvider(memberId));
+                      });
+                  },
                 ),
               if (canEdit)
                 IconButton(
@@ -699,14 +704,15 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
   }
 
   void _collect(BuildContext context, WidgetRef ref, Member m) {
+    final container = ProviderScope.containerOf(context, listen: false);
     showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => QuickCollectSheet(memberId: m.id, memberName: m.fullName),
     ).then((_) {
-      ref.invalidate(_memberDetailProvider(memberId));
-      ref.invalidate(_memberDueProvider(m.id));
+      container.invalidate(_memberDetailProvider(memberId));
+      container.invalidate(_memberDueProvider(m.id));
     });
   }
 
@@ -715,6 +721,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
   // RPC Collect uses, just without the full payment-method form since this
   // path assumes cash/default terms already agreed with the member.
   Future<void> _renew(BuildContext context, WidgetRef ref, Member m) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final npd = m.nextPaymentDate;
     if (npd == null || npd.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -754,8 +761,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
         amount: amount,
         method: 'cash',
       );
-      ref.invalidate(_memberDetailProvider(memberId));
-      ref.invalidate(_memberDueProvider(m.id));
+      container.invalidate(_memberDetailProvider(memberId));
+      container.invalidate(_memberDueProvider(m.id));
+      if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Plan renewed'),
@@ -768,10 +776,15 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
   }
 
   Future<void> _checkIn(BuildContext context, WidgetRef ref, Member m) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     // Captured before the await — see showCheckInResult's note.
     final messenger = ScaffoldMessenger.of(context);
     final gymId = await ref.read(gymIdProvider.future);
     final r = await checkInMember(memberId: m.id, gymId: gymId);
+    if (r.success) {
+      container.invalidate(_memberCheckInsProvider(memberId));
+    }
+    if (!mounted) return;
     showCheckInResult(
       messenger,
       success: r.success,
@@ -779,7 +792,6 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       title: r.title,
       subtitle: r.subtitle,
     );
-    if (r.success) ref.invalidate(_memberCheckInsProvider(memberId));
   }
 
   Widget _buildStatTiles(WidgetRef ref) {
@@ -831,6 +843,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     Member m,
     String? role,
   ) {
+    final container = ProviderScope.containerOf(context, listen: false);
     final workoutPlans =
         ref.watch(_memberWorkoutPlansProvider(memberId)).valueOrNull ??
         const [];
@@ -862,8 +875,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           builder: (_) =>
               WorkoutPlanSheet(memberId: memberId, memberName: m.fullName),
         );
-        if (saved == true)
-          ref.invalidate(_memberWorkoutPlansProvider(memberId));
+        if (saved == true) {
+          container.invalidate(_memberWorkoutPlansProvider(memberId));
+        }
         return;
       }
       final changed = await Navigator.of(context).push<bool>(
@@ -876,8 +890,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           ),
         ),
       );
-      if (changed == true)
-        ref.invalidate(_memberWorkoutPlansProvider(memberId));
+      if (changed == true) {
+        container.invalidate(_memberWorkoutPlansProvider(memberId));
+      }
     }
 
     Future<void> openDiet() async {
@@ -890,7 +905,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           builder: (_) =>
               DietPlanSheet(memberId: memberId, memberName: m.fullName),
         );
-        if (saved == true) ref.invalidate(_memberDietPlansProvider(memberId));
+        if (saved == true) {
+          container.invalidate(_memberDietPlansProvider(memberId));
+        }
         return;
       }
       final changed = await Navigator.of(context).push<bool>(
@@ -903,7 +920,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           ),
         ),
       );
-      if (changed == true) ref.invalidate(_memberDietPlansProvider(memberId));
+      if (changed == true) {
+        container.invalidate(_memberDietPlansProvider(memberId));
+      }
     }
 
     return Padding(
@@ -1146,6 +1165,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     WidgetRef ref,
     Member m,
   ) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final ctrl = TextEditingController(text: m.biometricId ?? '');
     final saved = await showAppDialog<bool>(
       context,
@@ -1180,7 +1200,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           .from('members')
           .update({'biometric_id': _normalizeBiometricId(ctrl.text)})
           .eq('id', m.id);
-      ref.invalidate(_memberDetailProvider(m.id));
+      container.invalidate(_memberDetailProvider(m.id));
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(
@@ -1634,6 +1654,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   }
 
   Future<void> _toggleHold() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final newStatus = m.status == 'frozen' ? 'active' : 'frozen';
     setState(() => _busy = true);
     try {
@@ -1641,7 +1662,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           .from('members')
           .update({'status': newStatus})
           .eq('id', m.id);
-      ref.invalidate(_memberDetailProvider(m.id));
+      container.invalidate(_memberDetailProvider(m.id));
+      if (!mounted) return;
       _toast(newStatus == 'frozen' ? 'Membership put on hold' : 'Hold removed');
     } catch (e) {
       debugPrint('[GymCRM] Toggle hold error: $e');
@@ -1657,6 +1679,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       final auth = Supabase.instance.client.auth;
       final session =
           auth.currentSession ?? (await auth.refreshSession()).session;
+      if (!mounted) return;
       final token = session?.accessToken;
       if (token == null) {
         _toast('Session expired. Please sign in again.');
@@ -1684,6 +1707,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   }
 
   Future<void> _cancelPlan() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final ms = m.currentMembership;
     if (ms == null || ms.status != 'active') return;
     final ok = await showConfirmDialog(
@@ -1694,6 +1718,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       cancelLabel: 'Keep plan',
       confirmLabel: 'Cancel it',
     );
+    if (!mounted) return;
     if (ok != true) return;
     setState(() => _busy = true);
     try {
@@ -1704,7 +1729,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
             'cancelled_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('id', ms.id);
-      ref.invalidate(_memberDetailProvider(m.id));
+      container.invalidate(_memberDetailProvider(m.id));
+      if (!mounted) return;
       _toast('Membership cancelled');
     } catch (e) {
       debugPrint('[GymCRM] Cancel plan error: $e');
@@ -1715,6 +1741,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   }
 
   Future<void> _managePlan() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     ref.invalidate(_detailPlansProvider);
     final plans = await ref.read(_detailPlansProvider.future);
     if (!mounted) return;
@@ -1808,6 +1835,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
         },
       ),
     );
+    if (!mounted) return;
     if (selected == null) return;
 
     // Optional recurring discount for this member.
@@ -1830,6 +1858,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       ),
     );
     discountCtrl.dispose();
+    if (!mounted) return;
 
     setState(() => _busy = true);
     try {
@@ -1875,6 +1904,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           builder: (_) =>
               _PlanStartChoiceSheet(todayStr: todayStr, currentNpd: currentNpd),
         );
+        if (!mounted) return;
         if (choice == null) {
           setState(() => _busy = false);
           return;
@@ -1901,8 +1931,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           'p_billing_interval_months': months,
         },
       );
-      ref.invalidate(_memberDetailProvider(m.id));
       notifyGymDataChanged();
+      container.invalidate(_memberDetailProvider(m.id));
+      if (!mounted) return;
       _toast('Plan assigned');
     } catch (e) {
       debugPrint('[GymCRM] Assign plan error: $e');
@@ -1913,6 +1944,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
   }
 
   Future<void> _editDiscount() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final ms = m.currentMembership;
     if (ms == null) return;
 
@@ -1937,6 +1969,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       ),
     );
     discountCtrl.dispose();
+    if (!mounted) return;
     if (newDiscount == null) return;
 
     setState(() => _busy = true);
@@ -1945,7 +1978,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           .from('memberships')
           .update({'discount_amount': newDiscount})
           .eq('id', ms.id);
-      ref.invalidate(_memberDetailProvider(m.id));
+      container.invalidate(_memberDetailProvider(m.id));
+      if (!mounted) return;
       _toast('Discount updated');
     } catch (e) {
       debugPrint('[GymCRM] Edit discount error: $e');

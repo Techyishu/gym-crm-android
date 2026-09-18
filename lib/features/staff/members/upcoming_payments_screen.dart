@@ -477,6 +477,7 @@ class _CollectButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final role = ref.watch(staffRoleProvider).valueOrNull;
+    final container = ProviderScope.containerOf(context, listen: false);
     if (!RoleAccess.canRecordPayment(role)) return const SizedBox.shrink();
     return WideActionButton(
       label: isFuturePaymentDate(nextPaymentDate) ? 'Collect early' : 'Collect',
@@ -489,8 +490,8 @@ class _CollectButton extends ConsumerWidget {
               QuickCollectSheet(memberId: memberId, memberName: memberName),
         ).then((success) {
           if (success == true) {
-            ref.invalidate(_overdueProvider(gymId));
-            ref.invalidate(_upcomingProvider(gymId));
+            container.invalidate(_overdueProvider(gymId));
+            container.invalidate(_upcomingProvider(gymId));
           }
         });
       },
@@ -677,6 +678,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       enteredAmount: amount,
       dueAmount: _due ?? amount,
     );
+    if (!mounted) return;
     if (!ok) return;
 
     setState(() => _loading = true);

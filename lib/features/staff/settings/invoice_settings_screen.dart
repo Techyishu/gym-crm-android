@@ -163,6 +163,7 @@ class _InvoiceSettingsScreenState extends ConsumerState<InvoiceSettingsScreen> {
     try {
       final gymId = await ref.read(gymIdProvider.future);
       final logoUrl = await _uploadLogo(gymId);
+      if (!mounted) return;
       await ref
           .read(supabaseProvider)
           .rpc(
@@ -191,6 +192,7 @@ class _InvoiceSettingsScreenState extends ConsumerState<InvoiceSettingsScreen> {
               },
             },
           );
+      if (!mounted) return;
       _logoUrl = logoUrl;
       _logo = null;
       if (mounted) {

@@ -181,6 +181,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     final synced = await OfflineCheckInQueue.flush();
     if (!mounted) return;
     final remaining = await OfflineCheckInQueue.pendingCount();
+    if (!mounted) return;
     setState(() => _pendingSync = remaining);
     if (synced > 0) ref.invalidate(_recentCheckInsProvider);
   }
@@ -192,6 +193,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     String memberId, {
     String method = 'manual',
   }) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     setState(() => _processing = true);
     try {
       // If offline, enqueue and return immediately (QR only; manual needs names).
@@ -237,7 +239,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         gymId: gymId,
         method: method,
       );
-      if (r.success) ref.invalidate(_recentCheckInsProvider);
+      if (r.success) container.invalidate(_recentCheckInsProvider);
       return _CheckResult(
         success: r.success,
         already: r.already,
@@ -271,13 +273,14 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
   }
 
   Future<void> _processCheckOut(String checkInId, String memberName) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     if (_processing) return;
     setState(() => _message = null);
     setState(() => _processing = true);
     try {
       final client = Supabase.instance.client;
       await client.rpc('checkout_member', params: {'p_check_in_id': checkInId});
-      ref.invalidate(_recentCheckInsProvider);
+      container.invalidate(_recentCheckInsProvider);
       if (!mounted) return;
       setState(() {
         _success = true;

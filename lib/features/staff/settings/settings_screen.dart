@@ -57,6 +57,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(staffProfileProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -98,7 +99,8 @@ class SettingsScreen extends ConsumerWidget {
                       useSafeArea: true,
                       builder: (_) => _EditProfileSheet(
                         profile: profile.value ?? {},
-                        onSaved: () => ref.invalidate(staffProfileProvider),
+                        onSaved: () =>
+                            container.invalidate(staffProfileProvider),
                       ),
                     ),
                   ),
@@ -129,7 +131,7 @@ class SettingsScreen extends ConsumerWidget {
                       isScrollControlled: true,
                       useSafeArea: true,
                       builder: (_) => _GymDetailsSheet(
-                        onSaved: () => ref.invalidate(_gymProvider),
+                        onSaved: () => container.invalidate(_gymProvider),
                       ),
                     ),
                   ),
@@ -317,6 +319,7 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(authNotifierProvider.notifier);
     final ok = await showConfirmDialog(
       context,
       title: 'Sign out?',
@@ -324,14 +327,15 @@ class SettingsScreen extends ConsumerWidget {
       confirmLabel: 'Sign out',
       icon: AppIcons.logout,
     );
-    if (ok == true) ref.read(authNotifierProvider.notifier).signOut();
+    if (ok == true) notifier.signOut();
   }
 
   void _confirmDeleteAccount(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(authNotifierProvider.notifier);
     showDialog(
       context: context,
       builder: (_) => _DeleteAccountDialog(
-        onDeleted: () => ref.read(authNotifierProvider.notifier).signOut(),
+        onDeleted: notifier.signOut,
       ),
     );
   }
@@ -381,12 +385,14 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
         if (mounted) Navigator.pop(context);
         widget.onDeleted();
       } else {
+        if (!mounted) return;
         setState(() {
           _error = 'Failed to delete account. Please contact support.';
           _loading = false;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Error: $e';
         _loading = false;
@@ -764,6 +770,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
       widget.onSaved();
       if (mounted) Navigator.pop(context);
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to save: $e';
         _loading = false;
@@ -861,11 +868,13 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(password: _newCtrl.text),
       );
+      if (!mounted) return;
       setState(() {
         _done = true;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed: $e';
         _loading = false;
@@ -1109,6 +1118,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
 
     try {
       final uploadedLogoUrl = await _uploadLogo(gymId);
+      if (!mounted) return;
       final settings = {
         ..._settings,
         'address': _addressCtrl.text.trim(),
@@ -1126,6 +1136,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
       widget.onSaved();
       if (mounted) Navigator.pop(context);
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed: $e';
         _loading = false;
@@ -1515,6 +1526,7 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
   }
 
   Future<void> _submit() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
       setState(() => _error = 'Please describe your issue in a few words.');
@@ -1535,7 +1547,7 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
         'title': title,
         'description': _descCtrl.text.trim(),
       });
-      ref.invalidate(_myTicketsProvider);
+      container.invalidate(_myTicketsProvider);
       if (mounted)
         setState(() {
           _submitted = true;
@@ -1831,6 +1843,7 @@ class _RegistrationLinkSheetState
       icon: AppIcons.refresh,
       danger: false,
     );
+    if (!mounted) return;
     if (ok != true) return;
     setState(() => _regenerating = true);
     try {

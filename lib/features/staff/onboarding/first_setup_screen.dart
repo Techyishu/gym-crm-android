@@ -158,8 +158,10 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
             )
             as Map,
       );
+      if (!mounted) return;
       widget.onCreated(created);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = 'Could not create the plan. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -427,6 +429,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
         }
       }
 
+      if (!mounted) return;
       widget.onDone({
         'name': [
           _firstCtrl.text.trim(),
@@ -434,6 +437,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
         ].where((s) => s.isNotEmpty).join(' '),
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = 'Could not add this member. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);

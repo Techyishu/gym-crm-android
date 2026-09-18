@@ -134,6 +134,7 @@ class _StaffWorkoutPlansScreenState
   String _query = '';
 
   Future<void> _pickMemberAndCreate({Map<String, dynamic>? preselected}) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     Map<String, dynamic>? selected = preselected;
     if (selected == null) {
       final members = await ref.read(_gymMembersProvider.future);
@@ -159,7 +160,7 @@ class _StaffWorkoutPlansScreenState
           WorkoutPlanSheet(memberId: memberId, memberName: memberName),
     );
     if (saved != true) return;
-    ref.invalidate(_gymWorkoutPlansProvider);
+    container.invalidate(_gymWorkoutPlansProvider);
 
     // Offer the copy here, while whoever built the plan is still thinking
     // about who else trains on it.
@@ -185,13 +186,14 @@ class _StaffWorkoutPlansScreenState
       ref: ref,
       plan: plans.first,
       sourceMemberId: memberId,
-      onDone: () => ref.invalidate(_gymWorkoutPlansProvider),
+      onDone: () => container.invalidate(_gymWorkoutPlansProvider),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final plansAsync = ref.watch(_gymWorkoutPlansProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -292,8 +294,9 @@ class _StaffWorkoutPlansScreenState
                             memberId: memberId,
                             memberName: memberName,
                             plans: plans,
-                            onChanged: () =>
-                                ref.invalidate(_gymWorkoutPlansProvider),
+                            onChanged: () => container.invalidate(
+                              _gymWorkoutPlansProvider,
+                            ),
                           );
                         },
                       ),

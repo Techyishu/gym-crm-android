@@ -144,10 +144,11 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
 
   Future<void> _handleScan(String raw) async {
     // Ignore further frames once we're processing or already showing a result.
-    if (_processing || _outcome != null) return;
+    if (!mounted || _processing || _outcome != null) return;
 
     // Freeze the camera immediately so it can't fire again on the next frame.
     await _scanner.stop().catchError((_) {});
+    if (!mounted) return;
 
     final token = _extractToken(raw);
     if (token == null) {
@@ -167,6 +168,7 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
         'self_checkin',
         params: {'p_token': token},
       );
+      if (!mounted) return;
       final map = (res as Map).cast<String, dynamic>();
       final member = (map['member'] as Map?)?.cast<String, dynamic>();
       final name = member != null
@@ -209,6 +211,7 @@ class _MemberQrScreenState extends ConsumerState<MemberQrScreen>
         );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(
         () => _outcome = _ScanOutcome(
           success: false,

@@ -106,6 +106,7 @@ class _AttendanceCalendarScreenState
       useSafeArea: true,
       builder: (_) => _AttendanceEditorSheet(date: _selected, record: record),
     );
+    if (!mounted) return;
     if (changed == true) _load();
   }
 
@@ -121,6 +122,7 @@ class _AttendanceCalendarScreenState
         actionLabel: 'Delete',
       ),
     );
+    if (!mounted) return;
     if (reason == null) return;
     try {
       final gymId = await ref.read(gymIdProvider.future);
@@ -134,6 +136,7 @@ class _AttendanceCalendarScreenState
               'p_reason': reason,
             },
           );
+      if (!mounted) return;
       _load();
     } catch (error) {
       if (mounted) {
@@ -466,6 +469,7 @@ class _AttendanceEditorSheetState
       context: context,
       initialTime: checkout ? _checkOut ?? _checkIn : _checkIn,
     );
+    if (!mounted) return;
     if (picked != null) {
       setState(() {
         if (checkout) {

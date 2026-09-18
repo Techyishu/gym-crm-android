@@ -694,6 +694,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   }
 
   Future<void> _deleteInvoice(BuildContext context, _TxnItem item) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final ok = await showConfirmDialog(
       context,
       title: 'Delete invoice?',
@@ -702,15 +703,17 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
       confirmLabel: 'Delete',
       icon: AppIcons.delete,
     );
+    if (!mounted) return;
     if (ok != true) return;
     await Supabase.instance.client
         .from('invoices')
         .delete()
         .eq('id', item.invoiceId);
-    ref.invalidate(_billingFeedProvider);
+    container.invalidate(_billingFeedProvider);
   }
 
   void _collect(BuildContext context, _TxnItem item) {
+    final container = ProviderScope.containerOf(context, listen: false);
     if (item.needsInvoice) {
       // No invoice exists yet for this renewal — QuickCollectSheet creates
       // one and records the payment in a single step.
@@ -720,7 +723,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         useSafeArea: true,
         builder: (_) =>
             QuickCollectSheet(memberId: item.memberId!, memberName: item.name),
-      ).then((_) => ref.invalidate(_billingFeedProvider));
+      ).then((_) => container.invalidate(_billingFeedProvider));
       return;
     }
     final invoice = Invoice.fromJson(item.raw);
@@ -729,16 +732,17 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => _RecordPaymentSheet(invoice: invoice),
-    ).then((_) => ref.invalidate(_billingFeedProvider));
+    ).then((_) => container.invalidate(_billingFeedProvider));
   }
 
   void _showCreateInvoiceSheet(BuildContext context) {
+    final container = ProviderScope.containerOf(context, listen: false);
     showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => const _CreateInvoiceSheet(),
-    ).then((_) => ref.invalidate(_billingFeedProvider));
+    ).then((_) => container.invalidate(_billingFeedProvider));
   }
 }
 
@@ -1111,6 +1115,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       enteredAmount: amount,
       dueAmount: _due ?? inv.amount,
     );
+    if (!mounted) return;
     if (!ok) return;
 
     setState(() => _loading = true);
@@ -1775,6 +1780,7 @@ class _PlansBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final plans = ref.watch(_plansProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
 
     return plans.when(
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -1806,7 +1812,7 @@ class _PlansBody extends ConsumerWidget {
                           isScrollControlled: true,
                           useSafeArea: true,
                           builder: (_) => PlanFormSheet(plan: plan),
-                        ).then((_) => ref.invalidate(_plansProvider)),
+                        ).then((_) => container.invalidate(_plansProvider)),
                       ),
                     )
                     .toList(),
@@ -1818,7 +1824,7 @@ class _PlansBody extends ConsumerWidget {
                 isScrollControlled: true,
                 useSafeArea: true,
                 builder: (_) => const PlanFormSheet(),
-              ).then((_) => ref.invalidate(_plansProvider)),
+              ).then((_) => container.invalidate(_plansProvider)),
               child: DottedBorderBox(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -2093,6 +2099,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
       cancelLabel: 'Cancel',
       confirmLabel: 'Delete',
     );
+    if (!mounted) return;
     if (ok != true) return;
     setState(() => _loading = true);
     try {

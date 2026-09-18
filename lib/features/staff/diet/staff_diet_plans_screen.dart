@@ -125,6 +125,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
   String _query = '';
 
   Future<void> _pickMemberAndCreate({Map<String, dynamic>? preselected}) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     Map<String, dynamic>? selected = preselected;
     if (selected == null) {
       final members = await ref.read(_gymMembersForDietProvider.future);
@@ -149,7 +150,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
       builder: (_) => DietPlanSheet(memberId: memberId, memberName: memberName),
     );
     if (saved != true) return;
-    ref.invalidate(_gymDietPlansProvider);
+    container.invalidate(_gymDietPlansProvider);
 
     // Offer the copy while whoever built the plan is still thinking about who
     // else eats the same way.
@@ -174,13 +175,14 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
       ref: ref,
       plan: plans.first,
       sourceMemberId: memberId,
-      onDone: () => ref.invalidate(_gymDietPlansProvider),
+      onDone: () => container.invalidate(_gymDietPlansProvider),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final plansAsync = ref.watch(_gymDietPlansProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -282,7 +284,7 @@ class _StaffDietPlansScreenState extends ConsumerState<StaffDietPlansScreen> {
                             memberName: memberName,
                             plans: plans,
                             onChanged: () =>
-                                ref.invalidate(_gymDietPlansProvider),
+                                container.invalidate(_gymDietPlansProvider),
                           );
                         },
                       ),

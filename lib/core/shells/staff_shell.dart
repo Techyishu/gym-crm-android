@@ -224,7 +224,8 @@ class _StaffShellState extends ConsumerState<StaffShell>
       if (!hasAccess) return const PaywallScreen();
     }
 
-    void onSignOut() => ref.read(authNotifierProvider.notifier).signOut();
+    final authNotifier = ref.read(authNotifierProvider.notifier);
+    void onSignOut() => authNotifier.signOut();
 
     return ShowCaseWidget(
       builder: (context) {

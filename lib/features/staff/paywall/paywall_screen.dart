@@ -96,6 +96,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _loggedView = false;
 
   Future<void> _signOut() async {
+    final notifier = ref.read(authNotifierProvider.notifier);
     final ok = await showConfirmDialog(
       context,
       title: 'Sign out?',
@@ -104,7 +105,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       icon: AppIcons.logout,
     );
     if (ok == true) {
-      await ref.read(authNotifierProvider.notifier).signOut();
+      await notifier.signOut();
     }
   }
 

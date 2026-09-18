@@ -82,6 +82,7 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final container = ProviderScope.containerOf(context, listen: false);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Classes & Bookings'),
@@ -102,7 +103,7 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen>
           _MyBookingsTab(ref: ref),
           _AvailableClassesTab(
             ref: ref,
-            onBooked: () => ref.invalidate(_myBookingsProvider),
+            onBooked: () => container.invalidate(_myBookingsProvider),
           ),
         ],
       ),

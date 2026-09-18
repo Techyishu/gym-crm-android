@@ -171,7 +171,10 @@ class StaffScreen extends ConsumerWidget {
   }
 
   void _showInviteSheet(BuildContext context, WidgetRef ref) {
-    showInviteStaffSheet(context).then((_) => ref.invalidate(staffListProvider));
+    final container = ProviderScope.containerOf(context, listen: false);
+    showInviteStaffSheet(
+      context,
+    ).then((_) => container.invalidate(staffListProvider));
   }
 
   Future<void> _confirmRemove(
@@ -194,6 +197,7 @@ class StaffScreen extends ConsumerWidget {
       final auth = Supabase.instance.client.auth;
       final session =
           auth.currentSession ?? (await auth.refreshSession()).session;
+      if (!context.mounted) return;
       final token = session?.accessToken;
       if (token == null) {
         if (context.mounted) {
@@ -522,6 +526,7 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
       final auth = Supabase.instance.client.auth;
       final session =
           auth.currentSession ?? (await auth.refreshSession()).session;
+      if (!mounted) return;
       final token = session?.accessToken;
       if (token == null) {
         setState(() => _error = 'Session expired. Please sign in again.');

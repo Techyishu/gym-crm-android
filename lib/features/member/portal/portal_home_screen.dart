@@ -286,6 +286,7 @@ class PortalHomeScreen extends ConsumerWidget {
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(authNotifierProvider.notifier);
     final ok = await showConfirmDialog(
       context,
       title: 'Sign out?',
@@ -294,7 +295,7 @@ class PortalHomeScreen extends ConsumerWidget {
       icon: AppIcons.logout,
     );
     if (ok == true) {
-      await ref.read(authNotifierProvider.notifier).signOut();
+      await notifier.signOut();
     }
   }
 }

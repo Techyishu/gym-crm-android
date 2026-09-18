@@ -508,6 +508,7 @@ class _SetupChecklist extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final whatsappOn = gym?['whatsapp_reminder_enabled'] == true;
+    final container = ProviderScope.containerOf(context, listen: false);
 
     // Labels name the outcome, not the mechanic — "Add 3 members" tells you
     // what to do, "see your dashboard come alive" tells you why it's worth
@@ -519,7 +520,7 @@ class _SetupChecklist extends ConsumerWidget {
         done: memberCount >= 3,
         onTap: () => showAddMemberSheet(
           context,
-        ).then((_) => ref.invalidate(_dashboardDataProvider)),
+        ).then((_) => container.invalidate(_dashboardDataProvider)),
       ),
       (
         label: 'Set your monthly fee',
@@ -643,6 +644,7 @@ class _QuickActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final role = ref.watch(staffRoleProvider).valueOrNull;
+    final container = ProviderScope.containerOf(context, listen: false);
     final items = [
       // Opens the add-member sheet directly instead of routing to the
       // members list first — same shortcut the dashboard checklist uses.
@@ -652,7 +654,7 @@ class _QuickActions extends ConsumerWidget {
         accent: true,
         onTap: () => showAddMemberSheet(
           context,
-        ).then((_) => ref.invalidate(_dashboardDataProvider)),
+        ).then((_) => container.invalidate(_dashboardDataProvider)),
       ),
       if (canCollect)
         (
@@ -1452,13 +1454,14 @@ class _PaymentDueToday extends ConsumerWidget {
     WidgetRef ref,
     Map<String, dynamic> member,
   ) async {
+    final container = ProviderScope.containerOf(ctx, listen: false);
     await showAdaptiveSheet(
       context: ctx,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => _CollectPaymentSheet(
         member: member,
-        onPaid: () => ref.invalidate(_dashboardDataProvider),
+        onPaid: () => container.invalidate(_dashboardDataProvider),
       ),
     );
   }
@@ -1793,6 +1796,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
       enteredAmount: amount,
       dueAmount: _due ?? amount,
     );
+    if (!mounted) return;
     if (!ok) return;
 
     setState(() => _loading = true);

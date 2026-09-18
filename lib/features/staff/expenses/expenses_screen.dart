@@ -98,11 +98,15 @@ class ExpensesScreen extends ConsumerWidget {
                         expense: list[i],
                         canDelete: canDelete,
                         onDelete: () async {
+                          final container = ProviderScope.containerOf(
+                            context,
+                            listen: false,
+                          );
                           await Supabase.instance.client
                               .from('expenses')
                               .delete()
                               .eq('id', list[i].id);
-                          ref.invalidate(_expensesProvider);
+                          container.invalidate(_expensesProvider);
                         },
                       ),
                     ),
@@ -117,12 +121,13 @@ class ExpensesScreen extends ConsumerWidget {
   }
 
   void _showAddSheet(BuildContext context, WidgetRef ref) {
+    final container = ProviderScope.containerOf(context, listen: false);
     showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => const _AddExpenseSheet(),
-    ).then((_) => ref.invalidate(_expensesProvider));
+    ).then((_) => container.invalidate(_expensesProvider));
   }
 }
 

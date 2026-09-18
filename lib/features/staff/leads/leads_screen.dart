@@ -233,20 +233,28 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                           lead: shown[i],
                           onStatusChange: canEdit
                               ? (status) async {
+                                  final container = ProviderScope.containerOf(
+                                    context,
+                                    listen: false,
+                                  );
                                   await Supabase.instance.client
                                       .from('leads')
                                       .update({'status': status})
                                       .eq('id', shown[i].id);
-                                  ref.invalidate(_leadsProvider);
+                                  container.invalidate(_leadsProvider);
                                 }
                               : null,
                           onDelete: canDelete
                               ? () async {
+                                  final container = ProviderScope.containerOf(
+                                    context,
+                                    listen: false,
+                                  );
                                   await Supabase.instance.client
                                       .from('leads')
                                       .delete()
                                       .eq('id', shown[i].id);
-                                  ref.invalidate(_leadsProvider);
+                                  container.invalidate(_leadsProvider);
                                 }
                               : null,
                         );
@@ -263,12 +271,13 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
   }
 
   void _showAddSheet(BuildContext context, WidgetRef ref) {
+    final container = ProviderScope.containerOf(context, listen: false);
     showAdaptiveSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => const _AddLeadSheet(),
-    ).then((_) => ref.invalidate(_leadsProvider));
+    ).then((_) => container.invalidate(_leadsProvider));
   }
 }
 
