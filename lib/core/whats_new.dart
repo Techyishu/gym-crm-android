@@ -18,6 +18,17 @@ class WhatsNewEntry {
 
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
+    version: '1.0.7+1',
+    date: '20 Sep 2026',
+    title: 'Day passes, a clearer Payments Due, and a smarter Money screen',
+    bullets: [
+      'Sell short passes: Add day pass under Money, Plans makes a plan of 1 to 29 days that never renews. When a pass ends, Convert to full plan on the member\'s page moves them to a monthly or yearly plan.',
+      'Payments Due now filters by Overdue, Today and Coming, shows the amount owed, and has a day strip so you can see what is due on a given date. Collect sits right beside each name.',
+      'Money can switch its collected total between Today, Week and Month, with the change against the period before. A new search finds a member across Dues, Payments and Invoices, and each due is one line with its amount and Collect.',
+      'Adding a member now shows Amount payable and Due amount separately. Type only what you collected, or tap Full amount — the due updates as you type.',
+    ],
+  ),
+  WhatsNewEntry(
     version: '1.0.3+57',
     date: '12 Sep 2026',
     title: 'Find members who joined recently',

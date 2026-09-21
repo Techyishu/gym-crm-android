@@ -13,6 +13,7 @@ import '../../../core/access/role_access.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/day_pass.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../shared/widgets/authed_member_image.dart';
@@ -41,7 +42,9 @@ final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
   final client = Supabase.instance.client;
   final data = await client
       .from('membership_plans')
-      .select('id, name, price, billing_interval, billing_interval_months')
+      .select(
+        'id, name, price, billing_interval, billing_interval_months, billing_interval_days',
+      )
       .eq('gym_id', gymId)
       .eq('is_active', true)
       .order('price');
@@ -617,8 +620,10 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 ),
               ),
               // Only offered once the plan has actually lapsed — an active
-              // member is renewed through Collect, not this shortcut.
-              if (m.status == 'expired') ...[
+              // member is renewed through Collect, not this shortcut. A day
+              // pass never renews; it gets "Convert to full plan" instead.
+              if (m.status == 'expired' &&
+                  m.currentMembership?.isDayPass != true) ...[
                 const SizedBox(width: 8),
                 Expanded(
                   child: _HeroAction(
@@ -968,6 +973,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
             : null;
       }
     }
+    final isPass = ms?.isDayPass ?? false;
     final planTitle = ms?.plan != null
         ? '${ms!.plan!.name} · ${formatCurrency(ms.plan!.price)}'
         : 'No active plan';
@@ -1069,7 +1075,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 Row(
                   children: [
                     Text(
-                      'Renews ${formatDateFromString(m.nextPaymentDate)}',
+                      '${isPass ? 'Pass ends' : 'Renews'} ${formatDateFromString(m.nextPaymentDate)}',
                       style: const TextStyle(
                         fontSize: 12.5,
                         color: AppTheme.inkSoft,
@@ -1079,11 +1085,13 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                     Text(
                       daysLeft != null && daysLeft >= 0
                           ? '$daysLeft days left'
+                          : isPass
+                          ? 'Pass ended'
                           : '${daysLeft!.abs()} days overdue',
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
-                        color: daysLeft >= 0
+                        color: (daysLeft ?? 0) >= 0
                             ? AppTheme.ink
                             : AppTheme.statusDanger,
                         fontFeatures: AppTheme.tabularFigures,
@@ -1740,19 +1748,29 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     }
   }
 
-  Future<void> _managePlan() async {
+  /// Assign / change a plan. With [convert] (day-pass members only) the list
+  /// is limited to full plans, since converting a pass to another pass is just
+  /// buying a new pass.
+  Future<void> _managePlan({bool convert = false}) async {
     final container = ProviderScope.containerOf(context, listen: false);
     ref.invalidate(_detailPlansProvider);
-    final plans = await ref.read(_detailPlansProvider.future);
+    final allPlans = await ref.read(_detailPlansProvider.future);
+    final plans = convert
+        ? allPlans.where((p) => !isDayPassPlan(p)).toList()
+        : allPlans;
     if (!mounted) return;
     if (plans.isEmpty) {
-      _toast('No active plans. Create one in Billing first.');
+      _toast(
+        convert
+            ? 'No monthly or yearly plans. Create one in Billing first.'
+            : 'No active plans. Create one in Billing first.',
+      );
       return;
     }
     final currentPlanId = m.currentMembership?.plan?.id;
-    var picked =
-        currentPlanId ??
-        (plans.isNotEmpty ? plans.first['id'] as String : null);
+    String? picked = convert
+        ? plans.first['id'] as String
+        : currentPlanId ?? plans.first['id'] as String;
     final selected = await showAdaptiveSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -1770,7 +1788,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SheetHeader(title: 'Change plan'),
+                SheetHeader(
+                  title: convert ? 'Convert to a full plan' : 'Change plan',
+                ),
                 const SizedBox(height: 16),
                 ...plans.map((p) {
                   final id = p['id'] as String;
@@ -1827,7 +1847,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                   onPressed: picked == null
                       ? null
                       : () => Navigator.pop(ctx, picked),
-                  child: const Text('Switch plan'),
+                  child: Text(convert ? 'Convert' : 'Switch plan'),
                 ),
               ],
             ),
@@ -1864,16 +1884,21 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     try {
       // Plan cycle starts on the member's join date, not on assignment date.
       // Membership is open-ended — next_payment_date tracks renewal, not ends_at.
-      final startsAt = DateTime.tryParse(m.joinedAt) ?? DateTime.now().toUtc();
+      final plan = plans.firstWhere(
+        (p) => p['id'] == selected,
+        orElse: () => {},
+      );
+      // Day pass: starts today and never renews (see day_pass.dart).
+      final days = plan['billing_interval_days'] as int?;
+      final fromPass = m.currentMembership?.isDayPass ?? false;
+      final startsAt = days != null
+          ? DateTime.now().toUtc()
+          : (DateTime.tryParse(m.joinedAt) ?? DateTime.now().toUtc());
 
       // Extend from the member's current next_payment_date when one exists —
       // matches how Collect Payment already advances dates (from the date
       // itself, not from today or from join date). Only members who never
       // had a next_payment_date fall back to join date + plan duration.
-      final plan = plans.firstWhere(
-        (p) => p['id'] == selected,
-        orElse: () => {},
-      );
       final months =
           (plan['billing_interval_months'] as int?) ??
           const {
@@ -1895,7 +1920,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
               false);
 
       String anchor;
-      if (hasRemainingTime) {
+      if (days != null) {
+        anchor = todayStr;
+      } else if (hasRemainingTime) {
         if (!mounted) return;
         final choice = await showAdaptiveSheet<String>(
           context: context,
@@ -1910,12 +1937,18 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           return;
         }
         anchor = choice == 'today' ? todayStr : currentNpd;
+      } else if (fromPass) {
+        // The pass has already ended — the full plan starts today, not from
+        // the pass's old end date.
+        anchor = todayStr;
       } else {
         anchor = (currentNpd != null && currentNpd.isNotEmpty)
             ? currentNpd
             : startsAt.toIso8601String().split('T').first;
       }
-      final derived = advancePaymentDate(anchor, months: months) ?? anchor;
+      final derived = days != null
+          ? (dayPassEndDate(anchor, days) ?? anchor)
+          : (advancePaymentDate(anchor, months: months) ?? anchor);
 
       // Cancel old membership + insert new one + update member row, atomically
       // (single DB transaction via RPC) so a mid-flow interruption can't leave
@@ -1929,12 +1962,13 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           'p_discount_amount': discount ?? 0.0,
           'p_next_payment_date': derived,
           'p_billing_interval_months': months,
+          if (days != null) 'p_billing_interval_days': days,
         },
       );
       notifyGymDataChanged();
       container.invalidate(_memberDetailProvider(m.id));
       if (!mounted) return;
-      _toast('Plan assigned');
+      _toast(convert ? 'Converted to a full plan' : 'Plan assigned');
     } catch (e) {
       debugPrint('[GymCRM] Assign plan error: $e');
       _toast('Failed to assign plan');
@@ -2032,6 +2066,14 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           iconColor: AppTheme.inkSoft,
           label: m.status == 'frozen' ? 'Remove hold' : 'Hold membership',
           onTap: _busy ? null : _toggleHold,
+        ),
+      if (canEditMembership && m.currentMembership?.isDayPass == true)
+        _ActionRow(
+          icon: AppIcons.creditCardActive,
+          iconBg: AppTheme.accentSoft,
+          iconColor: AppTheme.accent,
+          label: 'Convert to full plan',
+          onTap: _busy ? null : () => _managePlan(convert: true),
         ),
       if (canEditMembership)
         _ActionRow(
@@ -2722,7 +2764,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
       if (mounted) {
         final msg = e.code == '23505'
             ? 'A member with this ID already exists.'
-            : 'Failed to save. Please try again.';
+            : duplicatePhoneMessage(e) ?? 'Failed to save. Please try again.';
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));

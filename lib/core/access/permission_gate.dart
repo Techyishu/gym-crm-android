@@ -20,6 +20,11 @@ class PermissionGate extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final permissions = ref.watch(staffPermissionsProvider);
     return permissions.when(
+      // Coming back to the app makes the shell re-read the staff profile,
+      // which reloads the permissions behind it. Without this the gated
+      // screen was swapped for a full-screen spinner on every resume; only
+      // the very first load (no value yet) should show one.
+      skipLoadingOnReload: true,
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (_, _) => NoAccessScreen(feature: module.label),

@@ -23,7 +23,7 @@ import '../features/staff/onboarding/first_setup_screen.dart';
 import '../features/staff/dashboard/dashboard_screen.dart';
 import '../features/staff/members/members_screen.dart';
 import '../features/staff/members/member_detail_screen.dart';
-import '../features/staff/members/upcoming_payments_screen.dart';
+import '../features/staff/members/payments_due_screen.dart';
 import '../features/staff/billing/billing_screen.dart';
 import '../features/staff/paywall/paywall_screen.dart';
 import '../features/staff/classes/classes_screen.dart';
@@ -386,8 +386,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/staff/upcoming-payments',
         builder: (_, state) => PermissionGate(
           module: GymModule.payments,
-          child: UpcomingPaymentsScreen(
-            initialTabExpiring: state.uri.queryParameters['tab'] == 'expiring',
+          child: PaymentsDueScreen(
+            initialComing: state.uri.queryParameters['tab'] == 'expiring',
           ),
         ),
       ),

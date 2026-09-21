@@ -11,6 +11,7 @@ import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../core/utils/validators.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
 
@@ -41,6 +42,8 @@ final _importPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
       .select('id, name, price, billing_interval, billing_interval_months')
       .eq('gym_id', gymId)
       .eq('is_active', true)
+      // Day passes don't renew, so they make no sense for a bulk import.
+      .isFilter('billing_interval_days', null)
       .order('price');
   return (data as List).cast<Map<String, dynamic>>();
 });
@@ -326,7 +329,8 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           // A plan-limit rejection fails the whole batch, not just the row that
           // crossed the cap — say so, or the importer reports a bare "Insert
           // failed" against 100 rows and the owner has no idea why.
-          final reason = planLimitMessage(e) ?? 'Insert failed';
+          final reason =
+              planLimitMessage(e) ?? duplicatePhoneMessage(e) ?? 'Insert failed';
           for (var j = 0; j < batch.length; j++) {
             errors.add(
               _Invalid(i + j + 2, batch[j]['email'] as String, reason),

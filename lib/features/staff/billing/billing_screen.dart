@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/day_pass.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/theme/app_theme.dart';
@@ -123,7 +124,7 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     client
         .from('members')
         .select(
-          'id, first_name, last_name, phone, next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
+          'id, first_name, last_name, phone, next_payment_date, memberships(status, discount_amount, billing_interval_days, membership_plans(price, name))',
         )
         .eq('gym_id', gymId)
         .not('status', 'eq', 'cancelled')
@@ -240,6 +241,8 @@ double _activePlanPrice(Map<String, dynamic> member) {
   for (final m in memberships) {
     final map = (m as Map).cast<String, dynamic>();
     if (map['status'] != 'active') continue;
+    // A day pass never renews, so it has no projected due.
+    if (map['billing_interval_days'] != null) return 0;
     final plan = map['membership_plans'] as Map?;
     if (plan == null || plan['price'] == null) continue;
     final listPrice = (plan['price'] as num).toDouble();
@@ -451,6 +454,28 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   // Sub-filter inside the Dues tab: 'overdue' | 'week' | 'all'.
   String _bucket = 'overdue';
 
+  // Name search across Dues / Payments / Invoices (client-side over the feed).
+  bool _searching = false;
+  String _query = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() => setState(() {
+    _searching = !_searching;
+    if (!_searching) {
+      _query = '';
+      _searchCtrl.clear();
+    }
+  });
+
+  bool _matches(_TxnItem t) =>
+      _query.isEmpty || t.name.toLowerCase().contains(_query);
+
   @override
   Widget build(BuildContext context) {
     final feed = ref.watch(_billingFeedProvider);
@@ -467,24 +492,63 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Money',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.ink,
-                        letterSpacing: -0.3,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _searching
+                              ? TextField(
+                                  controller: _searchCtrl,
+                                  autofocus: true,
+                                  textInputAction: TextInputAction.search,
+                                  onChanged: (v) => setState(
+                                    () => _query = v.trim().toLowerCase(),
+                                  ),
+                                  decoration: const InputDecoration(
+                                    hintText: 'Search by member name',
+                                    prefixIcon: Icon(AppIcons.search, size: 18),
+                                    isDense: true,
+                                  ),
+                                )
+                              : const Text(
+                                  'Money',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.ink,
+                                    letterSpacing: -0.3,
+                                  ),
+                                ),
+                        ),
+                        const SizedBox(width: 8),
+                        Semantics(
+                          button: true,
+                          label: _searching ? 'Close search' : 'Search',
+                          child: GestureDetector(
+                            onTap: _toggleSearch,
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: AppTheme.surface,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Icon(
+                                _searching ? AppIcons.close : AppIcons.search,
+                                size: 20,
+                                color: AppTheme.ink,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 14),
                     feed.when(
                       loading: () => const _BalanceCardSkeleton(),
                       error: (_, _) => const _BalanceCardSkeleton(),
                       data: (data) => _BalanceCard(
-                        dueTotal: data.dueTotal,
-                        dueMembers: data.dueMembers,
-                        collectedMonth:
-                            data.collected[BillingPeriod.month] ?? 0,
+                        data: data,
                         onDue: () => setState(() {
                           _tab = 0;
                           _bucket = 'overdue';
@@ -558,7 +622,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   // ── Dues queue ────────────────────────────────────────────────────────────
 
   Widget _duesTab(BuildContext context, _BillingFeed data) {
-    final all = data.items.where((t) => t.isDue).toList()
+    final all = data.items.where((t) => t.isDue && _matches(t)).toList()
       ..sort((a, b) => a.sortKey.compareTo(b.sortKey));
     final overdue = all.where((t) => t.isOverdue).toList();
     final week = all.where((t) => t.isUpcoming).toList();
@@ -575,29 +639,39 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
       children: [
-        Row(
-          children: [
-            PillChip(
-              label: 'Overdue ${overdue.length}',
-              selected: _bucket == 'overdue',
-              onTap: () => setState(() => _bucket = 'overdue'),
-            ),
-            const SizedBox(width: 8),
-            PillChip(
-              label: 'Due this week ${week.length}',
-              selected: _bucket == 'week',
-              onTap: () => setState(() => _bucket = 'week'),
-            ),
-            const SizedBox(width: 8),
-            PillChip(
-              label: 'All ${all.length}',
-              selected: _bucket == 'all',
-              onTap: () => setState(() => _bucket = 'all'),
-            ),
-          ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _DuesChip(
+                label: 'Overdue ${overdue.length}',
+                dot: overdue.isNotEmpty,
+                selected: _bucket == 'overdue',
+                onTap: () => setState(() => _bucket = 'overdue'),
+              ),
+              const SizedBox(width: 6),
+              _DuesChip(
+                label: 'This week ${week.length}',
+                selected: _bucket == 'week',
+                onTap: () => setState(() => _bucket = 'week'),
+              ),
+              const SizedBox(width: 6),
+              _DuesChip(
+                label: 'All ${all.length}',
+                selected: _bucket == 'all',
+                onTap: () => setState(() => _bucket = 'all'),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 10),
-        if (rows.isEmpty)
+        const SizedBox(height: 12),
+        if (rows.isEmpty && _query.isNotEmpty)
+          StateMessage(
+            icon: AppIcons.search,
+            title: 'No matches',
+            body: 'No dues for "${_searchCtrl.text.trim()}" in this view.',
+          )
+        else if (rows.isEmpty)
           StateMessage(
             icon: AppIcons.checkCircle,
             tint: AppTheme.statusActive,
@@ -629,9 +703,12 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     // Payments = money already collected. Invoices = the invoice records
     // themselves, i.e. open/partial bills (projected renewals have no
     // invoice row yet, so they only ever appear in Dues).
-    final items = _tab == 1
-        ? data.items.where((t) => !t.isDue).toList()
-        : data.items.where((t) => t.isDue && t.invoiceId.isNotEmpty).toList();
+    final items =
+        (_tab == 1
+                ? data.items.where((t) => !t.isDue)
+                : data.items.where((t) => t.isDue && t.invoiceId.isNotEmpty))
+            .where(_matches)
+            .toList();
 
     final canAdd = ref.watch(
       gymPermissionProvider((GymModule.payments, GymAction.add)),
@@ -666,7 +743,13 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
           ),
           const SizedBox(height: 12),
         ],
-        if (items.isEmpty)
+        if (items.isEmpty && _query.isNotEmpty)
+          StateMessage(
+            icon: AppIcons.search,
+            title: 'No matches',
+            body: 'Nothing for "${_searchCtrl.text.trim()}" in this tab.',
+          )
+        else if (items.isEmpty)
           StateMessage(
             icon: AppIcons.receipt,
             title: 'Nothing here yet',
@@ -748,79 +831,199 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 
 // ── Balance Card (banking-app hero) ─────────────────────────────────────────
 
-class _BalanceCard extends StatelessWidget {
-  final double dueTotal;
-  final int dueMembers;
-  final double collectedMonth;
+// The hero number switches between Today / Week / Month (the feed already
+// computes all three, each against the window just before it); To collect and
+// the collection rate sit underneath and don't change with the period.
+class _BalanceCard extends StatefulWidget {
+  final _BillingFeed data;
   final VoidCallback onDue;
-  const _BalanceCard({
-    required this.dueTotal,
-    required this.dueMembers,
-    required this.collectedMonth,
-    required this.onDue,
-  });
+  const _BalanceCard({required this.data, required this.onDue});
+
+  @override
+  State<_BalanceCard> createState() => _BalanceCardState();
+}
+
+class _BalanceCardState extends State<_BalanceCard> {
+  BillingPeriod _period = BillingPeriod.month;
+
+  static const _coral = Color(0xFFF2A79A); // negative change on the dark card
 
   @override
   Widget build(BuildContext context) {
-    final collectionRate = (collectedMonth + dueTotal) > 0
-        ? (collectedMonth / (collectedMonth + dueTotal) * 100).round()
+    final data = widget.data;
+    final collected = data.collected[_period] ?? 0;
+    final growth = data.growthPct[_period];
+    final monthCollected = data.collected[BillingPeriod.month] ?? 0;
+    final rate = (monthCollected + data.dueTotal) > 0
+        ? (monthCollected / (monthCollected + data.dueTotal) * 100).round()
         : null;
+    final label = switch (_period) {
+      BillingPeriod.today => 'COLLECTED · TODAY',
+      BillingPeriod.week => 'COLLECTED · THIS WEEK',
+      BillingPeriod.month =>
+        'COLLECTED · ${DateFormat('MMMM').format(DateTime.now()).toUpperCase()}',
+    };
+    final vs = switch (_period) {
+      BillingPeriod.today => 'vs yesterday',
+      BillingPeriod.week => 'vs last week',
+      BillingPeriod.month => 'vs last month',
+    };
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: AppTheme.darkCardDecoration(radius: 18),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: GestureDetector(
-                onTap: onDue,
-                behavior: HitTestBehavior.opaque,
-                child: _HeroFigure(
-                  label: 'TO COLLECT',
-                  value: formatCurrency(dueTotal),
-                  valueColor: AppTheme.onDark,
-                  caption: '$dueMembers member${dueMembers == 1 ? '' : 's'}',
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+      decoration: AppTheme.darkCardDecoration(radius: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: AppTheme.darkCard2,
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Row(
+              children: [
+                for (final p in BillingPeriod.values)
+                  Expanded(
+                    child: Semantics(
+                      button: true,
+                      selected: _period == p,
+                      label: switch (p) {
+                        BillingPeriod.today => 'Today',
+                        BillingPeriod.week => 'This week',
+                        BillingPeriod.month => 'This month',
+                      },
+                      child: GestureDetector(
+                        onTap: () => setState(() => _period = p),
+                        behavior: HitTestBehavior.opaque,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          height: 32,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _period == p
+                                ? Colors.white
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                          child: Text(
+                            switch (p) {
+                              BillingPeriod.today => 'Today',
+                              BillingPeriod.week => 'Week',
+                              BillingPeriod.month => 'Month',
+                            },
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _period == p
+                                  ? AppTheme.darkCard
+                                  : AppTheme.onDarkSoft,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+              color: AppTheme.onDarkSoft,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    formatCurrency(collected),
+                    style: AppTheme.numberStyle(
+                      fontSize: 32,
+                      color: AppTheme.onDark,
+                    ),
+                  ),
                 ),
               ),
-            ),
-            const VerticalDivider(width: 29, color: AppTheme.darkCard2),
-            Expanded(
-              child: _HeroFigure(
-                label:
-                    'COLLECTED · ${DateFormat('MMM').format(DateTime.now()).toUpperCase()}',
-                value: formatCurrency(collectedMonth),
-                valueColor: AppTheme.mintOnDark,
-                caption: collectionRate != null
-                    ? '$collectionRate% collection rate'
-                    : 'No dues outstanding',
+              if (growth != null) ...[
+                const SizedBox(width: 10),
+                Text(
+                  '${growth >= 0 ? '▲' : '▼'} ${growth.abs()}% $vs',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: growth >= 0 ? AppTheme.mintOnDark : _coral,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1, color: AppTheme.darkCard2),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: widget.onDue,
+                  behavior: HitTestBehavior.opaque,
+                  child: _HeroStat(
+                    label: 'TO COLLECT',
+                    value: formatCurrency(data.dueTotal),
+                    valueColor: AppTheme.onDark,
+                    caption:
+                        '${data.dueMembers} member${data.dueMembers == 1 ? '' : 's'}',
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
+              Expanded(
+                child: _HeroStat(
+                  label: 'COLLECTION RATE',
+                  value: rate != null ? '$rate%' : '—',
+                  valueColor: AppTheme.mintOnDark,
+                  caption: rate != null ? 'this month' : 'nothing billed yet',
+                  alignEnd: true,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-/// One side of the money hero: kicker, figure, one line of context.
-class _HeroFigure extends StatelessWidget {
+/// A small figure under the hero: kicker, value, one line of context.
+class _HeroStat extends StatelessWidget {
   final String label;
   final String value;
   final Color valueColor;
   final String caption;
-  const _HeroFigure({
+  final bool alignEnd;
+  const _HeroStat({
     required this.label,
     required this.value,
     required this.valueColor,
     required this.caption,
+    this.alignEnd = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: alignEnd
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -834,19 +1037,19 @@ class _HeroFigure extends StatelessWidget {
             color: AppTheme.onDarkSoft,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 3),
         FittedBox(
           fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
+          alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
           child: Text(
             value,
-            style: AppTheme.numberStyle(fontSize: 24, color: valueColor),
+            style: AppTheme.numberStyle(fontSize: 19, color: valueColor),
           ),
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 2),
         Text(
           caption,
-          maxLines: 2,
+          maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 12, color: AppTheme.onDarkSoft),
         ),
@@ -861,8 +1064,8 @@ class _BalanceCardSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 108,
-      decoration: AppTheme.darkCardDecoration(radius: 18),
+      height: 190,
+      decoration: AppTheme.darkCardDecoration(radius: 20),
     );
   }
 }
@@ -954,19 +1157,43 @@ class _TxnCard extends StatelessWidget {
 
 // ── Dues queue row (Collect) ────────────────────────────────────────────────
 
+// One line per member, same shape as the Payments Due screen: the amount and
+// how late (or how soon) sit under the name, and Collect is right beside it
+// instead of a full-width bar underneath.
 class _DueRow extends StatelessWidget {
   final _TxnItem item;
   final VoidCallback? onCollect;
   const _DueRow({required this.item, required this.onCollect});
 
+  String get _when {
+    if (item.overdueDays > 0) {
+      final d = item.overdueDays;
+      return '$d day${d == 1 ? '' : 's'} late';
+    }
+    if (item.isUpcoming) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final due = DateTime(
+        item.sortKey.year,
+        item.sortKey.month,
+        item.sortKey.day,
+      );
+      final d = due.difference(today).inDays;
+      return d == 1 ? 'tomorrow' : 'in $d days';
+    }
+    return 'due today';
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    // Upcoming rows read quietly; overdue and due-today keep their colour.
+    final tone = item.isUpcoming ? AppTheme.inkSoft : item.color;
+    return LayoutBuilder(
+      builder: (context, c) {
+        final roomy = c.maxWidth >= 400;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+          child: Row(
             children: [
               InitialsAvatar(name: item.name, size: 40),
               const SizedBox(width: 12),
@@ -985,37 +1212,145 @@ class _DueRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      item.duesLine,
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          if (item.amount > 0) ...[
+                            TextSpan(
+                              text: formatCurrency(item.amount),
+                              style: AppTheme.numberStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                                color: tone,
+                              ),
+                            ),
+                            const TextSpan(text: ' · '),
+                          ],
+                          TextSpan(text: _when),
+                          if (item.isPartial)
+                            const TextSpan(text: ' · partly paid'),
+                          if (roomy && item.planName.isNotEmpty)
+                            TextSpan(text: ' · ${item.planName}'),
+                        ],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.inkSoft,
+                        fontWeight: FontWeight.w600,
+                        color: tone,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              if (onCollect != null) ...[
+                const SizedBox(width: 8),
+                _DueCollectPill(
+                  early: item.isUpcoming,
+                  roomy: roomy,
+                  onTap: onCollect!,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DueCollectPill extends StatelessWidget {
+  final bool early;
+  final bool roomy;
+  final VoidCallback onTap;
+  const _DueCollectPill({
+    required this.early,
+    required this.roomy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = early ? (roomy ? 'Collect early' : 'Early') : 'Collect';
+    return Tooltip(
+      message: early ? 'Collect early' : 'Collect payment',
+      child: Material(
+        color: early ? AppTheme.surface2 : AppTheme.accent,
+        borderRadius: BorderRadius.circular(99),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(99),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: early ? AppTheme.ink : Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DuesChip extends StatelessWidget {
+  final String label;
+  final bool dot;
+  final bool selected;
+  final VoidCallback onTap;
+  const _DuesChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.dot = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.ink : AppTheme.surface,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (dot) ...[
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: AppTheme.statusDanger,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
               Text(
-                formatCurrency(item.amount),
-                style: AppTheme.numberStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: item.color,
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? Colors.white : AppTheme.ink,
                 ),
               ),
             ],
           ),
-          if (onCollect != null) ...[
-            const SizedBox(height: 12),
-            WideActionButton(
-              label: item.isUpcoming ? 'Collect early' : 'Collect',
-              onTap: onCollect,
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -1843,6 +2178,32 @@ class _PlansBody extends ConsumerWidget {
                 ),
               ),
             ),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () => showAdaptiveSheet(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                builder: (_) => const PlanFormSheet(isPass: true),
+              ).then((_) => container.invalidate(_plansProvider)),
+              child: DottedBorderBox(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(AppIcons.add, size: 18, color: AppTheme.accent),
+                    SizedBox(width: 6),
+                    Text(
+                      'Add day pass',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.accent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1862,7 +2223,10 @@ class _PlanCard extends StatelessWidget {
     final features = List<String>.from(plan['features'] ?? []);
     final interval = plan['billing_interval'] as String;
     final months = plan['billing_interval_months'] as int?;
-    final intervalLabel = interval == 'custom' && months != null
+    final days = plan['billing_interval_days'] as int?;
+    final intervalLabel = days != null
+        ? (days == 1 ? '1 day' : '$days days')
+        : interval == 'custom' && months != null
         ? '$months months'
         : interval;
     final isActive = plan['is_active'] as bool? ?? true;
@@ -1975,7 +2339,10 @@ Future<void> showPlanFormSheet(BuildContext context) => showAdaptiveSheet<void>(
 
 class PlanFormSheet extends ConsumerStatefulWidget {
   final Map<String, dynamic>? plan;
-  const PlanFormSheet({super.key, this.plan});
+  // Day pass: a 1-29 day plan that never renews (see day_pass.dart). Editing
+  // an existing pass turns this on by itself.
+  final bool isPass;
+  const PlanFormSheet({super.key, this.plan, this.isPass = false});
 
   @override
   ConsumerState<PlanFormSheet> createState() => _PlanFormSheetState();
@@ -1987,6 +2354,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
   late final TextEditingController _priceCtrl;
   late final TextEditingController _maxClassesCtrl;
   late final TextEditingController _monthsCtrl;
+  late final TextEditingController _daysCtrl;
   late final TextEditingController _featureCtrl;
 
   String _interval = 'monthly';
@@ -1995,6 +2363,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
   bool _loading = false;
 
   bool get _isEdit => widget.plan != null;
+  bool get _isPass => widget.isPass || isDayPassPlan(widget.plan);
 
   @override
   void initState() {
@@ -2010,6 +2379,9 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
     _monthsCtrl = TextEditingController(
       text: p?['billing_interval_months']?.toString() ?? '',
     );
+    _daysCtrl = TextEditingController(
+      text: p?['billing_interval_days']?.toString() ?? '',
+    );
     _featureCtrl = TextEditingController();
     _interval = p?['billing_interval'] as String? ?? 'monthly';
     _isActive = p?['is_active'] as bool? ?? true;
@@ -2022,6 +2394,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
     _priceCtrl.dispose();
     _maxClassesCtrl.dispose();
     _monthsCtrl.dispose();
+    _daysCtrl.dispose();
     _featureCtrl.dispose();
     super.dispose();
   }
@@ -2041,6 +2414,45 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
 
     try {
       final client = Supabase.instance.client;
+
+      if (_isPass) {
+        // create_membership_plan_secure only knows months, so a pass is
+        // written straight to the table; RLS still requires Memberships:Add
+        // / Edit and the table's check constraint enforces 1-29 days.
+        final passData = <String, dynamic>{
+          'name': _nameCtrl.text.trim(),
+          'price': double.parse(_priceCtrl.text.trim()),
+          'billing_interval_days': int.parse(_daysCtrl.text.trim()),
+          'features': _features,
+          if (_maxClassesCtrl.text.trim().isNotEmpty)
+            'max_classes': int.parse(_maxClassesCtrl.text.trim()),
+          'is_active': _isActive,
+        };
+        Map<String, dynamic>? createdPass;
+        if (_isEdit) {
+          await client
+              .from('membership_plans')
+              .update(passData)
+              .eq('id', widget.plan!['id']);
+        } else {
+          createdPass = Map<String, dynamic>.from(
+            await client
+                    .from('membership_plans')
+                    .insert({
+                      ...passData,
+                      'gym_id': await ref.read(gymIdProvider.future),
+                      'billing_interval': 'custom',
+                    })
+                    .select()
+                    .single()
+                as Map,
+          );
+          unawaited(AppEvents.planCreated());
+        }
+        if (mounted) Navigator.pop(context, createdPass);
+        return;
+      }
+
       final data = <String, dynamic>{
         'name': _nameCtrl.text.trim(),
         'price': double.parse(_priceCtrl.text.trim()),
@@ -2144,7 +2556,11 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SheetHeader(title: _isEdit ? 'Edit plan' : 'New plan'),
+              SheetHeader(
+                title: _isPass
+                    ? (_isEdit ? 'Edit day pass' : 'New day pass')
+                    : (_isEdit ? 'Edit plan' : 'New plan'),
+              ),
               const SizedBox(height: 18),
               const FieldLabel('Plan name'),
               TextFormField(
@@ -2183,7 +2599,22 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const FieldLabel('Duration'),
+                        FieldLabel(
+                          _isPass ? 'Days (1-$maxDayPassDays)' : 'Duration',
+                        ),
+                        if (_isPass)
+                          TextFormField(
+                            controller: _daysCtrl,
+                            keyboardType: TextInputType.number,
+                            validator: (v) {
+                              final n = int.tryParse(v?.trim() ?? '');
+                              if (n == null || n < 1 || n > maxDayPassDays) {
+                                return '1 to $maxDayPassDays days';
+                              }
+                              return null;
+                            },
+                          )
+                        else
                         DropdownButtonFormField<String>(
                           value: _interval,
                           items: const [
@@ -2215,7 +2646,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                   ),
                 ],
               ),
-              if (_interval == 'custom') ...[
+              if (!_isPass && _interval == 'custom') ...[
                 const SizedBox(height: 14),
                 const FieldLabel('Duration (months)'),
                 TextFormField(

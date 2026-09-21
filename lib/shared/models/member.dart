@@ -111,6 +111,8 @@ class Membership {
   final String? endsAt;
   final MembershipPlan? plan;
   final double discountAmount;
+  // Set only for day passes (non-renewing); copied from the plan on assign.
+  final int? billingIntervalDays;
 
   const Membership({
     required this.id,
@@ -121,9 +123,11 @@ class Membership {
     this.endsAt,
     this.plan,
     this.discountAmount = 0,
+    this.billingIntervalDays,
   });
 
   bool get hasDiscount => discountAmount > 0;
+  bool get isDayPass => billingIntervalDays != null;
 
   factory Membership.fromJson(Map<String, dynamic> j) {
     final id = j['id'] as String?;
@@ -138,6 +142,7 @@ class Membership {
       startsAt: j['starts_at'] as String? ?? '',
       endsAt: j['ends_at'] as String?,
       discountAmount: (j['discount_amount'] as num?)?.toDouble() ?? 0.0,
+      billingIntervalDays: j['billing_interval_days'] as int?,
       plan: j['membership_plans'] != null
           ? MembershipPlan.fromJson(
               j['membership_plans'] as Map<String, dynamic>,
@@ -154,6 +159,7 @@ class MembershipPlan {
   final double price;
   final String billingInterval;
   final int? billingIntervalMonths;
+  final int? billingIntervalDays;
   final List<String> features;
   final int? maxClasses;
   final bool isActive;
@@ -165,6 +171,7 @@ class MembershipPlan {
     required this.price,
     required this.billingInterval,
     this.billingIntervalMonths,
+    this.billingIntervalDays,
     required this.features,
     this.maxClasses,
     required this.isActive,
@@ -197,6 +204,7 @@ class MembershipPlan {
       price: (j['price'] as num?)?.toDouble() ?? 0.0,
       billingInterval: j['billing_interval'] as String? ?? 'monthly',
       billingIntervalMonths: j['billing_interval_months'] as int?,
+      billingIntervalDays: j['billing_interval_days'] as int?,
       features: List<String>.from(j['features'] ?? []),
       maxClasses: j['max_classes'] as int?,
       isActive: j['is_active'] as bool? ?? false,

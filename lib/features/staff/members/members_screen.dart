@@ -10,6 +10,7 @@ import '../../../core/access/role_access.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/day_pass.dart';
 import '../../../core/billing/plan_limits.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/services/data_refresh.dart';
@@ -84,7 +85,9 @@ final _memberPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
   final client = Supabase.instance.client;
   final data = await client
       .from('membership_plans')
-      .select('id, name, price, billing_interval, billing_interval_months')
+      .select(
+        'id, name, price, billing_interval, billing_interval_months, billing_interval_days',
+      )
       .eq('gym_id', gymId)
       .eq('is_active', true)
       .order('price');
@@ -116,6 +119,9 @@ String _planPriceLabel(Map<String, dynamic> p) {
     'biannual': '6mo',
     'annual': 'yr',
   };
+  if (p['billing_interval_days'] != null) {
+    return '${formatCurrency(price)} / ${p['billing_interval_days']}d';
+  }
   final unit = interval == 'custom'
       ? '${p['billing_interval_months'] ?? ''}mo'
       : (short[interval] ?? interval);
@@ -1500,6 +1506,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   final _customIdCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _paidAmountCtrl = TextEditingController();
+  // True after "Full amount" is tapped, until the amount is edited by hand.
+  // While it's on, the collected amount follows plan / discount changes.
+  bool _collectFull = false;
   final _emergencyNameCtrl = TextEditingController();
   final _emergencyPhoneCtrl = TextEditingController();
 
@@ -1511,6 +1520,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   String? _nextPaymentDate;
   String? _planId;
   int? _planBillingIntervalMonths;
+  int? _planDays; // set for day passes only
   double _planPrice = 0;
   double _planDiscountAmount = 0;
   String _paymentMethod = 'cash';
@@ -1560,8 +1570,11 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           'biannual': 6,
           'annual': 12,
         }[plan['billing_interval']];
+    _planDays = plan['billing_interval_days'] as int?;
     _planPrice = (plan['price'] as num?)?.toDouble() ?? 0;
-    _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
+    // Nothing is pre-filled: "Amount collected" starts empty so the owner
+    // never has to delete a number that looks like the price.
+    if (_collectFull) _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
   }
 
   // Gym has no plans yet — let staff make one without losing the half-filled
@@ -1724,10 +1737,13 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
       if (nextPaymentDate == null) {
         final joined =
             _joinedAt ?? DateTime.now().toIso8601String().split('T').first;
-        nextPaymentDate = advancePaymentDate(
-          joined,
-          months: billingIntervalMonths,
-        );
+        // A day pass starts today, whatever the join date says.
+        nextPaymentDate = _planDays != null
+            ? dayPassEndDate(
+                DateTime.now().toIso8601String().split('T').first,
+                _planDays!,
+              )
+            : advancePaymentDate(joined, months: billingIntervalMonths);
       }
 
       final inserted = await client
@@ -1781,6 +1797,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         'starts_at': DateTime.now().toUtc().toIso8601String(),
         'ends_at': null,
         'discount_amount': _planDiscountAmount,
+        if (_planDays != null) 'billing_interval_days': _planDays,
       });
 
       // Batch is optional and must never cost us the member: the rows above
@@ -1857,7 +1874,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
       if (mounted) {
         final msg = (e is PostgrestException && e.code == '23505')
             ? 'Member ID "${_customIdCtrl.text.trim()}" is already in use. Please use a different one.'
-            : planLimitMessage(e) ?? 'Failed to add member. Please try again.';
+            : duplicatePhoneMessage(e) ??
+                  planLimitMessage(e) ??
+                  'Failed to add member. Please try again.';
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
@@ -2194,34 +2213,27 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
       );
     }
+    // Two read-only totals and ONE input. Payable and Due are computed;
+    // the owner only ever types what was actually collected.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _FieldPair(
-          TextFormField(
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: 'Discount',
-              hintText: '0',
-              prefixText: '$currencySymbol ',
-            ),
-            onChanged: (v) {
-              final parsed = double.tryParse(v.trim()) ?? 0.0;
-              setState(() {
-                _planDiscountAmount = parsed < 0 ? 0 : parsed;
+        TextFormField(
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Discount',
+            hintText: '0',
+            prefixText: '$currencySymbol ',
+          ),
+          onChanged: (v) {
+            final parsed = double.tryParse(v.trim()) ?? 0.0;
+            setState(() {
+              _planDiscountAmount = parsed < 0 ? 0 : parsed;
+              if (_collectFull) {
                 _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
-              });
-            },
-          ),
-          TextFormField(
-            controller: _paidAmountCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: 'Amount paid',
-              prefixText: '$currencySymbol ',
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
+              }
+            });
+          },
         ),
         const SizedBox(height: 4),
         const Text(
@@ -2229,52 +2241,67 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           style: TextStyle(fontSize: 11, color: AppTheme.inkSoft),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final m in const [
-              ('cash', 'Cash'),
-              ('upi', 'UPI'),
-              ('card', 'Card'),
-              ('bank_transfer', 'Bank'),
-            ])
-              SelectChip(
-                label: m.$2,
-                selected: _paymentMethod == m.$1,
-                onTap: () => setState(() => _paymentMethod = m.$1),
-              ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppTheme.background,
-            borderRadius: BorderRadius.circular(12),
+        _FieldPair(
+          _AmountTile(label: 'Amount payable', value: formatCurrency(_planAmount)),
+          _AmountTile(
+            label: 'Due amount',
+            value: formatCurrency(_dueAmount),
+            valueColor: _dueAmount > 0
+                ? AppTheme.statusDanger
+                : AppTheme.statusActive,
           ),
-          child: Column(
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _paidAmountCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          decoration: InputDecoration(
+            labelText: 'Amount collected',
+            hintText: '0',
+            prefixText: '$currencySymbol ',
+          ),
+          validator: (v) {
+            final text = v?.trim() ?? '';
+            if (text.isEmpty) return null;
+            final amount = double.tryParse(text);
+            if (amount == null || amount < 0) return 'Enter a valid amount';
+            if (amount > _planAmount) return 'More than the amount payable';
+            return null;
+          },
+          onChanged: (_) => setState(() => _collectFull = false),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () => setState(() {
+              _collectFull = true;
+              _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
+            }),
+            child: const Text('Full amount'),
+          ),
+        ),
+        // The method only matters once money is actually being collected.
+        if (_paidAmount > 0) ...[
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              _SummaryLine(label: 'Plan', value: formatCurrency(_planPrice)),
-              if (_planDiscountAmount > 0)
-                _SummaryLine(
-                  label: 'Discount',
-                  value: '−${formatCurrency(_planDiscountAmount)}',
-                  valueColor: AppTheme.statusActive,
+              for (final m in const [
+                ('cash', 'Cash'),
+                ('upi', 'UPI'),
+                ('card', 'Card'),
+                ('bank_transfer', 'Bank'),
+              ])
+                SelectChip(
+                  label: m.$2,
+                  selected: _paymentMethod == m.$1,
+                  onTap: () => setState(() => _paymentMethod = m.$1),
                 ),
-              _SummaryLine(label: 'Paid', value: formatCurrency(_paidAmount)),
-              const Divider(height: 14, color: AppTheme.border),
-              _SummaryLine(
-                label: 'Outstanding',
-                value: formatCurrency(_dueAmount),
-                emphasis: true,
-                valueColor: _dueAmount > 0
-                    ? AppTheme.statusDanger
-                    : AppTheme.statusActive,
-              ),
             ],
           ),
-        ),
+        ],
       ],
     );
   }
@@ -2522,39 +2549,42 @@ class _PlanDropdown extends StatelessWidget {
   }
 }
 
-class _SummaryLine extends StatelessWidget {
+/// A read-only amount ("Amount payable" / "Due amount") — visibly not an input.
+class _AmountTile extends StatelessWidget {
   final String label;
   final String value;
-  final bool emphasis;
   final Color? valueColor;
-  const _SummaryLine({
+  const _AmountTile({
     required this.label,
     required this.value,
-    this.emphasis = false,
     this.valueColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: emphasis ? FontWeight.w800 : FontWeight.w600,
-                color: emphasis ? AppTheme.ink : AppTheme.inkSoft,
-              ),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.inkSoft,
             ),
           ),
+          const SizedBox(height: 4),
           Text(
             value,
             style: AppTheme.numberStyle(
-              fontSize: 13.5,
-              fontWeight: emphasis ? FontWeight.w800 : FontWeight.w700,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
               color: valueColor ?? AppTheme.ink,
             ),
           ),

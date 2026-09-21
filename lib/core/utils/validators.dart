@@ -1,3 +1,5 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 final _indianMobileRegex = RegExp(r'^[6-9]\d{9}$');
 
@@ -53,4 +55,15 @@ String? phoneWithCountryCode(String? v, {String dialCode = '91'}) {
   // Already carries the country code without the "+" (e.g. pasted "919812…").
   if (digits.length > 10 && digits.startsWith(dialCode)) return '+$digits';
   return '+$dialCode$digits';
+}
+
+/// A user-facing message when a write was rejected by the
+/// `members_no_duplicate_phone` trigger (block_duplicate_member_phone), or
+/// null if [error] is something else.
+String? duplicatePhoneMessage(Object error) {
+  if (error is! PostgrestException) return null;
+  if (!error.message.contains('phone number already exists in this gym')) {
+    return null;
+  }
+  return 'A member with this phone number already exists in this gym.';
 }

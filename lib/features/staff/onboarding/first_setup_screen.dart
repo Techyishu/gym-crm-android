@@ -438,7 +438,11 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Could not add this member. Please try again.');
+      setState(
+        () => _error =
+            duplicatePhoneMessage(e) ??
+            'Could not add this member. Please try again.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }

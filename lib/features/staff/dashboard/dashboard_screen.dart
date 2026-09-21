@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/collect_payment.dart';
+import '../../../core/billing/day_pass.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/billing/billing_access.dart';
 import '../settings/gym_branches_sheet.dart';
@@ -110,7 +111,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
       client
           .from('members')
           .select(
-            'id, first_name, last_name, phone, next_payment_date, avatar_url',
+            'id, first_name, last_name, phone, next_payment_date, avatar_url, memberships(status, billing_interval_days)',
           )
           .eq('gym_id', gymId)
           .eq('status', 'active')
@@ -237,7 +238,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'pendingRevenue': pendingRevenue,
     'monthRevenue': monthRevenue,
     'growthPct': growthPct,
-    'renewals': rows[4],
+    // A day pass ends instead of renewing, so it isn't a renewal due.
+    'renewals': rows[4].where((m) => !hasActiveDayPass(m)).toList(),
     'recentPaid': recentPaid,
     'todayCheckinsList': rows[6],
     'monthExpenses': sum(rows[8]),
