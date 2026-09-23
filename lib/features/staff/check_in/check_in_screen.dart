@@ -1987,9 +1987,12 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
     return Column(
       children: [
         Container(
-          color: AppTheme.surface,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          // color must live inside the decoration — passing both throws
+          // "Cannot provide both a color and a decoration" (the History
+          // screen showed "Something went wrong" in debug builds).
           decoration: const BoxDecoration(
+            color: AppTheme.surface,
             border: Border(bottom: BorderSide(color: AppTheme.border)),
           ),
           child: Column(

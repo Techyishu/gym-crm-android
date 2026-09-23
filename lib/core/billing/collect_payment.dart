@@ -59,6 +59,36 @@ Future<bool> confirmEarlyRenewalIfNeeded(
   return proceed ?? false;
 }
 
+/// Collecting an overdue renewal moves the next due date to start from today
+/// rather than the original (already-passed) due date, so staff aren't
+/// silently shorting the member's next cycle by however many days they were
+/// late. Surfaced here rather than left implicit in the date math.
+Future<bool> confirmOverdueRenewalIfNeeded(
+  BuildContext context, {
+  required String? nextPaymentDate,
+  bool settlingPartialInvoice = false,
+}) async {
+  if (settlingPartialInvoice) return true;
+  final date = paymentDate(nextPaymentDate);
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  if (date == null || !date.isBefore(today)) return true;
+  final days = today.difference(date).inDays;
+  final formatted = MaterialLocalizations.of(context).formatMediumDate(date);
+  final proceed = await showConfirmDialog(
+    context,
+    title: 'Renewal is overdue',
+    body:
+        'This renewal was due on $formatted ($days day${days == 1 ? '' : 's'} ago). '
+        "The next due date will be set starting from today, not the original date. "
+        'Continue?',
+    confirmLabel: 'Collect payment',
+    icon: AppIcons.schedule,
+    danger: false,
+  );
+  return proceed ?? false;
+}
+
 /// If [enteredAmount] is less than [dueAmount], confirms the remaining
 /// balance with the user before proceeding. Returns false if they cancel.
 /// Used by every "Collect Payment" screen so the confirmation reads the same

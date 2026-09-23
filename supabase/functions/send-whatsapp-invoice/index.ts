@@ -98,6 +98,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (invoiceEvent === 'paid' && inv.status !== 'paid') {
     return new Response('Invoice is not paid', { status: 409 })
   }
+  // Full payment collected in the same beat as invoice creation (e.g. paid
+  // in full on the add-member form) fires both triggers almost at once.
+  // Re-checking live status here — not the payload's stale intent — means
+  // whichever of the two calls loses the race just no-ops: the invoice is
+  // already paid, so the 'paid' event alone will notify the member.
+  if (invoiceEvent === 'generated' && inv.status === 'paid') {
+    return new Response('Invoice already paid; paid event will notify', { status: 200 })
+  }
 
   // Claim the allowance BEFORE sending. The RPC checks and decrements in one
   // atomic statement; doing it here in TypeScript let concurrent invocations

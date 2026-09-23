@@ -27,6 +27,11 @@ enum _Filter { all, overdue, today, coming }
 // bury today's and tomorrow's payments.
 const _collapsedOverdue = 5;
 
+// Overdue is a daily to-do list, not a churn report — a bill from a year ago
+// isn't something to chase today. Past this many days late, a due moves out
+// of Overdue; the old ones point to Members > Expired instead.
+const _recentOverdueDays = 7;
+
 // How far ahead the "coming" list reaches, and how many of those days get
 // their own header + day-strip cell (the rest are grouped as "Later").
 const _lookAheadDays = 30;
@@ -216,7 +221,12 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
   Widget _list(String gymId, List<_DueItem> items, bool canCollect) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final overdue = items.where((i) => i.days < 0).toList();
+    final overdue = items
+        .where((i) => i.days < 0 && i.days >= -_recentOverdueDays)
+        .toList();
+    final oldOverdue = items
+        .where((i) => i.days < -_recentOverdueDays)
+        .toList();
     final dueToday = items.where((i) => i.days == 0).toList();
     final coming = items.where((i) => i.days > 0).toList();
 
@@ -278,6 +288,10 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
               ),
             );
           }
+          if (oldOverdue.isNotEmpty) {
+            parts.add(_OldOverdueLink(count: oldOverdue.length));
+            parts.add(const SizedBox(height: 10));
+          }
           if (dueToday.isNotEmpty) {
             parts.add(
               group(
@@ -290,17 +304,32 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
           parts.addAll(_comingGroups(coming, today, group));
         case _Filter.overdue:
           if (overdue.isEmpty) {
+            // Nobody recent is overdue, but don't call it "up to date" when
+            // there are still old, unresolved dues sitting in Expired.
             parts.add(
-              const _EmptyNote(
-                icon: AppIcons.checkCircle,
-                title: 'No overdue payments',
-                sub: 'Everyone is up to date.',
-              ),
+              oldOverdue.isEmpty
+                  ? const _EmptyNote(
+                      icon: AppIcons.checkCircle,
+                      title: 'No overdue payments',
+                      sub: 'Everyone is up to date.',
+                    )
+                  : _EmptyNote(
+                      icon: AppIcons.history,
+                      title:
+                          'Nothing overdue in the last $_recentOverdueDays days',
+                      sub:
+                          '${oldOverdue.length} older due${oldOverdue.length == 1 ? '' : 's'} '
+                          "haven't been resolved — check Members > Expired.",
+                    ),
             );
           } else {
             parts.add(_OverdueBanner(items: overdue));
             parts.add(const SizedBox(height: 14));
             parts.add(group('OLDEST FIRST', overdue, tone: _Tone.overdue));
+          }
+          if (oldOverdue.isNotEmpty) {
+            parts.add(const SizedBox(height: 4));
+            parts.add(_OldOverdueLink(count: oldOverdue.length));
           }
         case _Filter.today:
           parts.add(
@@ -679,6 +708,59 @@ class _DayFilterBar extends StatelessWidget {
           ),
           TextButton(onPressed: onClear, child: const Text('Clear day')),
         ],
+      ),
+    );
+  }
+}
+
+// A due stuck past _recentOverdueDays isn't today's collections task
+// anymore — it points to the Members > Expired list instead of piling up
+// here forever.
+class _OldOverdueLink extends StatelessWidget {
+  final int count;
+  const _OldOverdueLink({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => context.go('/staff/members?status=expired'),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        child: Row(
+          children: [
+            const Icon(
+              AppIcons.history,
+              size: 16,
+              color: AppTheme.inkSoft,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '+$count more, over $_recentOverdueDays days late',
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.inkSoft,
+                ),
+              ),
+            ),
+            const Text(
+              'View expired members',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.accent,
+              ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(
+              AppIcons.chevronRight,
+              size: 14,
+              color: AppTheme.accent,
+            ),
+          ],
+        ),
       ),
     );
   }

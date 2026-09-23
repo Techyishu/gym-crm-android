@@ -11,6 +11,7 @@ import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/day_pass.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/billing/local_payment_guard.dart';
+import '../../../core/billing/to_collect.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/invoice_pdf.dart';
@@ -53,10 +54,6 @@ final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((
 // Period shown on the balance card's hero number.
 enum BillingPeriod { today, week, month }
 
-// "To collect" always shows overdue members plus anyone due within this
-// many days — no filter toggle, just one fixed window. Bounds how far past
-// today the dues/renewals queries fetch.
-const _collectWindowDays = 7;
 
 // Money dashboard: collected totals for today/week/month (each vs the same
 // elapsed-length window immediately before it), open due count, and a merged
@@ -93,7 +90,9 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
         )
         .eq('invoices.gym_id', gymId)
         .eq('status', 'succeeded')
-        .gte('created_at', startOfMonth.toIso8601String())
+        // toUtc(): without an offset the DB reads local midnight as UTC
+        // midnight and drops the first hours of the 1st (5.5h in IST).
+        .gte('created_at', startOfMonth.toUtc().toIso8601String())
         .order('created_at', ascending: false),
     // A partial invoice is a real outstanding balance and must always stay
     // visible, regardless of its renewal date. An untouched open invoice is
@@ -107,7 +106,7 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
         .eq('gym_id', gymId)
         .inFilter('status', ['open', 'partial'])
         .or(
-          'status.eq.partial,due_at.lt.${startOfToday.add(const Duration(days: _collectWindowDays + 1)).toIso8601String()}',
+          'status.eq.partial,due_at.lt.${startOfToday.add(const Duration(days: collectWindowDays + 1)).toUtc().toIso8601String()}',
         )
         .order('due_at'),
     // Wider-range, lightweight payments for the today/week/month sums.
@@ -116,27 +115,16 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
         .select('amount, created_at, invoices!inner(gym_id)')
         .eq('invoices.gym_id', gymId)
         .eq('status', 'succeeded')
-        .gte('created_at', statsFrom.toIso8601String()),
+        .gte('created_at', statsFrom.toUtc().toIso8601String()),
     // Members whose renewal falls due soon but don't have an open invoice
     // yet — Collect on these creates the invoice on the spot. Same
-    // _collectWindowDays cap as above and the same rule: only the overdue
+    // collectWindowDays cap as above and the same rule: only the overdue
     // subset feeds the "Amount due" figures.
-    client
-        .from('members')
-        .select(
-          'id, first_name, last_name, phone, next_payment_date, memberships(status, discount_amount, billing_interval_days, membership_plans(price, name))',
-        )
-        .eq('gym_id', gymId)
-        .not('status', 'eq', 'cancelled')
-        .lte(
-          'next_payment_date',
-          startOfToday
-              .add(const Duration(days: _collectWindowDays))
-              .toIso8601String()
-              .split('T')
-              .first,
-        )
-        .order('next_payment_date'),
+    renewingMembersQuery(
+      client,
+      gymId,
+      columns: 'first_name, last_name, phone, $collectMemberColumns',
+    ),
   ]);
 
   final payments = (results[0] as List).cast<Map<String, dynamic>>();
@@ -147,22 +135,19 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
       .cast<Map<String, dynamic>>()
       // A zero balance is not actionable. Showing it with a Collect button
       // makes the owner doubt every number on this page.
-      .where((invoice) => _remainingDue(invoice) > 0)
+      .where((invoice) => remainingDue(invoice) > 0)
       .toList();
   final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
   final renewingMembers = (results[3] as List).cast<Map<String, dynamic>>();
   final invoicedMemberIds = dues.map((d) => d['member_id']).toSet();
   final projected = renewingMembers.where(
-    (m) => !invoicedMemberIds.contains(m['id']) && _activePlanPrice(m) > 0,
+    (m) => !invoicedMemberIds.contains(m['id']) && activePlanPrice(m) > 0,
   );
-  bool isOverdueOrToday(DateTime? due) => due != null && !due.isAfter(now);
-  final overdueDues = dues.where(
-    (d) => isOverdueOrToday(DateTime.tryParse(d['due_at'] as String? ?? '')),
-  );
-  final overdueProjected = projected.where(
-    (m) => isOverdueOrToday(
-      DateTime.tryParse(m['next_payment_date'] as String? ?? ''),
-    ),
+  // Same rule the Home card uses — see to_collect.dart.
+  final toCollect = computeToCollect(
+    invoices: dues,
+    renewingMembers: renewingMembers,
+    now: now,
   );
 
   double sumBetween(DateTime from, DateTime to) => statsPayments
@@ -188,19 +173,6 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     for (final m in projected) _TxnItem.projected(m),
   ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
 
-  // "Amount due" and the overdue/member counts below deliberately use only
-  // the overdue-or-today subset, never the full (bucket-widened) dues/
-  // projected lists — otherwise the summary card would silently start
-  // counting members who aren't actually due yet again.
-  final invoicedTotal = overdueDues.fold<double>(
-    0,
-    (s, d) => s + _remainingDue(d),
-  );
-  final projectedTotal = overdueProjected.fold<double>(
-    0,
-    (s, m) => s + _activePlanPrice(m),
-  );
-  final overdueCount = overdueDues.length + overdueProjected.length;
 
   return _BillingFeed(
     collected: {
@@ -213,44 +185,59 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
       BillingPeriod.week: pctChange(collectedWeek, collectedPrevWeek),
       BillingPeriod.month: pctChange(collectedMonth, collectedPrevMonth),
     },
-    dueCount: overdueCount,
-    dueTotal: invoicedTotal + projectedTotal,
-    dueMembers:
-        overdueDues.map((d) => d['member_id']).toSet().length +
-        overdueProjected.length,
-    overdueCount: overdueCount,
+    dueCount: toCollect.items,
+    dueTotal: toCollect.total,
+    dueMembers: toCollect.members,
+    overdueCount: toCollect.items,
     items: items,
   );
 });
 
-// Remaining balance on an invoice row (as fetched with a joined 'payments'
-// list) — invoice amount minus whatever's already been collected against it.
-double _remainingDue(Map<String, dynamic> invoice) {
-  final amount = (invoice['amount'] as num?)?.toDouble() ?? 0;
-  final invPayments = (invoice['payments'] as List?) ?? const [];
-  final paid = invPayments
-      .where((p) => (p as Map)['status'] == 'succeeded')
-      .fold<double>(0, (s, p) => s + ((p as Map)['amount'] as num).toDouble());
-  return (amount - paid).clamp(0, amount);
+// Every succeeded payment inside a picked date range (local days, end day
+// inclusive) — the Custom view on the balance card and Payments tab.
+// ponytail: plain list fetch, capped by PostgREST's 1000-row limit; move the
+// total into an RPC if a gym ever records >1000 payments in one range.
+final _customPaymentsProvider =
+    FutureProvider.family<List<Map<String, dynamic>>, DateTimeRange>((
+      ref,
+      range,
+    ) async {
+      ref.watch(gymDataVersionProvider);
+      final gymId = await ref.watch(gymIdProvider.future);
+      final from = DateTime(
+        range.start.year,
+        range.start.month,
+        range.start.day,
+      );
+      final to = DateTime(range.end.year, range.end.month, range.end.day + 1);
+      final rows = await Supabase.instance.client
+          .from('payments')
+          .select(
+            'amount, method, created_at, invoice_id, invoices!inner(gym_id, members(first_name, last_name))',
+          )
+          .eq('invoices.gym_id', gymId)
+          .eq('status', 'succeeded')
+          .gte('created_at', from.toUtc().toIso8601String())
+          .lt('created_at', to.toUtc().toIso8601String())
+          .order('created_at', ascending: false);
+      return (rows as List).cast<Map<String, dynamic>>();
+    });
+
+double _sumAmounts(List<Map<String, dynamic>> rows) => rows.fold<double>(
+  0,
+  (s, p) => s + ((p['amount'] as num?)?.toDouble() ?? 0),
+);
+
+// "5 Sep – 18 Sep", with years when the range isn't in the current year.
+String _rangeLabel(DateTimeRange r) {
+  final thisYear = DateTime.now().year;
+  final fmt = DateFormat(
+    r.start.year == thisYear && r.end.year == thisYear ? 'd MMM' : 'd MMM yyyy',
+  );
+  if (DateUtils.isSameDay(r.start, r.end)) return fmt.format(r.start);
+  return '${fmt.format(r.start)} – ${fmt.format(r.end)}';
 }
 
-// Active plan price minus any per-member discount — same rule QuickCollectSheet
-// uses to autofill the amount when it creates the invoice on Collect.
-double _activePlanPrice(Map<String, dynamic> member) {
-  final memberships = (member['memberships'] as List?) ?? const [];
-  for (final m in memberships) {
-    final map = (m as Map).cast<String, dynamic>();
-    if (map['status'] != 'active') continue;
-    // A day pass never renews, so it has no projected due.
-    if (map['billing_interval_days'] != null) return 0;
-    final plan = map['membership_plans'] as Map?;
-    if (plan == null || plan['price'] == null) continue;
-    final listPrice = (plan['price'] as num).toDouble();
-    final discount = (map['discount_amount'] as num?)?.toDouble() ?? 0;
-    return (listPrice - discount).clamp(0, listPrice);
-  }
-  return 0;
-}
 
 class _BillingFeed {
   final Map<BillingPeriod, double> collected;
@@ -405,7 +392,7 @@ class _TxnItem {
       name: member != null
           ? '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim()
           : 'Unknown',
-      amount: _remainingDue(inv),
+      amount: remainingDue(inv),
       subtitle: inv['status'] == 'partial'
           ? 'Partially paid · ${s.subtitle}'
           : s.subtitle,
@@ -427,7 +414,7 @@ class _TxnItem {
       invoiceId: '',
       memberId: member['id'] as String?,
       name: '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim(),
-      amount: _activePlanPrice(member),
+      amount: activePlanPrice(member),
       subtitle: s.subtitle,
       color: s.color,
       sortKey: due ?? DateTime.now(),
@@ -476,9 +463,41 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   bool _matches(_TxnItem t) =>
       _query.isEmpty || t.name.toLowerCase().contains(_query);
 
+  // Set when the owner picks Custom on the balance card: the card shows that
+  // range's total and the Payments tab lists that range's payments.
+  DateTimeRange? _customRange;
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: today,
+      initialDateRange:
+          _customRange ??
+          DateTimeRange(
+            start: today.subtract(const Duration(days: 6)),
+            end: today,
+          ),
+      helpText: 'Select collection dates',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _customRange = picked;
+      _tab = 1; // show the payments that make up the total
+    });
+  }
+
+  void _clearCustomRange() => setState(() => _customRange = null);
+
   @override
   Widget build(BuildContext context) {
     final feed = ref.watch(_billingFeedProvider);
+    final customRange = _customRange;
+    final custom = customRange == null
+        ? null
+        : ref.watch(_customPaymentsProvider(customRange));
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -553,6 +572,10 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                           _tab = 0;
                           _bucket = 'overdue';
                         }),
+                        customRange: customRange,
+                        customTotal: custom?.whenData(_sumAmounts),
+                        onCustomTap: _pickCustomRange,
+                        onPresetTap: _clearCustomRange,
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -569,8 +592,10 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                     ? const _PlansBody()
                     : RefreshIndicator(
                         color: AppTheme.accent,
-                        onRefresh: () async =>
-                            ref.invalidate(_billingFeedProvider),
+                        onRefresh: () async {
+                          ref.invalidate(_billingFeedProvider);
+                          ref.invalidate(_customPaymentsProvider);
+                        },
                         child: feed.when(
                           loading: _loadingList,
                           error: (_, _) => ListView(
@@ -591,7 +616,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                           ),
                           data: (data) => _tab == 0
                               ? _duesTab(context, data)
-                              : _ledgerTab(context, data),
+                              : _ledgerTab(context, data, custom),
                         ),
                       ),
               ),
@@ -624,11 +649,24 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
   Widget _duesTab(BuildContext context, _BillingFeed data) {
     final all = data.items.where((t) => t.isDue && _matches(t)).toList()
       ..sort((a, b) => a.sortKey.compareTo(b.sortKey));
-    final overdue = all.where((t) => t.isOverdue).toList();
+    // Overdue is the daily to-do list, so it only holds what's still worth
+    // chasing today — anything stuck past collectWindowDays no longer
+    // inflates it. Partial dues is a separate, status-based view: everyone
+    // who paid something and still owes a balance, any age, so a partial
+    // payment never just disappears once it ages out of Overdue.
+    final overdue = all
+        .where((t) => t.isOverdue && t.overdueDays <= collectWindowDays)
+        .toList();
+    // Used only to word the empty state below — not a chip of its own.
+    final stuckOld = all
+        .where((t) => t.isOverdue && t.overdueDays > collectWindowDays)
+        .toList();
+    final partialDues = all.where((t) => t.isPartial).toList();
     final week = all.where((t) => t.isUpcoming).toList();
     final rows = switch (_bucket) {
       'overdue' => overdue,
       'week' => week,
+      'partial' => partialDues,
       _ => all,
     };
 
@@ -656,6 +694,16 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                 onTap: () => setState(() => _bucket = 'week'),
               ),
               const SizedBox(width: 6),
+              if (partialDues.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _DuesChip(
+                    label: 'Partial dues ${partialDues.length}',
+                    dot: true,
+                    selected: _bucket == 'partial',
+                    onTap: () => setState(() => _bucket = 'partial'),
+                  ),
+                ),
               _DuesChip(
                 label: 'All ${all.length}',
                 selected: _bucket == 'all',
@@ -670,6 +718,21 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             icon: AppIcons.search,
             title: 'No matches',
             body: 'No dues for "${_searchCtrl.text.trim()}" in this view.',
+          )
+        else if (rows.isEmpty && _bucket == 'overdue' && stuckOld.isNotEmpty)
+          // Nothing recent is overdue, but don't let that read as "all
+          // clear" when there are still old, unresolved dues sitting
+          // further back than the last collectWindowDays.
+          StateMessage(
+            icon: AppIcons.history,
+            tint: AppTheme.statusWarn,
+            tintBg: AppTheme.statusWarnBg,
+            title: 'Nothing overdue in the last $collectWindowDays days',
+            body:
+                '${stuckOld.length} older ${stuckOld.length == 1 ? 'due' : 'dues'} '
+                "haven't been collected or written off yet.",
+            actionLabel: 'View all dues',
+            onAction: () => setState(() => _bucket = 'all'),
           )
         else if (rows.isEmpty)
           StateMessage(
@@ -699,16 +762,58 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 
   // ── Payments / Invoices ledgers ───────────────────────────────────────────
 
-  Widget _ledgerTab(BuildContext context, _BillingFeed data) {
+  Widget _ledgerTab(
+    BuildContext context,
+    _BillingFeed data,
+    AsyncValue<List<Map<String, dynamic>>>? custom,
+  ) {
+    final customRange = _customRange;
+    final showCustom = _tab == 1 && customRange != null && custom != null;
+    if (showCustom && !custom.hasValue) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+        children: [
+          _CustomRangeBar(
+            label: _rangeLabel(customRange),
+            summary: custom.hasError ? null : 'Loading…',
+            onChange: _pickCustomRange,
+            onClear: _clearCustomRange,
+          ),
+          const SizedBox(height: 12),
+          if (custom.hasError)
+            StateMessage(
+              icon: AppIcons.cloudOff,
+              tint: AppTheme.statusDanger,
+              tintBg: AppTheme.statusDangerBg,
+              title: 'Could not load payments',
+              body: 'Check your connection, then pull down to retry.',
+              actionLabel: 'Retry',
+              onAction: () =>
+                  ref.invalidate(_customPaymentsProvider(customRange)),
+            )
+          else
+            const Padding(
+              padding: EdgeInsets.only(top: 32),
+              child: Center(
+                child: CircularProgressIndicator(color: AppTheme.accent),
+              ),
+            ),
+        ],
+      );
+    }
+
     // Payments = money already collected. Invoices = the invoice records
     // themselves, i.e. open/partial bills (projected renewals have no
     // invoice row yet, so they only ever appear in Dues).
     final items =
-        (_tab == 1
+        (showCustom
+                ? custom.requireValue.map(_TxnItem.payment)
+                : _tab == 1
                 ? data.items.where((t) => !t.isDue)
                 : data.items.where((t) => t.isDue && t.invoiceId.isNotEmpty))
             .where(_matches)
             .toList();
+    final customTotal = items.fold<double>(0, (s, t) => s + t.amount);
 
     final canAdd = ref.watch(
       gymPermissionProvider((GymModule.payments, GymAction.add)),
@@ -720,6 +825,17 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
       children: [
+        if (showCustom) ...[
+          _CustomRangeBar(
+            label: _rangeLabel(customRange),
+            summary:
+                '${items.length} payment${items.length == 1 ? '' : 's'} · '
+                '${formatCurrency(customTotal)}',
+            onChange: _pickCustomRange,
+            onClear: _clearCustomRange,
+          ),
+          const SizedBox(height: 12),
+        ],
         if (_tab == 2 && canAdd) ...[
           GestureDetector(
             onTap: () => _showCreateInvoiceSheet(context),
@@ -748,6 +864,12 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             icon: AppIcons.search,
             title: 'No matches',
             body: 'Nothing for "${_searchCtrl.text.trim()}" in this tab.',
+          )
+        else if (items.isEmpty && showCustom)
+          const StateMessage(
+            icon: AppIcons.receipt,
+            title: 'No payments in these dates',
+            body: 'Try a wider date range.',
           )
         else if (items.isEmpty)
           StateMessage(
@@ -793,6 +915,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         .delete()
         .eq('id', item.invoiceId);
     container.invalidate(_billingFeedProvider);
+    container.invalidate(_customPaymentsProvider);
   }
 
   void _collect(BuildContext context, _TxnItem item) {
@@ -837,7 +960,20 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 class _BalanceCard extends StatefulWidget {
   final _BillingFeed data;
   final VoidCallback onDue;
-  const _BalanceCard({required this.data, required this.onDue});
+  // Custom range: when set, the hero shows that range's total instead of the
+  // Today/Week/Month figure, with no "vs" comparison.
+  final DateTimeRange? customRange;
+  final AsyncValue<double>? customTotal;
+  final VoidCallback onCustomTap;
+  final VoidCallback onPresetTap;
+  const _BalanceCard({
+    required this.data,
+    required this.onDue,
+    required this.customRange,
+    required this.customTotal,
+    required this.onCustomTap,
+    required this.onPresetTap,
+  });
 
   @override
   State<_BalanceCard> createState() => _BalanceCardState();
@@ -848,21 +984,65 @@ class _BalanceCardState extends State<_BalanceCard> {
 
   static const _coral = Color(0xFFF2A79A); // negative change on the dark card
 
+  Widget _segment({
+    required String label,
+    required String semanticsLabel,
+    required bool selected,
+    required VoidCallback onTap,
+  }) => Expanded(
+    child: Semantics(
+      button: true,
+      selected: selected,
+      label: semanticsLabel,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          height: 32,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: selected ? AppTheme.darkCard : AppTheme.onDarkSoft,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final data = widget.data;
-    final collected = data.collected[_period] ?? 0;
-    final growth = data.growthPct[_period];
+    final customRange = widget.customRange;
+    final isCustom = customRange != null;
+    final collectedText = isCustom
+        ? switch (widget.customTotal) {
+            AsyncData(:final value) => formatCurrency(value),
+            AsyncError() => '—',
+            _ => '…',
+          }
+        : formatCurrency(data.collected[_period] ?? 0);
+    final growth = isCustom ? null : data.growthPct[_period];
     final monthCollected = data.collected[BillingPeriod.month] ?? 0;
     final rate = (monthCollected + data.dueTotal) > 0
         ? (monthCollected / (monthCollected + data.dueTotal) * 100).round()
         : null;
-    final label = switch (_period) {
-      BillingPeriod.today => 'COLLECTED · TODAY',
-      BillingPeriod.week => 'COLLECTED · THIS WEEK',
-      BillingPeriod.month =>
-        'COLLECTED · ${DateFormat('MMMM').format(DateTime.now()).toUpperCase()}',
-    };
+    final label = isCustom
+        ? 'COLLECTED · ${_rangeLabel(customRange).toUpperCase()}'
+        : switch (_period) {
+            BillingPeriod.today => 'COLLECTED · TODAY',
+            BillingPeriod.week => 'COLLECTED · THIS WEEK',
+            BillingPeriod.month =>
+              'COLLECTED · ${DateFormat('MMMM').format(DateTime.now()).toUpperCase()}',
+          };
     final vs = switch (_period) {
       BillingPeriod.today => 'vs yesterday',
       BillingPeriod.week => 'vs last week',
@@ -884,46 +1064,29 @@ class _BalanceCardState extends State<_BalanceCard> {
             child: Row(
               children: [
                 for (final p in BillingPeriod.values)
-                  Expanded(
-                    child: Semantics(
-                      button: true,
-                      selected: _period == p,
-                      label: switch (p) {
-                        BillingPeriod.today => 'Today',
-                        BillingPeriod.week => 'This week',
-                        BillingPeriod.month => 'This month',
-                      },
-                      child: GestureDetector(
-                        onTap: () => setState(() => _period = p),
-                        behavior: HitTestBehavior.opaque,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 160),
-                          height: 32,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: _period == p
-                                ? Colors.white
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: Text(
-                            switch (p) {
-                              BillingPeriod.today => 'Today',
-                              BillingPeriod.week => 'Week',
-                              BillingPeriod.month => 'Month',
-                            },
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: _period == p
-                                  ? AppTheme.darkCard
-                                  : AppTheme.onDarkSoft,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                  _segment(
+                    label: switch (p) {
+                      BillingPeriod.today => 'Today',
+                      BillingPeriod.week => 'Week',
+                      BillingPeriod.month => 'Month',
+                    },
+                    semanticsLabel: switch (p) {
+                      BillingPeriod.today => 'Today',
+                      BillingPeriod.week => 'This week',
+                      BillingPeriod.month => 'This month',
+                    },
+                    selected: !isCustom && _period == p,
+                    onTap: () {
+                      if (isCustom) widget.onPresetTap();
+                      setState(() => _period = p);
+                    },
                   ),
+                _segment(
+                  label: 'Custom',
+                  semanticsLabel: 'Custom dates',
+                  selected: isCustom,
+                  onTap: widget.onCustomTap,
+                ),
               ],
             ),
           ),
@@ -947,7 +1110,7 @@ class _BalanceCardState extends State<_BalanceCard> {
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    formatCurrency(collected),
+                    collectedText,
                     style: AppTheme.numberStyle(
                       fontSize: 32,
                       color: AppTheme.onDark,
@@ -996,6 +1159,71 @@ class _BalanceCardState extends State<_BalanceCard> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Strip above the Payments list while a custom range is active: which dates,
+/// how many payments and their total, plus change / clear.
+class _CustomRangeBar extends StatelessWidget {
+  final String label;
+  final String? summary;
+  final VoidCallback onChange;
+  final VoidCallback onClear;
+  const _CustomRangeBar({
+    required this.label,
+    required this.summary,
+    required this.onChange,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.accentSoft,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const Icon(AppIcons.calendarMonth, size: 18, color: AppTheme.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: onChange,
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                  if (summary != null)
+                    Text(
+                      summary!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.inkSoft,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          TextButton(onPressed: onChange, child: const Text('Change')),
+          IconButton(
+            tooltip: 'Clear dates',
+            onPressed: onClear,
+            icon: const Icon(AppIcons.close, size: 18, color: AppTheme.inkSoft),
           ),
         ],
       ),
@@ -1421,6 +1649,13 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       settlingPartialInvoice: (_due ?? inv.amount) < inv.amount,
     );
     if (!early) return;
+    if (!mounted) return;
+    final overdueOk = await confirmOverdueRenewalIfNeeded(
+      context,
+      nextPaymentDate: inv.dueAt,
+      settlingPartialInvoice: (_due ?? inv.amount) < inv.amount,
+    );
+    if (!overdueOk) return;
 
     // Only a genuine duplicate is worth stopping. A balance still owed on this
     // invoice means a second collection today is the rest of the same bill —

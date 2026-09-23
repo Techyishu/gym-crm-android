@@ -50,3 +50,9 @@ android/key.properties
 *.jks
 .vercel
 .env*.local
+
+# npm-installed Supabase CLI (large Mac binaries) — recreate with `npm install`
+node_modules/
+
+# Security audit reports — repo is public, keep local only
+SECURITY_AUDIT_*.md

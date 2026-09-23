@@ -745,6 +745,23 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       return;
     }
 
+    // This shortcut only ever appears once a plan has lapsed (see the button
+    // above), so the overdue check is the one that actually fires here — the
+    // early check is kept only so this stays identical to every other
+    // collect path if that visibility rule ever changes.
+    final early = await confirmEarlyRenewalIfNeeded(
+      context,
+      nextPaymentDate: npd,
+    );
+    if (!early) return;
+    if (!context.mounted) return;
+    final overdueOk = await confirmOverdueRenewalIfNeeded(
+      context,
+      nextPaymentDate: npd,
+    );
+    if (!overdueOk) return;
+    if (!context.mounted) return;
+
     final confirmed = await showConfirmDialog(
       context,
       title: 'Renew plan?',

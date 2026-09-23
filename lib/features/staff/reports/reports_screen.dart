@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/access/gym_permissions.dart';
+import '../../../core/services/data_refresh.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/responsive_content.dart';
@@ -84,17 +86,101 @@ class _MemReport {
 
 // ─── Providers ────────────────────────────────────────────────────────────────
 
-final _revReportProvider = FutureProvider.family<_RevReport, String>((
+// A preset period ('week' | 'month' | 'year'), or a custom range when [range]
+// is set (period is then ignored). Record equality keeps the family cache key
+// stable across rebuilds.
+typedef _RevQuery = ({String period, DateTimeRange? range});
+
+// The window every period-driven figure on this screen uses (revenue,
+// expenses, new members), so they always describe the same dates.
+// [to] is exclusive; null means "up to now".
+({DateTime from, DateTime? to, String period}) _windowOf(_RevQuery query) {
+  final range = query.range;
+  if (range != null) {
+    // Whole local days, end day inclusive.
+    final from = DateTime(range.start.year, range.start.month, range.start.day);
+    final to = DateTime(range.end.year, range.end.month, range.end.day + 1);
+    // Daily points up to ~3 months, monthly beyond that.
+    return (
+      from: from,
+      to: to,
+      period: to.difference(from).inDays > 92 ? 'year' : 'month',
+    );
+  }
+  final now = DateTime.now();
+  return (
+    from: switch (query.period) {
+      'week' => now.subtract(const Duration(days: 7)),
+      'year' => DateTime(now.year - 1, now.month, now.day),
+      _ => DateTime(now.year, now.month - 1, now.day),
+    },
+    to: null,
+    period: query.period,
+  );
+}
+
+String _isoDate(DateTime d) => d.toIso8601String().split('T').first;
+
+// Expense rows (category, amount) in the window. expense_date is a plain date,
+// so the window is compared as local dates. RLS returns nothing without the
+// expenses permission — callers must gate on it, or profit would read as
+// "all revenue".
+final _expensesReportProvider =
+    FutureProvider.family<List<(String category, double amount)>, _RevQuery>((
+      ref,
+      query,
+    ) async {
+      ref.watch(gymDataVersionProvider); // refetch after a write elsewhere
+      final gymId = await ref.watch(gymIdProvider.future);
+      final w = _windowOf(query);
+      var q = Supabase.instance.client
+          .from('expenses')
+          .select('category, amount')
+          .eq('gym_id', gymId)
+          .gte('expense_date', _isoDate(w.from));
+      final to = w.to;
+      if (to != null) q = q.lt('expense_date', _isoDate(to));
+      final rows = await q;
+      return (rows as List)
+          .map(
+            (e) => (
+              (e['category'] as String?) ?? 'Other',
+              (e['amount'] as num?)?.toDouble() ?? 0,
+            ),
+          )
+          .toList();
+    });
+
+// Members who joined inside the window.
+final _newMembersProvider = FutureProvider.family<int, _RevQuery>((
   ref,
-  period,
+  query,
 ) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write elsewhere
+  final gymId = await ref.watch(gymIdProvider.future);
+  final w = _windowOf(query);
+  var q = Supabase.instance.client
+      .from('members')
+      .select('id')
+      .eq('gym_id', gymId)
+      .gte('joined_at', w.from.toUtc().toIso8601String());
+  final to = w.to;
+  if (to != null) q = q.lt('joined_at', to.toUtc().toIso8601String());
+  final res = await q.count(CountOption.exact);
+  return res.count;
+});
+
+final _revReportProvider = FutureProvider.family<_RevReport, _RevQuery>((
+  ref,
+  query,
+) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
   final now = DateTime.now();
-  final from = switch (period) {
-    'week' => now.subtract(const Duration(days: 7)),
-    'year' => DateTime(now.year - 1, now.month, now.day),
-    _ => DateTime(now.year, now.month - 1, now.day),
-  };
+  final w = _windowOf(query);
+  final from = w.from;
+  final to = w.to;
+  final period = w.period;
 
   const mon = [
     'Jan',
@@ -116,8 +202,13 @@ final _revReportProvider = FutureProvider.family<_RevReport, String>((
             'get_revenue_report',
             params: {
               'p_gym_id': gymId,
-              'p_from': from.toIso8601String(),
+              // toUtc(): a local DateTime serialises without an offset and
+              // the DB (UTC) would read IST midnight as UTC midnight.
+              'p_from': from.toUtc().toIso8601String(),
               'p_period': period,
+              if (to != null) 'p_to': to.toUtc().toIso8601String(),
+              // Chart buckets follow the device's local day, not UTC's.
+              'p_utc_offset_min': now.timeZoneOffset.inMinutes,
             },
           )
           as Map<String, dynamic>;
@@ -162,6 +253,7 @@ final _revReportProvider = FutureProvider.family<_RevReport, String>((
 });
 
 final _memReportProvider = FutureProvider<_MemReport>((ref) async {
+  ref.watch(gymDataVersionProvider); // refetch after a write elsewhere
   final gymId = await ref.watch(gymIdProvider.future);
 
   const mon = [
@@ -217,6 +309,16 @@ final _memReportProvider = FutureProvider<_MemReport>((ref) async {
 
 String _compactRev(double amount) => formatCurrencyCompact(amount);
 
+// "5 Sep – 18 Sep", or with years when the range isn't in the current year.
+String _rangeLabel(DateTimeRange r) {
+  final thisYear = DateTime.now().year;
+  final fmt = r.start.year == thisYear && r.end.year == thisYear
+      ? formatDateShort
+      : formatDate;
+  if (DateUtils.isSameDay(r.start, r.end)) return fmt(r.start);
+  return '${fmt(r.start)} – ${fmt(r.end)}';
+}
+
 String _planLabel(int months) => switch (months) {
   1 => 'Monthly',
   3 => 'Quarterly',
@@ -240,21 +342,6 @@ Color _methodColor(int i) => const [
   AppTheme.statusWarn,
 ][i % 4];
 
-const List<String> _monthNames = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 class ReportsScreen extends ConsumerStatefulWidget {
@@ -266,6 +353,25 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   String _period = 'month';
+  DateTimeRange? _customRange;
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: today,
+      initialDateRange:
+          _customRange ??
+          DateTimeRange(
+            start: today.subtract(const Duration(days: 6)),
+            end: today,
+          ),
+      helpText: 'Select report dates',
+    );
+    if (picked != null && mounted) setState(() => _customRange = picked);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -280,7 +386,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      // Opened directly (web refresh / link) there's nothing
+                      // to pop and pop() leaves a blank screen.
+                      onPressed: () => context.canPop()
+                          ? context.pop()
+                          : context.go('/staff/dashboard'),
                       icon: const Icon(
                         AppIcons.arrowBack,
                         size: 20,
@@ -310,6 +420,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   onRefresh: () async {
                     ref.invalidate(_revReportProvider);
                     ref.invalidate(_memReportProvider);
+                    ref.invalidate(_expensesReportProvider);
+                    ref.invalidate(_newMembersProvider);
                   },
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -321,46 +433,16 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                         // collections first, then memberships, then expenses.
                         _RevenueTab(
                           period: _period,
-                          onPeriodChanged: (p) => setState(() => _period = p),
+                          customRange: _customRange,
+                          onPeriodChanged: (p) => setState(() {
+                            _period = p;
+                            _customRange = null;
+                          }),
+                          onCustomTap: _pickCustomRange,
                         ),
                         const SizedBox(height: 20),
-                        const _MembersTab(),
-                        const SizedBox(height: 20),
-                        GestureDetector(
-                          onTap: () => context.push('/staff/expenses'),
-                          behavior: HitTestBehavior.opaque,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 14,
-                            ),
-                            decoration: AppTheme.cardDecoration(),
-                            child: Row(
-                              children: const [
-                                Icon(
-                                  AppIcons.receipt,
-                                  size: 20,
-                                  color: AppTheme.statusNeutral,
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    'Expenses',
-                                    style: TextStyle(
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.ink,
-                                    ),
-                                  ),
-                                ),
-                                Icon(
-                                  AppIcons.chevronRight,
-                                  size: 20,
-                                  color: AppTheme.inkHint,
-                                ),
-                              ],
-                            ),
-                          ),
+                        _MembersTab(
+                          query: (period: _period, range: _customRange),
                         ),
                       ],
                     ),
@@ -377,15 +459,33 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
 
 class _RevenueTab extends ConsumerWidget {
   final String period;
+  final DateTimeRange? customRange;
   final ValueChanged<String> onPeriodChanged;
-  const _RevenueTab({required this.period, required this.onPeriodChanged});
+  final VoidCallback onCustomTap;
+  const _RevenueTab({
+    required this.period,
+    required this.customRange,
+    required this.onPeriodChanged,
+    required this.onCustomTap,
+  });
 
   static const _periods = [('week', '7d'), ('month', '30d'), ('year', '12m')];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(_revReportProvider(period));
-    final now = DateTime.now();
+    final range = customRange;
+    final _RevQuery query = (period: period, range: range);
+    final async = ref.watch(_revReportProvider(query));
+    final canSeeExpenses = ref.watch(
+      gymPermissionProvider((GymModule.expenses, GymAction.view)),
+    );
+    final title = range != null
+        ? _rangeLabel(range)
+        : switch (period) {
+            'week' => 'Last 7 days',
+            'year' => 'Last 12 months',
+            _ => 'Last 30 days',
+          };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -400,23 +500,34 @@ class _RevenueTab extends ConsumerWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Collected · ${_monthNames[now.month - 1]}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.onDarkSoft,
+                  Expanded(
+                    child: Text(
+                      'Collected · $title',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.onDarkSoft,
+                      ),
                     ),
                   ),
-                  const Spacer(),
                   ..._periods.map(
                     (p) => Padding(
                       padding: const EdgeInsets.only(left: 6),
                       child: _HeroPeriodChip(
                         label: p.$2,
-                        active: period == p.$1,
+                        active: range == null && period == p.$1,
                         onTap: () => onPeriodChanged(p.$1),
                       ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: _HeroPeriodChip(
+                      label: 'Custom',
+                      active: range != null,
+                      onTap: onCustomTap,
                     ),
                   ),
                 ],
@@ -481,11 +592,15 @@ class _RevenueTab extends ConsumerWidget {
                     ),
                   ),
                   error: (_, __) => const SizedBox.shrink(),
-                  data: (r) => r.chartData.isEmpty
-                      ? const Center(
+                  // One point draws a lone dot that looks broken (a one-day
+                  // range, or all money collected on one day) — say it instead.
+                  data: (r) => r.chartData.length < 2
+                      ? Center(
                           child: Text(
-                            'No revenue data for this period',
-                            style: TextStyle(
+                            r.chartData.isEmpty
+                                ? 'No revenue data for this period'
+                                : 'All collected on ${r.chartData.first.$1}',
+                            style: const TextStyle(
                               fontSize: 11,
                               color: AppTheme.onDarkSoft,
                             ),
@@ -498,6 +613,18 @@ class _RevenueTab extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 14),
+
+        // Profit & loss for the same dates: collected minus expenses (the
+        // dashboard's profit rule). Hidden without the expenses permission —
+        // RLS would return no expenses and profit would read as all revenue.
+        if (canSeeExpenses) ...[
+          _ProfitLossCard(
+            revenue: async.whenData((r) => r.totalRevenue),
+            expenses: ref.watch(_expensesReportProvider(query)),
+            periodLabel: title,
+          ),
+          const SizedBox(height: 14),
+        ],
 
         // Collection rate / Avg per member / Avg days to pay
         async.when(
@@ -651,11 +778,22 @@ class _RevenueTab extends ConsumerWidget {
 // ─── Members tab ──────────────────────────────────────────────────────────────
 
 class _MembersTab extends ConsumerWidget {
-  const _MembersTab();
+  // Same dates as the revenue section — drives "New members".
+  final _RevQuery query;
+  const _MembersTab({required this.query});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(_memReportProvider);
+    final newMembers = ref.watch(_newMembersProvider(query));
+    final range = query.range;
+    final periodLabel = range != null
+        ? _rangeLabel(range)
+        : switch (query.period) {
+            'week' => 'last 7 days',
+            'year' => 'last 12 months',
+            _ => 'last 30 days',
+          };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -687,8 +825,10 @@ class _MembersTab extends ConsumerWidget {
                       color: Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(999),
                     ),
+                    // Describes the chart below (joins per month), which is
+                    // always the last 6 months — not a filter.
                     child: const Text(
-                      '6 months',
+                      'Joins · last 6 months',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -731,7 +871,7 @@ class _MembersTab extends ConsumerWidget {
                             ),
                           ),
                           Text(
-                            '${r.newLast30d} new',
+                            '${newMembers.value ?? '…'} new',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
@@ -799,8 +939,12 @@ class _MembersTab extends ConsumerWidget {
               Expanded(
                 child: _MetricCard(
                   label: 'New members',
-                  value: '${r.newLast30d}',
-                  sub: 'last 30 days',
+                  value: switch (newMembers) {
+                    AsyncData(:final value) => '$value',
+                    AsyncError() => '—',
+                    _ => '…',
+                  },
+                  sub: periodLabel,
                   valueColor: AppTheme.statusActive,
                 ),
               ),
@@ -1004,6 +1148,220 @@ class _HeroLineChart extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Profit & loss + expenses ─────────────────────────────────────────────────
+
+class _ProfitLossCard extends StatelessWidget {
+  final AsyncValue<double> revenue;
+  final AsyncValue<List<(String category, double amount)>> expenses;
+  final String periodLabel;
+  const _ProfitLossCard({
+    required this.revenue,
+    required this.expenses,
+    required this.periodLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Profit & loss',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  periodLabel,
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (revenue.hasError || expenses.hasError)
+            const _ErrorText()
+          else if (!revenue.hasValue || !expenses.hasValue)
+            const SizedBox(
+              height: 96,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else
+            ..._body(context, revenue.requireValue, expenses.requireValue),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _body(
+    BuildContext context,
+    double collected,
+    List<(String, double)> rows,
+  ) {
+    final byCategory = <String, double>{};
+    for (final (category, amount) in rows) {
+      byCategory[category] = (byCategory[category] ?? 0) + amount;
+    }
+    final categories = byCategory.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final spent = byCategory.values.fold<double>(0, (s, v) => s + v);
+    final net = collected - spent;
+    final isLoss = net < 0;
+    final margin = collected > 0 ? (net / collected * 100).round() : null;
+
+    return [
+      _line('Collected', formatCurrency(collected), AppTheme.ink),
+      const SizedBox(height: 8),
+      _line(
+        'Expenses',
+        spent > 0 ? '− ${formatCurrency(spent)}' : formatCurrency(0),
+        AppTheme.ink,
+      ),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Divider(height: 1),
+      ),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isLoss ? 'Net loss' : 'Net profit',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
+                // A negative margin ("-1402% of collected") reads as noise;
+                // a loss just says what happened.
+                if (isLoss || margin != null)
+                  Text(
+                    isLoss ? 'Spent more than collected' : '$margin% of collected',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.inkHint,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            '${isLoss ? '− ' : ''}${formatCurrency(net.abs())}',
+            style: AppTheme.numberStyle(
+              fontSize: 24,
+              color: isLoss ? AppTheme.statusDanger : AppTheme.statusActive,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      const Text(
+        'Expenses by category',
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.inkSoft,
+        ),
+      ),
+      const SizedBox(height: 10),
+      if (categories.isEmpty)
+        const Text(
+          'No expenses logged for these dates.',
+          style: TextStyle(fontSize: 12.5, color: AppTheme.inkHint),
+        )
+      else
+        for (final (i, c) in categories.indexed) ...[
+          if (i > 0) const SizedBox(height: 10),
+          _categoryBar(c.key, c.value, spent, _methodColor(i)),
+        ],
+      const SizedBox(height: 6),
+      Align(
+        alignment: Alignment.centerRight,
+        child: TextButton(
+          onPressed: () => context.push('/staff/expenses'),
+          child: const Text('View all expenses'),
+        ),
+      ),
+    ];
+  }
+
+  Widget _line(String label, String value, Color color) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 13.5, color: AppTheme.inkSoft),
+        ),
+      ),
+      Text(
+        value,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    ],
+  );
+
+  Widget _categoryBar(String name, double amount, double total, Color color) {
+    final share = total > 0 ? amount / total : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.ink,
+                ),
+              ),
+            ),
+            Text(
+              '${formatCurrency(amount)} · ${(share * 100).round()}%',
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
+            ),
+          ],
+        ),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: LinearProgressIndicator(
+            value: share,
+            minHeight: 6,
+            color: color,
+            backgroundColor: AppTheme.surface2,
+          ),
+        ),
+      ],
     );
   }
 }

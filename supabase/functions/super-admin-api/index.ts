@@ -120,9 +120,23 @@ async function audit(
 }
 
 async function directory() {
-  const { data, error } = await adminClient.rpc("platform_admin_gym_directory");
+  const [{ data, error }, owners] = await Promise.all([
+    adminClient.rpc("platform_admin_gym_directory"),
+    adminClient.from("gyms").select("id,owner_id"),
+  ]);
   if (error) throw error;
-  return data ?? [];
+  if (owners.error) throw owners.error;
+  const ownerByGym = new Map(
+    (owners.data ?? []).map((row) => [row.id, row.owner_id]),
+  );
+  const counts = new Map<string, number>();
+  for (const row of owners.data ?? []) {
+    counts.set(row.owner_id, (counts.get(row.owner_id) ?? 0) + 1);
+  }
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    ...row,
+    branches: counts.get(ownerByGym.get(row.id) ?? "") ?? 1,
+  }));
 }
 
 async function listAllUsers() {
@@ -144,7 +158,23 @@ function startOfMonth(value = new Date()) {
 }
 
 function monthKey(value: Date) {
-  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${value.getUTCFullYear()}-${
+    String(value.getUTCMonth() + 1).padStart(2, "0")
+  }`;
+}
+
+function addUtcMonths(value: Date, months: number) {
+  const result = new Date(value);
+  const day = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(
+    result.getUTCFullYear(),
+    result.getUTCMonth() + 1,
+    0,
+  )).getUTCDate();
+  result.setUTCDate(Math.min(day, lastDay));
+  return result;
 }
 
 Deno.serve(async (req: Request) => {
@@ -230,14 +260,16 @@ Deno.serve(async (req: Request) => {
           head: true,
         }).gte("created_at", dayAgo),
       ]);
-      for (const result of [
-        gymsResult,
-        membersResult,
-        newMembersResult,
-        invoicesResult,
-        ticketsResult,
-        errorsResult,
-      ]) if (result.error) throw result.error;
+      for (
+        const result of [
+          gymsResult,
+          membersResult,
+          newMembersResult,
+          invoicesResult,
+          ticketsResult,
+          errorsResult,
+        ]
+      ) if (result.error) throw result.error;
 
       const gyms = gymsResult.data ?? [];
       const payingGyms = gyms.filter((gym) =>
@@ -269,12 +301,15 @@ Deno.serve(async (req: Request) => {
         trialGyms: gyms.filter((gym) =>
           gym.plan !== "pro" && gym.trial_ends_at && gym.trial_ends_at > nowIso
         ).length,
-        newGymsThisMonth: gyms.filter((gym) => gym.created_at >= monthStart)
+        newGymsThisMonth: gyms.filter((gym) =>
+          gym.created_at >= monthStart
+        )
           .length,
         newMembersThisMonth: newMembersResult.count ?? 0,
         lapsedThisMonth,
         mrr: payingGyms.reduce(
-          (sum, gym) => sum + Number(gym.plan_price ?? 0),
+          (sum, gym) =>
+            sum + Number(gym.plan_price ?? 0),
           0,
         ),
         revenueByMonth,
@@ -359,18 +394,20 @@ Deno.serve(async (req: Request) => {
           "id,name,status,settings,created_at",
         ).eq("owner_id", rawGym.owner_id).order("created_at"),
       ]);
-      for (const result of [
-        memberships,
-        invoices,
-        checkIns,
-        ownerProfile,
-        notes,
-        events,
-        overrides,
-        tickets,
-        staff,
-        branches,
-      ]) if (result.error) throw result.error;
+      for (
+        const result of [
+          memberships,
+          invoices,
+          checkIns,
+          ownerProfile,
+          notes,
+          events,
+          overrides,
+          tickets,
+          staff,
+          branches,
+        ]
+      ) if (result.error) throw result.error;
 
       const membershipRows = memberships.data ?? [];
       const membersWithMembership = members.map((member) => {
@@ -390,7 +427,9 @@ Deno.serve(async (req: Request) => {
         gym: { ...gym, ...rawGym },
         owner: {
           name: ownerProfile.data
-            ? `${ownerProfile.data.first_name ?? ""} ${ownerProfile.data.last_name ?? ""}`
+            ? `${ownerProfile.data.first_name ?? ""} ${
+              ownerProfile.data.last_name ?? ""
+            }`
               .trim()
             : null,
           email: ownerAuth.data.user?.email ?? null,
@@ -410,9 +449,10 @@ Deno.serve(async (req: Request) => {
           activeMembers: realMembers.filter((member) =>
             member.status === "active"
           ).length,
-          activeMemberships: membershipRows.filter((membership: Record<string, unknown>) =>
-            membership.status === "active"
-          ).length,
+          activeMemberships:
+            membershipRows.filter((membership: Record<string, unknown>) =>
+              membership.status === "active"
+            ).length,
           totalRevenue: invoiceRows.filter((invoice) =>
             invoice.status === "paid"
           ).reduce((sum, invoice) => sum + Number(invoice.amount ?? 0), 0),
@@ -593,7 +633,14 @@ Deno.serve(async (req: Request) => {
       }).eq("id", gymId).select("id,plan,trial_ends_at,plan_expires_at,status")
         .single();
       if (error) throw error;
-      await audit(auth.admin, gymId, "gym.trial.granted", `${days} days`, before, after);
+      await audit(
+        auth.admin,
+        gymId,
+        "gym.trial.granted",
+        `${days} days`,
+        before,
+        after,
+      );
       return json({ gym: after });
     }
 
@@ -610,15 +657,14 @@ Deno.serve(async (req: Request) => {
         throw new Error("Invalid price");
       }
       const months = body.months == null ? null : Number(body.months);
-      if (months != null && (!Number.isInteger(months) || months < 1 || months > 120)) {
+      if (
+        months != null &&
+        (!Number.isInteger(months) || months < 1 || months > 120)
+      ) {
         throw new Error("Invalid duration");
       }
       const expiry = plan === "pro" && months
-        ? new Date(Date.UTC(
-          new Date().getUTCFullYear(),
-          new Date().getUTCMonth() + months,
-          new Date().getUTCDate(),
-        )).toISOString()
+        ? addUtcMonths(new Date(), months).toISOString()
         : null;
       const { data: before, error: readError } = await adminClient.from("gyms")
         .select("id,plan,plan_price,plan_expires_at,trial_ends_at,status")
@@ -635,8 +681,59 @@ Deno.serve(async (req: Request) => {
         .select("id,plan,plan_price,plan_expires_at,trial_ends_at,status")
         .single();
       if (error) throw error;
-      await audit(auth.admin, gymId, "gym.plan.changed", "Admin change", before, after);
+      await audit(
+        auth.admin,
+        gymId,
+        "gym.plan.changed",
+        "Admin change",
+        before,
+        after,
+      );
       return json({ gym: after });
+    }
+
+    if (action === "impersonate") {
+      const denied = requireSuperadmin(auth.admin);
+      if (denied) return denied;
+      const gymId = requiredUuid(body.gymId);
+      const reason = requiredText(body.reason, "Reason", 5);
+      const { data: gym, error: gymError } = await adminClient.from("gyms")
+        .select("id,name,owner_id").eq("id", gymId).single();
+      if (gymError || !gym) return json({ error: "Gym not found" }, 404);
+      const owner = await adminClient.auth.admin.getUserById(gym.owner_id);
+      if (owner.error || !owner.data.user?.email) {
+        return json({ error: "Gym owner has no email on file" }, 404);
+      }
+      const { data: linkData, error: linkError } = await adminClient.auth.admin
+        .generateLink({ type: "magiclink", email: owner.data.user.email });
+      if (linkError || !linkData.properties?.action_link) {
+        throw linkError ?? new Error("Magic link generation failed");
+      }
+      const { data: impersonation, error: auditError } = await adminClient
+        .from("impersonation_audit").insert({
+          admin_id: auth.admin.id,
+          gym_id: gymId,
+          target_user_id: gym.owner_id,
+          reason,
+        }).select("id").single();
+      if (auditError) {
+        throw new Error(`Impersonation audit failed: ${auditError.message}`);
+      }
+      await audit(
+        auth.admin,
+        gymId,
+        "gym.impersonation_link.generated",
+        reason,
+        null,
+        {
+          auditId: impersonation.id,
+          ownerId: gym.owner_id,
+        },
+      );
+      return json({
+        link: linkData.properties.action_link,
+        auditId: impersonation.id,
+      });
     }
 
     if (action === "deleteGym") {
@@ -654,7 +751,9 @@ Deno.serve(async (req: Request) => {
       await audit(auth.admin, null, "gym.deleted", reason, gym, null);
       const { error } = await adminClient.from("gyms").delete().eq("id", gymId);
       if (error) throw error;
-      const { error: userError } = await adminClient.auth.admin.deleteUser(gym.owner_id);
+      const { error: userError } = await adminClient.auth.admin.deleteUser(
+        gym.owner_id,
+      );
       return json({ deleted: true, ownerDeleted: !userError });
     }
 
@@ -689,7 +788,9 @@ Deno.serve(async (req: Request) => {
         revenueByTier: [...tiers.entries()].sort(([a], [b]) => a - b).map(
           ([price, count]) => ({ price, count, total: price * count }),
         ),
-        failedCount: invoices.filter((invoice) => invoice.status === "failed").length,
+        failedCount: invoices.filter((invoice) =>
+          invoice.status === "failed"
+        ).length,
         pendingTotal: invoices.filter((invoice) =>
           invoice.status === "pending" || invoice.status === "partial"
         ).reduce((sum, invoice) => sum + Number(invoice.amount ?? 0), 0),
@@ -697,19 +798,36 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "analytics") {
-      const [users, profiles, gymsResult, membersResult, invoicesResult, checkInsResult] =
-        await Promise.all([
-          listAllUsers(),
-          adminClient.from("profiles").select("id,gym_id"),
-          adminClient.from("gyms").select("id,plan,created_at"),
-          adminClient.from("members").select("gym_id").eq("is_demo_data", false),
-          adminClient.from("invoices").select("gym_id").eq("status", "paid")
-            .eq("is_demo_data", false),
-          adminClient.from("check_ins").select("gym_id,checked_in_at")
-            .eq("is_demo_data", false)
-            .gte("checked_in_at", new Date(Date.now() - 30 * 86400000).toISOString()),
-        ]);
-      for (const result of [profiles, gymsResult, membersResult, invoicesResult, checkInsResult]) {
+      const [
+        users,
+        profiles,
+        gymsResult,
+        membersResult,
+        invoicesResult,
+        checkInsResult,
+      ] = await Promise.all([
+        listAllUsers(),
+        adminClient.from("profiles").select("id,gym_id"),
+        adminClient.from("gyms").select("id,plan,created_at"),
+        adminClient.from("members").select("gym_id").eq("is_demo_data", false),
+        adminClient.from("invoices").select("gym_id").eq("status", "paid")
+          .eq("is_demo_data", false),
+        adminClient.from("check_ins").select("gym_id,checked_in_at")
+          .eq("is_demo_data", false)
+          .gte(
+            "checked_in_at",
+            new Date(Date.now() - 30 * 86400000).toISOString(),
+          ),
+      ]);
+      for (
+        const result of [
+          profiles,
+          gymsResult,
+          membersResult,
+          invoicesResult,
+          checkInsResult,
+        ]
+      ) {
         if (result.error) throw result.error;
       }
       const gyms = gymsResult.data ?? [];
@@ -718,12 +836,24 @@ Deno.serve(async (req: Request) => {
       const confirmed = signedUp.filter((user) => user.email_confirmed_at);
       const userGym = new Map(profileRows.map((row) => [row.id, row.gym_id]));
       const gymIds = new Set(gyms.map((gym) => gym.id));
-      const gymsWithMembers = new Set((membersResult.data ?? []).map((row) => row.gym_id));
-      const gymsWithPayment = new Set((invoicesResult.data ?? []).map((row) => row.gym_id));
-      const setup = confirmed.filter((user) => gymIds.has(userGym.get(user.id)));
-      const firstMember = setup.filter((user) => gymsWithMembers.has(userGym.get(user.id)));
-      const firstPayment = firstMember.filter((user) => gymsWithPayment.has(userGym.get(user.id)));
-      const activeGymIds = new Set((checkInsResult.data ?? []).map((row) => row.gym_id));
+      const gymsWithMembers = new Set(
+        (membersResult.data ?? []).map((row) => row.gym_id),
+      );
+      const gymsWithPayment = new Set(
+        (invoicesResult.data ?? []).map((row) => row.gym_id),
+      );
+      const setup = confirmed.filter((user) =>
+        gymIds.has(userGym.get(user.id))
+      );
+      const firstMember = setup.filter((user) =>
+        gymsWithMembers.has(userGym.get(user.id))
+      );
+      const firstPayment = firstMember.filter((user) =>
+        gymsWithPayment.has(userGym.get(user.id))
+      );
+      const activeGymIds = new Set(
+        (checkInsResult.data ?? []).map((row) => row.gym_id),
+      );
       const cohorts = new Map<string, { total: number; active: number }>();
       for (const gym of gyms) {
         const key = monthKey(new Date(gym.created_at));
@@ -733,7 +863,9 @@ Deno.serve(async (req: Request) => {
         cohorts.set(key, bucket);
       }
       const planMix = new Map<string, number>();
-      for (const gym of gyms) planMix.set(gym.plan, (planMix.get(gym.plan) ?? 0) + 1);
+      for (const gym of gyms) {
+        planMix.set(gym.plan, (planMix.get(gym.plan) ?? 0) + 1);
+      }
       return json({
         funnel: [
           { label: "Signed up", count: signedUp.length },
@@ -746,9 +878,14 @@ Deno.serve(async (req: Request) => {
           .map(([month, value]) => ({
             month,
             ...value,
-            retentionPct: value.total ? Math.round(value.active / value.total * 100) : 0,
+            retentionPct: value.total
+              ? Math.round(value.active / value.total * 100)
+              : 0,
           })),
-        planMix: [...planMix.entries()].map(([plan, count]) => ({ plan, count })),
+        planMix: [...planMix.entries()].map(([plan, count]) => ({
+          plan,
+          count,
+        })),
       });
     }
 
@@ -756,12 +893,18 @@ Deno.serve(async (req: Request) => {
       const users = await listAllUsers();
       const [profiles, linkedMembers] = await Promise.all([
         adminClient.from("profiles").select("id,gym_id"),
-        adminClient.from("members").select("user_id").not("user_id", "is", null),
+        adminClient.from("members").select("user_id").not(
+          "user_id",
+          "is",
+          null,
+        ),
       ]);
       if (profiles.error) throw profiles.error;
       if (linkedMembers.error) throw linkedMembers.error;
       const profileIds = new Set((profiles.data ?? []).map((row) => row.id));
-      const memberIds = new Set((linkedMembers.data ?? []).map((row) => row.user_id));
+      const memberIds = new Set(
+        (linkedMembers.data ?? []).map((row) => row.user_id),
+      );
       return json({
         accounts: users.filter((user) =>
           !user.app_metadata?.super_admin && !memberIds.has(user.id)
@@ -771,7 +914,8 @@ Deno.serve(async (req: Request) => {
           created_at: user.created_at,
           email_confirmed: !!user.email_confirmed_at,
           has_gym: profileIds.has(user.id),
-          banned: !!user.banned_until && new Date(user.banned_until) > new Date(),
+          banned: !!user.banned_until &&
+            new Date(user.banned_until) > new Date(),
           last_sign_in_at: user.last_sign_in_at ?? null,
         })).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)),
       });
@@ -802,30 +946,51 @@ Deno.serve(async (req: Request) => {
           email: target.data.user.email,
         });
         if (error) throw error;
-        await audit(auth.admin, null, "account.magic_link.generated", null, null, { userId });
+        await audit(
+          auth.admin,
+          null,
+          "account.magic_link.generated",
+          null,
+          null,
+          { userId },
+        );
         return json({ link: data.properties?.action_link ?? null });
       } else if (operation === "setupGym") {
         const gymName = requiredText(body.gymName, "Gym name", 2);
         const target = await adminClient.auth.admin.getUserById(userId);
-        if (target.error || !target.data.user) return json({ error: "User not found" }, 404);
+        if (target.error || !target.data.user) {
+          return json({ error: "User not found" }, 404);
+        }
         const metadata = target.data.user.user_metadata ?? {};
-        const fullName = String(metadata.full_name ?? metadata.name ?? "").trim();
+        const fullName = String(metadata.full_name ?? metadata.name ?? "")
+          .trim();
         const parts = fullName.split(/\s+/).filter(Boolean);
-        const { data: gymId, error } = await adminClient.rpc("create_platform_gym", {
-          p_owner_id: userId,
-          p_gym_name: gymName,
-          p_owner_first_name: String(metadata.first_name ?? parts[0] ?? "Owner"),
-          p_owner_last_name: String(metadata.last_name ?? parts.slice(1).join(" ")),
-          p_city: typeof body.city === "string" ? body.city.trim() : "",
-          p_plan: "starter",
-        });
+        const { data: gymId, error } = await adminClient.rpc(
+          "create_platform_gym",
+          {
+            p_owner_id: userId,
+            p_gym_name: gymName,
+            p_owner_first_name: String(
+              metadata.first_name ?? parts[0] ?? "Owner",
+            ),
+            p_owner_last_name: String(
+              metadata.last_name ?? parts.slice(1).join(" "),
+            ),
+            p_city: typeof body.city === "string" ? body.city.trim() : "",
+            p_plan: "starter",
+          },
+        );
         if (error) throw error;
-        await audit(auth.admin, gymId, "account.gym.setup", null, null, { userId });
+        await audit(auth.admin, gymId, "account.gym.setup", null, null, {
+          userId,
+        });
         return json({ gymId });
       } else {
         throw new Error("Invalid account operation");
       }
-      await audit(auth.admin, null, `account.${operation}`, null, null, { userId });
+      await audit(auth.admin, null, `account.${operation}`, null, null, {
+        userId,
+      });
       return json({ updated: true });
     }
 
@@ -835,8 +1000,12 @@ Deno.serve(async (req: Request) => {
       const email = requiredText(body.email, "Email", 5).toLowerCase();
       const password = requiredText(body.password, "Password", 8);
       const gymName = requiredText(body.gymName, "Gym name", 2);
-      const firstName = typeof body.firstName === "string" ? body.firstName.trim() : "";
-      const lastName = typeof body.lastName === "string" ? body.lastName.trim() : "";
+      const firstName = typeof body.firstName === "string"
+        ? body.firstName.trim()
+        : "";
+      const lastName = typeof body.lastName === "string"
+        ? body.lastName.trim()
+        : "";
       const plan = body.plan === "pro" ? "pro" : "starter";
       const { data, error } = await adminClient.auth.admin.createUser({
         email,
@@ -844,7 +1013,9 @@ Deno.serve(async (req: Request) => {
         email_confirm: true,
         user_metadata: { first_name: firstName, last_name: lastName },
       });
-      if (error || !data.user) throw error ?? new Error("Account creation failed");
+      if (error || !data.user) {
+        throw error ?? new Error("Account creation failed");
+      }
       const created = await adminClient.rpc("create_platform_gym", {
         p_owner_id: data.user.id,
         p_gym_name: gymName,
@@ -857,7 +1028,10 @@ Deno.serve(async (req: Request) => {
         await adminClient.auth.admin.deleteUser(data.user.id);
         throw created.error;
       }
-      await audit(auth.admin, created.data, "account.created", null, null, { email, plan });
+      await audit(auth.admin, created.data, "account.created", null, null, {
+        email,
+        plan,
+      });
       return json({ userId: data.user.id, gymId: created.data }, 201);
     }
 
@@ -868,7 +1042,9 @@ Deno.serve(async (req: Request) => {
       const role = body.role === "admin" ? "admin" : "superadmin";
       const users = await listAllUsers();
       const target = users.find((user) => user.email?.toLowerCase() === email);
-      if (!target) return json({ error: "No account exists with this email" }, 404);
+      if (!target) {
+        return json({ error: "No account exists with this email" }, 404);
+      }
       const { error: authError } = await adminClient.auth.admin.updateUserById(
         target.id,
         { app_metadata: { ...target.app_metadata, super_admin: true } },
@@ -877,12 +1053,17 @@ Deno.serve(async (req: Request) => {
       const { error } = await adminClient.from("platform_admins").upsert({
         id: target.id,
         email,
-        full_name: typeof body.fullName === "string" ? body.fullName.trim() || null : null,
+        full_name: typeof body.fullName === "string"
+          ? body.fullName.trim() || null
+          : null,
         role,
         is_active: true,
       }, { onConflict: "id" });
       if (error) throw error;
-      await audit(auth.admin, null, "admin.upserted", null, null, { email, role });
+      await audit(auth.admin, null, "admin.upserted", null, null, {
+        email,
+        role,
+      });
       return json({ updated: true });
     }
 
@@ -890,12 +1071,21 @@ Deno.serve(async (req: Request) => {
       const denied = requireSuperadmin(auth.admin);
       if (denied) return denied;
       const userId = requiredUuid(body.userId, "userId");
-      if (userId === auth.admin.id) return json({ error: "You cannot revoke your own access" }, 422);
+      if (userId === auth.admin.id) {
+        return json({ error: "You cannot revoke your own access" }, 422);
+      }
       const target = await adminClient.auth.admin.getUserById(userId);
-      if (target.error || !target.data.user) return json({ error: "User not found" }, 404);
+      if (target.error || !target.data.user) {
+        return json({ error: "User not found" }, 404);
+      }
       const { error: authError } = await adminClient.auth.admin.updateUserById(
         userId,
-        { app_metadata: { ...target.data.user.app_metadata, super_admin: false } },
+        {
+          app_metadata: {
+            ...target.data.user.app_metadata,
+            super_admin: false,
+          },
+        },
       );
       if (authError) throw authError;
       const { error } = await adminClient.from("platform_admins").update({
@@ -999,7 +1189,11 @@ Deno.serve(async (req: Request) => {
 
     if (action === "listEmailRecipients" || action === "sendEmail") {
       const segment = typeof body.segment === "string" ? body.segment : "all";
-      if (!["all", "trial_active", "trial_expired", "no_activity"].includes(segment)) {
+      if (
+        !["all", "trial_active", "trial_expired", "no_activity"].includes(
+          segment,
+        )
+      ) {
         throw new Error("Invalid segment");
       }
       const { data: gyms, error: gymError } = await adminClient.from("gyms")
@@ -1040,21 +1234,34 @@ Deno.serve(async (req: Request) => {
       const subject = requiredText(body.subject, "Subject", 2);
       const message = requiredText(body.message, "Message", 2);
       if (Array.isArray(body.selectedEmails)) {
-        const selected = new Set(body.selectedEmails.map((value) =>
-          String(value).trim().toLowerCase()
-        ));
+        const selected = new Set(
+          body.selectedEmails.map((value) =>
+            String(value).trim().toLowerCase()
+          ),
+        );
         recipients = recipients.filter((recipient) =>
           selected.has(recipient.email.toLowerCase())
         );
       }
-      if (!recipients.length) return json({ sent: 0, failed: 0, recipientCount: 0 });
+      if (!recipients.length) {
+        return json({ sent: 0, failed: 0, recipientCount: 0 });
+      }
       const apiKey = Deno.env.get("RESEND_API_KEY");
-      const from = Deno.env.get("ADMIN_FROM_EMAIL") ?? "GymCRM <noreply@gymcrm.in>";
-      if (!apiKey) return json({ error: "Email delivery is not configured" }, 503);
-      const escape = (value: string) => value.replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;");
-      const html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:28px;background:#111;color:#fff"><h2>${escape(subject)}</h2><div style="white-space:pre-wrap;line-height:1.6;color:#d1d5db">${escape(message)}</div><p style="margin-top:28px;color:#6b7280;font-size:12px">GymCRM · gymcrm.in</p></div>`;
+      const from = Deno.env.get("ADMIN_FROM_EMAIL") ??
+        "GymCRM <noreply@gymcrm.in>";
+      if (!apiKey) {
+        return json({ error: "Email delivery is not configured" }, 503);
+      }
+      const escape = (value: string) =>
+        value.replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      const html =
+        `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:28px;background:#111;color:#fff"><h2>${
+          escape(subject)
+        }</h2><div style="white-space:pre-wrap;line-height:1.6;color:#d1d5db">${
+          escape(message)
+        }</div><p style="margin-top:28px;color:#6b7280;font-size:12px">GymCRM · gymcrm.in</p></div>`;
       let sent = 0;
       let failed = 0;
       for (let index = 0; index < recipients.length; index += 100) {
@@ -1075,16 +1282,17 @@ Deno.serve(async (req: Request) => {
         if (response.ok) sent += batch.length;
         else failed += batch.length;
       }
-      const { error: logError } = await adminClient.from("admin_comms_log").insert({
-        sent_by: auth.admin.id,
-        sent_by_email: auth.admin.email,
-        segment,
-        subject,
-        message,
-        recipient_count: recipients.length,
-        sent_count: sent,
-        failed_count: failed,
-      });
+      const { error: logError } = await adminClient.from("admin_comms_log")
+        .insert({
+          sent_by: auth.admin.id,
+          sent_by_email: auth.admin.email,
+          segment,
+          subject,
+          message,
+          recipient_count: recipients.length,
+          sent_count: sent,
+          failed_count: failed,
+        });
       if (logError) throw logError;
       await audit(auth.admin, null, "email.sent", null, null, {
         segment,
@@ -1159,7 +1367,14 @@ Deno.serve(async (req: Request) => {
       const { error } = await adminClient.from("feature_flag_overrides")
         .delete().eq("gym_id", gymId).eq("flag_key", key);
       if (error) throw error;
-      await audit(auth.admin, gymId, "feature_flag.override.cleared", null, null, { key });
+      await audit(
+        auth.admin,
+        gymId,
+        "feature_flag.override.cleared",
+        null,
+        null,
+        { key },
+      );
       return json({ updated: true });
     }
 
@@ -1211,7 +1426,10 @@ Deno.serve(async (req: Request) => {
     if (action === "deleteAnnouncement") {
       const denied = requireSuperadmin(auth.admin);
       if (denied) return denied;
-      const announcementId = requiredUuid(body.announcementId, "announcementId");
+      const announcementId = requiredUuid(
+        body.announcementId,
+        "announcementId",
+      );
       const { error } = await adminClient.from("announcements").delete()
         .eq("id", announcementId);
       if (error) throw error;

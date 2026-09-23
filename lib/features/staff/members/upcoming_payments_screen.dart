@@ -173,6 +173,13 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       settlingPartialInvoice: _partlyPaid,
     );
     if (!early) return;
+    if (!mounted) return;
+    final overdueOk = await confirmOverdueRenewalIfNeeded(
+      context,
+      nextPaymentDate: _nextPaymentDate,
+      settlingPartialInvoice: _partlyPaid,
+    );
+    if (!overdueOk) return;
     if (_nextPaymentDate == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

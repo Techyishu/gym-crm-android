@@ -330,9 +330,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/staff/members',
-                builder: (_, __) => const PermissionGate(
+                builder: (_, state) => PermissionGate(
                   module: GymModule.members,
-                  child: MembersScreen(),
+                  child: MembersScreen(
+                    initialFilter: state.uri.queryParameters['status'],
+                  ),
                 ),
                 routes: [
                   GoRoute(

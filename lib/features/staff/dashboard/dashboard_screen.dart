@@ -9,6 +9,7 @@ import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/day_pass.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/billing/billing_access.dart';
+import '../../../core/billing/to_collect.dart';
 import '../settings/gym_branches_sheet.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/data_refresh.dart';
@@ -91,7 +92,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .gte('created_at', startOfDay),
       client
           .from('invoices')
-          .select('amount, due_at, payments(amount, status)')
+          .select('member_id, amount, status, due_at, payments(amount, status)')
           .eq('gym_id', gymId)
           .inFilter('status', ['open', 'partial']),
       client
@@ -164,6 +165,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .eq('gym_id', gymId)
           .eq('status', 'active')
           .not('dob', 'is', null),
+      // Renewals with no invoice yet — part of "To collect" (same as Money).
+      renewingMembersQuery(client, gymId),
     ]),
   ]);
 
@@ -179,21 +182,6 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
   double sum(List<Map<String, dynamic>> l) =>
       l.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0));
 
-  // Remaining balance per invoice — full amount minus whatever's already
-  // been paid — not the raw invoice amount, which would overstate dues on
-  // any invoice that's partially paid.
-  double remainingDue(Map<String, dynamic> inv) {
-    final amount = (inv['amount'] as num?)?.toDouble() ?? 0;
-    final invPayments = (inv['payments'] as List?) ?? const [];
-    final paid = invPayments
-        .where((p) => (p as Map)['status'] == 'succeeded')
-        .fold<double>(
-          0,
-          (s, p) => s + ((p as Map)['amount'] as num).toDouble(),
-        );
-    return (amount - paid).clamp(0, amount);
-  }
-
   // "Overdue" = an unsettled invoice whose due date has already passed.
   // Invoices with no due date are still owed, but they aren't late.
   final todayMidnight = DateTime(now.year, now.month, now.day);
@@ -204,9 +192,12 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
   }).toList();
 
   final collectedToday = sum(todayPaid);
-  final pendingRevenue = dueInvoices.fold<double>(
-    0,
-    (s, inv) => s + remainingDue(inv),
+  // Was the sum of every open invoice, due date ignored — an advance bill due
+  // in 2028 showed as owed today while Money said ₹0. Now Money's exact rule.
+  final toCollect = computeToCollect(
+    invoices: dueInvoices,
+    renewingMembers: rows[10],
+    now: now,
   );
   final monthRevenue = sum(monthPaid);
   final lastMonthRevenue = sum(lastMonthPaid);
@@ -235,7 +226,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'memberCount': counts[5].count,
     'collectedToday': collectedToday,
     'todayPayments': todayPaid.length,
-    'pendingRevenue': pendingRevenue,
+    'pendingRevenue': toCollect.total,
     'monthRevenue': monthRevenue,
     'growthPct': growthPct,
     // A day pass ends instead of renewing, so it isn't a renewal due.
@@ -244,7 +235,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'todayCheckinsList': rows[6],
     'monthExpenses': sum(rows[8]),
     'profit': monthRevenue - sum(rows[8]),
-    'dueCount': dueInvoices.where((i) => remainingDue(i) > 0).length,
+    // Members, not invoices — one member with 3 bills is "1 member".
+    'dueCount': toCollect.members,
     'overdueCount': overdue.length,
     'overdueAmount': overdue.fold<double>(0, (s, i) => s + remainingDue(i)),
     'leadsToFollowUp': rows[7].length,
@@ -1279,7 +1271,7 @@ class _CollectedHero extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Outstanding dues',
+                        'To collect',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
@@ -1781,6 +1773,13 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
       settlingPartialInvoice: _partlyPaid,
     );
     if (!early) return;
+    if (!mounted) return;
+    final overdueOk = await confirmOverdueRenewalIfNeeded(
+      context,
+      nextPaymentDate: _nextPaymentDate,
+      settlingPartialInvoice: _partlyPaid,
+    );
+    if (!overdueOk) return;
     if (_nextPaymentDate == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

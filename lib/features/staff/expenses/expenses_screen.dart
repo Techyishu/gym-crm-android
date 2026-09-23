@@ -107,6 +107,9 @@ class ExpensesScreen extends ConsumerWidget {
                               .delete()
                               .eq('id', list[i].id);
                           container.invalidate(_expensesProvider);
+                          // Reports P&L and the dashboard profit read
+                          // expenses too.
+                          notifyGymDataChanged();
                         },
                       ),
                     ),
@@ -339,6 +342,8 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
         'expense_date': _date.toIso8601String().split('T')[0],
         if (_noteCtrl.text.trim().isNotEmpty) 'note': _noteCtrl.text.trim(),
       });
+      // Reports P&L and the dashboard profit read expenses too.
+      notifyGymDataChanged();
 
       if (mounted) Navigator.pop(context);
     } catch (e) {

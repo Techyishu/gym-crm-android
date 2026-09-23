@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -129,7 +130,10 @@ String _planPriceLabel(Map<String, dynamic> p) {
 }
 
 class MembersScreen extends ConsumerStatefulWidget {
-  const MembersScreen({super.key});
+  /// Opened with `?status=expired` (etc.) from Payments Due's "old overdue"
+  /// link, so the right filter chip is already selected on arrival.
+  final String? initialFilter;
+  const MembersScreen({super.key, this.initialFilter});
 
   @override
   ConsumerState<MembersScreen> createState() => _MembersScreenState();
@@ -315,8 +319,19 @@ class _LapsingChip extends StatelessWidget {
   }
 }
 
+const _kFilterKeys = {
+  'all',
+  'due',
+  'lapsing',
+  'joined',
+  'expired',
+  'active',
+  'frozen',
+};
+
 class _MembersScreenState extends ConsumerState<MembersScreen> {
-  String _filter = 'all';
+  late String _filter =
+      _kFilterKeys.contains(widget.initialFilter) ? widget.initialFilter! : 'all';
   String _search = '';
   int _lapsingDays = 7;
   int _joinedDays = 30;
@@ -1375,12 +1390,57 @@ Future<void> showAddMemberSheet(BuildContext context) async {
 
 /// Canvas 1n "success — after add member": confirms what was created and
 /// offers the two things staff actually do next.
-class _MemberAddedSheet extends StatelessWidget {
+class _MemberAddedSheet extends StatefulWidget {
   final Map<String, dynamic> added;
   const _MemberAddedSheet({required this.added});
 
   @override
+  State<_MemberAddedSheet> createState() => _MemberAddedSheetState();
+}
+
+class _MemberAddedSheetState extends State<_MemberAddedSheet> {
+  // Which language's send is in flight, if any — lets the tapped button
+  // alone go quiet while the other stays tappable-looking, rather than
+  // disabling both for a send only one of them started.
+  String? _sending;
+
+  /// Real MSG91 template send via send-whatsapp-welcome — spends the gym's
+  /// shared WhatsApp allowance, unlike the manual wa.me share below it.
+  Future<void> _sendTemplate(String template) async {
+    setState(() => _sending = template);
+    try {
+      final res = await Supabase.instance.client.functions.invoke(
+        'send-whatsapp-welcome',
+        body: {'member_id': widget.added['id'], 'template': template},
+      );
+      final raw = res.data;
+      final parsed = raw is String
+          ? jsonDecode(raw) as Map<String, dynamic>
+          : raw as Map<String, dynamic>?;
+      final sent = parsed?['sent'] == true;
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            sent
+                ? 'Welcome message sent'
+                : 'Could not send — ${parsed?['reason'] ?? parsed?['error'] ?? 'try again'}',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not send welcome message')),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final added = widget.added;
     final name = added['name'] as String? ?? 'Member';
     final customId = added['customId'] as String? ?? '';
     final plan = added['plan'] as String? ?? '';
@@ -1465,24 +1525,49 @@ class _MemberAddedSheet extends StatelessWidget {
                 },
               ),
             if (outstanding > 0 && phone.isNotEmpty) const SizedBox(height: 10),
-            if (phone.isNotEmpty)
+            if (phone.isNotEmpty) ...[
               CardAction(
-                label: 'Share welcome message',
+                label: _sending == 'welcome_1'
+                    ? 'Sending…'
+                    : 'Send welcome message (English)',
                 filled: false,
-                onTap: () {
-                  Navigator.pop(context);
-                  final number = phone.length == 10 ? '91$phone' : phone;
-                  final text =
-                      'Welcome ${name.split(' ').first}! 🎉 '
-                      'Excited to have you with us. See you at the gym soon!';
-                  launchUrl(
-                    Uri.parse(
-                      'https://wa.me/$number?text=${Uri.encodeComponent(text)}',
-                    ),
-                    mode: LaunchMode.externalApplication,
-                  );
-                },
+                onTap: _sending != null
+                    ? null
+                    : () => _sendTemplate('welcome_1'),
               ),
+              const SizedBox(height: 10),
+              CardAction(
+                label: _sending == 'welcome_hin_1'
+                    ? 'Sending…'
+                    : 'Send welcome message (Hindi)',
+                filled: false,
+                onTap: _sending != null
+                    ? null
+                    : () => _sendTemplate('welcome_hin_1'),
+              ),
+              const SizedBox(height: 10),
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    final number = phone.length == 10 ? '91$phone' : phone;
+                    final text =
+                        'Welcome ${name.split(' ').first}! 🎉 '
+                        'Excited to have you with us. See you at the gym soon!';
+                    launchUrl(
+                      Uri.parse(
+                        'https://wa.me/$number?text=${Uri.encodeComponent(text)}',
+                      ),
+                      mode: LaunchMode.externalApplication,
+                    );
+                  },
+                  child: const Text(
+                    'Or share manually instead',
+                    style: TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
