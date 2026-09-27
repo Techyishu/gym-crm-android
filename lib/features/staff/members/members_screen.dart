@@ -19,6 +19,7 @@ import '../../../core/services/review_prompt.dart';
 import '../../../core/services/member_photo_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/check_in_service.dart';
+import '../../../core/billing/payment_dates.dart' show today, ymd;
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/validators.dart';
@@ -1404,6 +1405,33 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
   // disabling both for a send only one of them started.
   String? _sending;
 
+  // Whether send-whatsapp-welcome can work for this gym — it needs the
+  // owner's phone for the template's "Call us" number and fails without it.
+  // null while checking: the send buttons stay hidden until we know.
+  bool? _contactReady;
+
+  @override
+  void initState() {
+    super.initState();
+    if ((widget.added['phone'] as String? ?? '').isNotEmpty) {
+      _checkContact();
+    }
+  }
+
+  Future<void> _checkContact() async {
+    try {
+      final ready = await Supabase.instance.client.rpc(
+        'welcome_contact_ready',
+        params: {'p_member_id': widget.added['id']},
+      );
+      if (mounted) setState(() => _contactReady = ready == true);
+    } catch (e) {
+      debugPrint('[GymCRM] welcome_contact_ready error: $e');
+      // Don't block on a failed check — the send reports its own error.
+      if (mounted) setState(() => _contactReady = true);
+    }
+  }
+
   /// Real MSG91 template send via send-whatsapp-welcome — spends the gym's
   /// shared WhatsApp allowance, unlike the manual wa.me share below it.
   Future<void> _sendTemplate(String template) async {
@@ -1526,26 +1554,43 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
               ),
             if (outstanding > 0 && phone.isNotEmpty) const SizedBox(height: 10),
             if (phone.isNotEmpty) ...[
-              CardAction(
-                label: _sending == 'welcome_1'
-                    ? 'Sending…'
-                    : 'Send welcome message (English)',
-                filled: false,
-                onTap: _sending != null
-                    ? null
-                    : () => _sendTemplate('welcome_1'),
-              ),
-              const SizedBox(height: 10),
-              CardAction(
-                label: _sending == 'welcome_hin_1'
-                    ? 'Sending…'
-                    : 'Send welcome message (Hindi)',
-                filled: false,
-                onTap: _sending != null
-                    ? null
-                    : () => _sendTemplate('welcome_hin_1'),
-              ),
-              const SizedBox(height: 10),
+              if (_contactReady == true) ...[
+                CardAction(
+                  label: _sending == 'welcome_1'
+                      ? 'Sending…'
+                      : 'Send welcome message (English)',
+                  filled: false,
+                  onTap: _sending != null
+                      ? null
+                      : () => _sendTemplate('welcome_1'),
+                ),
+                const SizedBox(height: 10),
+                CardAction(
+                  label: _sending == 'welcome_hin_1'
+                      ? 'Sending…'
+                      : 'Send welcome message (Hindi)',
+                  filled: false,
+                  onTap: _sending != null
+                      ? null
+                      : () => _sendTemplate('welcome_hin_1'),
+                ),
+                const SizedBox(height: 10),
+              ] else if (_contactReady == false) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.statusWarnBg,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    "Welcome messages need the gym owner's phone number, "
+                    'which isn\'t added yet. The owner can add it in '
+                    'Settings → Edit profile.',
+                    style: TextStyle(fontSize: 13, color: AppTheme.ink),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               Center(
                 child: TextButton(
                   onPressed: () {
@@ -1573,6 +1618,14 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
       ),
     );
   }
+}
+
+/// A failure after the member row was already written, with wording that says
+/// exactly what was and wasn't saved — the generic "Failed to add member"
+/// hid a member that existed and a payment that wasn't recorded.
+class _AddMemberException implements Exception {
+  final String message;
+  const _AddMemberException(this.message);
 }
 
 class AddMemberSheet extends ConsumerStatefulWidget {
@@ -1875,15 +1928,35 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
       // Assign the selected membership plan (open-ended, matches the web flow).
       // A DB trigger auto-creates the invoice the moment this insert commits.
-      await client.from('memberships').insert({
-        'member_id': inserted['id'],
-        'plan_id': _planId,
-        'status': 'active',
-        'starts_at': DateTime.now().toUtc().toIso8601String(),
-        'ends_at': null,
-        'discount_amount': _planDiscountAmount,
-        if (_planDays != null) 'billing_interval_days': _planDays,
-      });
+      try {
+        await client.from('memberships').insert({
+          'member_id': inserted['id'],
+          'plan_id': _planId,
+          'status': 'active',
+          'starts_at': DateTime.now().toUtc().toIso8601String(),
+          'ends_at': null,
+          'discount_amount': _planDiscountAmount,
+          if (_planDays != null) 'billing_interval_days': _planDays,
+        });
+      } catch (e) {
+        // The member row is already committed. Undo it so the owner can just
+        // retry (a leftover row would trip the duplicate-phone check); only if
+        // that also fails do they need to know a plan-less member exists.
+        debugPrint('[GymCRM] AddMember plan assignment failed: $e');
+        try {
+          await client.rpc(
+            'delete_member_secure',
+            params: {'p_member_id': inserted['id']},
+          );
+        } catch (undoError) {
+          debugPrint('[GymCRM] AddMember rollback failed: $undoError');
+          throw const _AddMemberException(
+            'Member was saved but the plan could not be assigned. '
+            'Open the member and choose a plan.',
+          );
+        }
+        rethrow;
+      }
 
       // Batch is optional and must never cost us the member: the rows above
       // are already committed by this point, so a failed enrolment is
@@ -1906,7 +1979,14 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         }
       }
 
-      if (paidAmount > 0) {
+      // The member and plan are saved by now, so a payment that can't be
+      // recorded must not turn into "Failed to add member" (the member exists,
+      // a retry would hit the duplicate-phone check, and the cash would be
+      // lost). Keep the member, say plainly the money is not recorded, and
+      // show the full amount as still due.
+      var paymentNotRecorded = false;
+      String? firstInvoiceId;
+      try {
         final invoice = await client
             .from('invoices')
             .select('id')
@@ -1915,15 +1995,49 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             .order('created_at', ascending: false)
             .limit(1)
             .maybeSingle();
-        if (invoice != null) {
-          // next_payment_date was just set by the staff above — recordInvoicePayment
-          // doesn't touch it itself, so no separate "don't advance" flag is needed here.
-          await recordInvoicePayment(
-            invoiceId: invoice['id'] as String,
-            amount: paidAmount,
-            method: _paymentMethod,
-            recordedBy: client.auth.currentUser?.id,
-          );
+        firstInvoiceId = invoice?['id'] as String?;
+      } catch (e) {
+        debugPrint('[GymCRM] AddMember first invoice lookup failed: $e');
+      }
+
+      // The trigger dates the first bill on the renewal date (a month ahead).
+      // That made it look like the renewal: paying its balance later renewed
+      // the plan a second time, and an unpaid balance stayed hidden from every
+      // due list for a month. The first bill is for what the member owes now,
+      // so date it today. Best-effort — if it can't be updated the bill just
+      // keeps the trigger's date, exactly as before.
+      final firstBillId = firstInvoiceId;
+      if (firstBillId != null &&
+          _planDays == null &&
+          nextPaymentDate != null &&
+          nextPaymentDate.compareTo(ymd(today)) > 0) {
+        try {
+          await client
+              .from('invoices')
+              .update({'due_at': '${ymd(today)}T00:00:00Z'})
+              .eq('id', firstBillId);
+        } catch (e) {
+          debugPrint('[GymCRM] AddMember first bill date not set: $e');
+        }
+      }
+
+      if (paidAmount > 0) {
+        try {
+          if (firstInvoiceId == null) {
+            paymentNotRecorded = true;
+          } else {
+            // next_payment_date was just set by the staff above — recordInvoicePayment
+            // doesn't touch it itself, so no separate "don't advance" flag is needed here.
+            await recordInvoicePayment(
+              invoiceId: firstInvoiceId,
+              amount: paidAmount,
+              method: _paymentMethod,
+              recordedBy: client.auth.currentUser?.id,
+            );
+          }
+        } catch (e) {
+          debugPrint('[GymCRM] AddMember payment not recorded: $e');
+          paymentNotRecorded = true;
         }
       }
 
@@ -1943,12 +2057,25 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
       // Hand the caller what it needs to show the "member added" confirmation
       // — this sheet's own context is gone the moment it pops.
       if (mounted) {
+        if (paymentNotRecorded) {
+          // Captured before the pop — this sheet's context is gone after it.
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 8),
+              backgroundColor: AppTheme.statusDanger,
+              content: Text(
+                'Member added, but the ${formatCurrency(paidAmount)} payment '
+                'was NOT recorded. Open the member and tap Collect.',
+              ),
+            ),
+          );
+        }
         Navigator.pop(context, <String, dynamic>{
           'id': inserted['id'] as String,
           'name': _nameCtrl.text.trim(),
           'customId': _customIdCtrl.text.trim(),
           'plan': _selectedPlanName,
-          'outstanding': _dueAmount,
+          'outstanding': paymentNotRecorded ? _planAmount : _dueAmount,
           // Same normalisation as the insert above — this one feeds the
           // "Share welcome message" wa.me link.
           'phone': phoneWithCountryCode(_phoneCtrl.text) ?? '',
@@ -1957,7 +2084,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     } catch (e) {
       debugPrint('[GymCRM] AddMember error: $e');
       if (mounted) {
-        final msg = (e is PostgrestException && e.code == '23505')
+        final msg = e is _AddMemberException
+            ? e.message
+            : (e is PostgrestException && e.code == '23505')
             ? 'Member ID "${_customIdCtrl.text.trim()}" is already in use. Please use a different one.'
             : duplicatePhoneMessage(e) ??
                   planLimitMessage(e) ??

@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'payment_dates.dart' show billRenewsPlan;
+
 /// "To collect" — the one rule for what a gym is owed *right now*, shared by
 /// the Money card and the Home card so the two can never disagree again.
 ///
@@ -68,6 +70,31 @@ PostgrestTransformBuilder<List<Map<String, dynamic>>> renewingMembersQuery(
       .order('next_payment_date');
 }
 
+/// Members whose coming renewal already has its own bill — an unpaid bill due
+/// on their renewal date, or (for an overdue member) any bill nobody has paid
+/// on yet, since their first payment renews them. Any other unpaid bill (an
+/// old due of an active member, or the balance of a partial payment that
+/// already extended the plan) doesn't cover the renewal, so that renewal must
+/// still be projected.
+Set<Object?> renewalBilledIds(
+  Iterable<Map<String, dynamic>> invoices,
+  Iterable<Map<String, dynamic>> renewingMembers,
+) {
+  final renewalDate = {
+    for (final m in renewingMembers)
+      m['id']: (m['next_payment_date'] as String?)?.split('T').first,
+  };
+  return invoices
+      .where(
+        (i) => billRenewsPlan(
+          dueDate: (i['due_at'] as String?)?.split('T').first,
+          nextPaymentDate: renewalDate[i['member_id']],
+        ),
+      )
+      .map((i) => i['member_id'])
+      .toSet();
+}
+
 typedef ToCollect = ({double total, int members, int items});
 
 /// [invoices]: open/partial invoice rows with `member_id`, `amount`, `due_at`
@@ -103,7 +130,7 @@ ToCollect computeToCollect({
     final due = DateTime.tryParse(i['due_at'] as String? ?? '');
     return due != null && due.isBefore(windowEnd);
   }).toList();
-  final invoicedIds = dues.map((d) => d['member_id']).toSet();
+  final invoicedIds = renewalBilledIds(dues, renewingMembers);
   final projected = renewingMembers.where(
     (m) => !invoicedIds.contains(m['id']) && activePlanPrice(m) > 0,
   );

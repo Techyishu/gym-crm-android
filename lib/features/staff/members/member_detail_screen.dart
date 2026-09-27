@@ -14,6 +14,7 @@ import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/advance_payment_date.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/day_pass.dart';
+import '../../../core/billing/payment_dates.dart' show billRenewsPlan;
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/member_photo_service.dart';
 import '../../../shared/widgets/authed_member_image.dart';
@@ -424,13 +425,13 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                       listen: false,
                     );
                     showAdaptiveSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        useSafeArea: true,
-                        builder: (_) => _EditMemberSheet(member: m),
-                      ).then((_) {
-                        container.invalidate(_memberDetailProvider(memberId));
-                      });
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      builder: (_) => _EditMemberSheet(member: m),
+                    ).then((_) {
+                      container.invalidate(_memberDetailProvider(memberId));
+                    });
                   },
                 ),
               if (canEdit)
@@ -718,6 +719,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     ).then((_) {
       container.invalidate(_memberDetailProvider(memberId));
       container.invalidate(_memberDueProvider(m.id));
+      container.invalidate(_memberInvoicesProvider(memberId));
     });
   }
 
@@ -736,31 +738,39 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       );
       return;
     }
-    final due = ref.read(_memberDueProvider(m.id)).valueOrNull;
-    final amount = (due != null && due > 0)
-        ? due
+    final openInvoices =
+        (await Supabase.instance.client
+                    .from('invoices')
+                    .select('id, amount, due_at, payments(amount, status)')
+                    .eq('member_id', m.id)
+                    .inFilter('status', ['open', 'partial'])
+                    .order('created_at', ascending: true)
+                as List)
+            .cast<Map<String, dynamic>>();
+    if (!context.mounted) return;
+    final renewalInvoice = openInvoices
+        .cast<Map<String, dynamic>?>()
+        .firstWhere(
+          (invoice) => billRenewsPlan(
+            dueDate: (invoice?['due_at'] as String?)?.split('T').first,
+            nextPaymentDate: npd.split('T').first,
+          ),
+          orElse: () => null,
+        );
+    final invoiceAmount = (renewalInvoice?['amount'] as num?)?.toDouble();
+    final paid = ((renewalInvoice?['payments'] as List?) ?? const [])
+        .where((p) => (p as Map)['status'] == 'succeeded')
+        .fold<double>(
+          0,
+          (sum, p) => sum + ((p as Map)['amount'] as num).toDouble(),
+        );
+    final amount = invoiceAmount != null
+        ? (invoiceAmount - paid).clamp(0, invoiceAmount).toDouble()
         : (m.currentMembership?.plan?.price ?? 0);
     if (amount <= 0) {
       _collect(context, ref, m);
       return;
     }
-
-    // This shortcut only ever appears once a plan has lapsed (see the button
-    // above), so the overdue check is the one that actually fires here — the
-    // early check is kept only so this stays identical to every other
-    // collect path if that visibility rule ever changes.
-    final early = await confirmEarlyRenewalIfNeeded(
-      context,
-      nextPaymentDate: npd,
-    );
-    if (!early) return;
-    if (!context.mounted) return;
-    final overdueOk = await confirmOverdueRenewalIfNeeded(
-      context,
-      nextPaymentDate: npd,
-    );
-    if (!overdueOk) return;
-    if (!context.mounted) return;
 
     final confirmed = await showConfirmDialog(
       context,
@@ -782,9 +792,11 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
         expectedNextPaymentDate: npd.split('T').first,
         amount: amount,
         method: 'cash',
+        invoiceId: renewalInvoice?['id'] as String?,
       );
       container.invalidate(_memberDetailProvider(memberId));
       container.invalidate(_memberDueProvider(m.id));
+      container.invalidate(_memberInvoicesProvider(memberId));
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(

@@ -11,6 +11,7 @@ import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/day_pass.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/billing/local_payment_guard.dart';
+import '../../../core/billing/payment_dates.dart';
 import '../../../core/billing/to_collect.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -53,7 +54,6 @@ final _membersListProvider = FutureProvider<List<Map<String, dynamic>>>((
 
 // Period shown on the balance card's hero number.
 enum BillingPeriod { today, week, month }
-
 
 // Money dashboard: collected totals for today/week/month (each vs the same
 // elapsed-length window immediately before it), open due count, and a merged
@@ -139,7 +139,7 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
       .toList();
   final statsPayments = (results[2] as List).cast<Map<String, dynamic>>();
   final renewingMembers = (results[3] as List).cast<Map<String, dynamic>>();
-  final invoicedMemberIds = dues.map((d) => d['member_id']).toSet();
+  final invoicedMemberIds = renewalBilledIds(dues, renewingMembers);
   final projected = renewingMembers.where(
     (m) => !invoicedMemberIds.contains(m['id']) && activePlanPrice(m) > 0,
   );
@@ -172,7 +172,6 @@ final _billingFeedProvider = FutureProvider<_BillingFeed>((ref) async {
     for (final d in dues) _TxnItem.due(d),
     for (final m in projected) _TxnItem.projected(m),
   ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
-
 
   return _BillingFeed(
     collected: {
@@ -237,7 +236,6 @@ String _rangeLabel(DateTimeRange r) {
   if (DateUtils.isSameDay(r.start, r.end)) return fmt.format(r.start);
   return '${fmt.format(r.start)} – ${fmt.format(r.end)}';
 }
-
 
 class _BillingFeed {
   final Map<BillingPeriod, double> collected;
@@ -1602,6 +1600,12 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
   String _method = 'cash';
   bool _loading = false;
   double? _due;
+  DateTime _paidAt = today;
+
+  /// Only set when this bill is the member's current renewal — a manual
+  /// invoice never moves the plan date, so it gets no valid-till row.
+  DateTime? _validTill;
+  DateTime? _defaultTill;
 
   static const _methods = [
     ('cash', 'Cash', AppIcons.payments),
@@ -1613,7 +1617,13 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
   @override
   void initState() {
     super.initState();
+    _amountCtrl.addListener(() => setState(() {}));
     _loadDue();
+  }
+
+  bool get _isPartial {
+    final amount = double.tryParse(_amountCtrl.text.trim());
+    return _due != null && amount != null && amount < _due!;
   }
 
   Future<void> _loadDue() async {
@@ -1623,6 +1633,47 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       _due = due;
       _amountCtrl.text = due.toStringAsFixed(0);
     });
+    try {
+      final member = await Supabase.instance.client
+          .from('members')
+          .select(
+            'next_payment_date, billing_interval_months, memberships(status, billing_interval_days, membership_plans(billing_interval, billing_interval_months))',
+          )
+          .eq('id', widget.invoice.memberId)
+          .maybeSingle();
+      final npd = (member?['next_payment_date'] as String?)?.split('T').first;
+      // Same test _save uses to route to the renewal RPC.
+      if (member == null ||
+          npd == null ||
+          !billRenewsPlan(
+            dueDate: widget.invoice.dueAt?.split('T').first,
+            nextPaymentDate: npd,
+          )) {
+        return;
+      }
+      Map? active;
+      for (final m in (member['memberships'] as List?) ?? const []) {
+        if ((m as Map)['status'] == 'active') {
+          active = m;
+          break;
+        }
+      }
+      if (active?['billing_interval_days'] != null) return;
+      final till = defaultValidTill(
+        npd,
+        renewalMonths(
+          active?['membership_plans'] as Map?,
+          (member['billing_interval_months'] as num?)?.toInt(),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _defaultTill = till;
+        _validTill = till;
+      });
+    } catch (e) {
+      debugPrint('[GymCRM] RecordPayment renewal lookup: $e');
+    }
   }
 
   @override
@@ -1642,6 +1693,17 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
       return;
     }
+    final dateError = paymentDatesError(
+      _paidAt,
+      _validTill,
+      defaultTill: _defaultTill,
+    );
+    if (dateError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(dateError)));
+      return;
+    }
 
     final early = await confirmEarlyRenewalIfNeeded(
       context,
@@ -1649,18 +1711,13 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       settlingPartialInvoice: (_due ?? inv.amount) < inv.amount,
     );
     if (!early) return;
-    if (!mounted) return;
-    final overdueOk = await confirmOverdueRenewalIfNeeded(
-      context,
-      nextPaymentDate: inv.dueAt,
-      settlingPartialInvoice: (_due ?? inv.amount) < inv.amount,
-    );
-    if (!overdueOk) return;
 
     // Only a genuine duplicate is worth stopping. A balance still owed on this
     // invoice means a second collection today is the rest of the same bill —
-    // an instalment, not an accidental re-tap.
-    final prior = (_due ?? 0) > 0
+    // an instalment, not an accidental re-tap. A backdated entry is catch-up
+    // bookkeeping, not a re-tap either.
+    final backdated = paidAtParam(_paidAt) != null;
+    final prior = (_due ?? 0) > 0 || backdated
         ? null
         : await LocalPaymentGuard.check(inv.memberId);
     if (prior != null && mounted) {
@@ -1718,10 +1775,14 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       // A membership-renewal invoice advances the plan date inside the same
       // locked transaction. A manually created invoice records only its own
       // payment and must not move the membership schedule.
-      if (invoiceDueDate != null && invoiceDueDate == renewalDate) {
+      if (renewalDate != null &&
+          billRenewsPlan(
+            dueDate: invoiceDueDate,
+            nextPaymentDate: renewalDate,
+          )) {
         await collectMembershipRenewal(
           memberId: inv.memberId,
-          expectedNextPaymentDate: renewalDate!,
+          expectedNextPaymentDate: renewalDate,
           amount: amount,
           method: _method,
           referenceNo: _refCtrl.text.trim().isEmpty
@@ -1729,6 +1790,8 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
               : _refCtrl.text.trim(),
           notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
           invoiceId: inv.id,
+          paidAt: paidAtParam(_paidAt),
+          validTill: validTillParam(_validTill, _defaultTill),
         );
       } else {
         await recordInvoicePayment(
@@ -1740,10 +1803,11 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
               : _refCtrl.text.trim(),
           notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
           recordedBy: userId,
+          paidAt: paidAtParam(_paidAt),
         );
       }
 
-      await LocalPaymentGuard.record(inv.memberId, amount);
+      if (!backdated) await LocalPaymentGuard.record(inv.memberId, amount);
 
       if (mounted) {
         Navigator.pop(context);
@@ -1802,6 +1866,15 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
             Text(
               partialPaymentHint,
               style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+            ),
+            const SizedBox(height: 16),
+            PaymentDatesFields(
+              paidAt: _paidAt,
+              onPaidAt: (d) => setState(() => _paidAt = d),
+              validTill: _validTill,
+              defaultTill: _defaultTill,
+              onValidTill: (d) => setState(() => _validTill = d),
+              partial: _isPartial,
             ),
             const SizedBox(height: 16),
             const FieldLabel('Method'),
@@ -1915,8 +1988,10 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
           _amountCtrl.text = price;
           _planHint = '${plan['name']} — $currencySymbol$price';
         }
-        final npd = data['next_payment_date'] as String?;
-        if (npd != null) _dueAt = npd.split('T').first;
+        // A manual invoice (locker, PT, top-up) is owed now. Defaulting it to
+        // the renewal date made it look like the renewal bill, so paying it
+        // renewed the membership.
+        _dueAt = ymd(today);
       });
     } catch (e) {
       debugPrint('[GymCRM] RecordPayment autofill error: $e');
@@ -2850,32 +2925,32 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                             },
                           )
                         else
-                        DropdownButtonFormField<String>(
-                          value: _interval,
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'monthly',
-                              child: Text('Monthly'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'quarterly',
-                              child: Text('Quarterly'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'biannual',
-                              child: Text('6 months'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'annual',
-                              child: Text('Yearly'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'custom',
-                              child: Text('Custom…'),
-                            ),
-                          ],
-                          onChanged: (v) => setState(() => _interval = v!),
-                        ),
+                          DropdownButtonFormField<String>(
+                            value: _interval,
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'monthly',
+                                child: Text('Monthly'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'quarterly',
+                                child: Text('Quarterly'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'biannual',
+                                child: Text('6 months'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'annual',
+                                child: Text('Yearly'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'custom',
+                                child: Text('Custom…'),
+                              ),
+                            ],
+                            onChanged: (v) => setState(() => _interval = v!),
+                          ),
                       ],
                     ),
                   ),

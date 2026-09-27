@@ -66,8 +66,10 @@ class _DueItem {
 }
 
 // One query for members due within the window plus one for their unpaid
-// invoices. The amount is the unpaid invoice balance when there is one,
-// otherwise the plan price minus the member's discount.
+// invoices. The amount is any unpaid invoice balance, plus the plan price
+// minus the member's discount when the coming renewal isn't billed yet — a
+// partial payment extends the plan, so an unpaid balance is not necessarily
+// this renewal.
 final _dueItemsProvider = FutureProvider.family<List<_DueItem>, String>((
   ref,
   gymId,
@@ -77,29 +79,30 @@ final _dueItemsProvider = FutureProvider.family<List<_DueItem>, String>((
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
 
-  final results = await Future.wait([
-    client
-        .from('members')
-        .select(
-          'id, first_name, last_name, avatar_url, next_payment_date, status, phone, '
-          'memberships(status, discount_amount, billing_interval_days, membership_plans(price, name))',
-        )
-        .eq('gym_id', gymId)
-        .lte(
-          'next_payment_date',
-          _ymd(today.add(const Duration(days: _lookAheadDays))),
-        )
-        .not('status', 'eq', 'cancelled')
-        .order('next_payment_date', ascending: true),
-    client
-        .from('invoices')
-        .select('member_id, amount, payments(amount, status)')
-        .eq('gym_id', gymId)
-        .inFilter('status', ['open', 'partial']),
-  ]);
+  final bills =
+      (await client
+              .from('invoices')
+              .select('member_id, amount, due_at, payments(amount, status)')
+              .eq('gym_id', gymId)
+              .inFilter('status', ['open', 'partial']))
+          .cast<Map<String, dynamic>>();
 
   final owed = <String, double>{};
-  for (final inv in (results[1] as List).cast<Map<String, dynamic>>()) {
+  // Due dates of each member's unpaid bills, to tell whether the coming
+  // renewal already has its own bill.
+  final billDueDates = <String, Set<String>>{};
+  // Oldest unpaid bill that fell due within the last _recentOverdueDays. A
+  // member can owe overdue money while their plan date is still ahead (a part
+  // payment renews the plan at once and leaves the rest as a bill), so this —
+  // not the plan date — decides whether they are overdue.
+  final recentOverdue = <String, DateTime>{};
+  final overdueSince = today.subtract(const Duration(days: _recentOverdueDays));
+  for (final inv in bills) {
+    final billMember = inv['member_id'] as String?;
+    final billDue = (inv['due_at'] as String?)?.split('T').first;
+    if (billMember != null && billDue != null) {
+      billDueDates.putIfAbsent(billMember, () => {}).add(billDue);
+    }
     final paid = ((inv['payments'] as List?) ?? const [])
         .where((p) => (p as Map)['status'] == 'succeeded')
         .fold<double>(
@@ -110,11 +113,37 @@ final _dueItemsProvider = FutureProvider.family<List<_DueItem>, String>((
     final memberId = inv['member_id'] as String?;
     if (memberId != null && left > 0) {
       owed[memberId] = (owed[memberId] ?? 0) + left;
+      final billDate = DateTime.tryParse(billDue ?? '');
+      if (billDate != null &&
+          billDate.isBefore(today) &&
+          !billDate.isBefore(overdueSince)) {
+        final seen = recentOverdue[memberId];
+        if (seen == null || billDate.isBefore(seen)) {
+          recentOverdue[memberId] = billDate;
+        }
+      }
     }
   }
 
+  // Members whose plan date is within the look-ahead, plus anyone with a
+  // recently overdue bill even if their plan date is further out.
+  final overdueIds = recentOverdue.keys.toList();
+  final membersData = await client
+      .from('members')
+      .select(
+        'id, first_name, last_name, avatar_url, next_payment_date, status, phone, '
+        'memberships(status, discount_amount, billing_interval_days, membership_plans(price, name))',
+      )
+      .eq('gym_id', gymId)
+      .or(
+        'next_payment_date.lte.${_ymd(today.add(const Duration(days: _lookAheadDays)))}'
+        '${overdueIds.isEmpty ? '' : ',id.in.(${overdueIds.join(',')})'}',
+      )
+      .not('status', 'eq', 'cancelled')
+      .order('next_payment_date', ascending: true);
+
   final items = <_DueItem>[];
-  for (final m in (results[0] as List).cast<Map<String, dynamic>>()) {
+  for (final m in (membersData as List).cast<Map<String, dynamic>>()) {
     final due = DateTime.tryParse(
       ((m['next_payment_date'] as String?) ?? '').split('T').first,
     );
@@ -134,20 +163,36 @@ final _dueItemsProvider = FutureProvider.family<List<_DueItem>, String>((
     // still has an unpaid invoice.
     if (active?['billing_interval_days'] != null && balance <= 0) continue;
 
-    double? amount;
-    if (balance > 0) {
-      amount = balance;
-    } else if (plan?['price'] != null) {
+    // File the member under their overdue bill's date when that is what is
+    // late; a plan date that is itself recently overdue already says so.
+    final overdueBill = recentOverdue[m['id']];
+    final planRecentlyOverdue =
+        due.isBefore(today) && !due.isBefore(overdueSince);
+    final fromBill = overdueBill != null && !planRecentlyOverdue;
+    final effectiveDue = fromBill ? overdueBill : due;
+
+    final renewalBilled = billDueDates[m['id']]?.contains(_ymd(due)) ?? false;
+    final isPass = active?['billing_interval_days'] != null;
+    // A renewal that isn't due yet isn't part of what they owe right now.
+    final renewalNotDueYet = fromBill && due.isAfter(today);
+    double? renewal;
+    if (!renewalBilled &&
+        !isPass &&
+        !renewalNotDueYet &&
+        plan?['price'] != null) {
       final discount = (active?['discount_amount'] as num?)?.toDouble() ?? 0;
       final net = (plan!['price'] as num).toDouble() - discount;
-      amount = net < 0 ? 0 : net;
+      renewal = net < 0 ? 0 : net;
     }
+    final double? amount = balance > 0 || renewal != null
+        ? balance + (renewal ?? 0)
+        : null;
 
     items.add(
       _DueItem(
         member: m,
-        due: due,
-        days: due.difference(today).inDays,
+        due: effectiveDue,
+        days: effectiveDue.difference(today).inDays,
         amount: amount,
         planName: plan?['name'] as String?,
       ),
@@ -221,9 +266,11 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
   Widget _list(String gymId, List<_DueItem> items, bool canCollect) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final overdue = items
-        .where((i) => i.days < 0 && i.days >= -_recentOverdueDays)
-        .toList();
+    final overdue =
+        items
+            .where((i) => i.days < 0 && i.days >= -_recentOverdueDays)
+            .toList()
+          ..sort((a, b) => a.days.compareTo(b.days));
     final oldOverdue = items
         .where((i) => i.days < -_recentOverdueDays)
         .toList();
@@ -294,11 +341,7 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
           }
           if (dueToday.isNotEmpty) {
             parts.add(
-              group(
-                _dayHeading(today, today),
-                dueToday,
-                tone: _Tone.today,
-              ),
+              group(_dayHeading(today, today), dueToday, tone: _Tone.today),
             );
           }
           parts.addAll(_comingGroups(coming, today, group));
@@ -422,7 +465,8 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
     List<_DueItem> coming,
     DateTime today,
     Widget Function(
-      String, List<_DueItem>, {
+      String,
+      List<_DueItem>, {
       required _Tone tone,
       int? cap,
       VoidCallback? onShowAll,
@@ -635,8 +679,7 @@ class _DayCell extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label:
-          '${DateFormat('EEEE d MMMM').format(day)}, $count due',
+      label: '${DateFormat('EEEE d MMMM').format(day)}, $count due',
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
@@ -729,11 +772,7 @@ class _OldOverdueLink extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
         child: Row(
           children: [
-            const Icon(
-              AppIcons.history,
-              size: 16,
-              color: AppTheme.inkSoft,
-            ),
+            const Icon(AppIcons.history, size: 16, color: AppTheme.inkSoft),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -754,11 +793,7 @@ class _OldOverdueLink extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 2),
-            const Icon(
-              AppIcons.chevronRight,
-              size: 14,
-              color: AppTheme.accent,
-            ),
+            const Icon(AppIcons.chevronRight, size: 14, color: AppTheme.accent),
           ],
         ),
       ),
@@ -1069,17 +1104,18 @@ class _DueTile extends StatelessWidget {
                 _CollectPill(
                   early: item.days > 0,
                   roomy: roomy,
-                  onTap: () => showAdaptiveSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    useSafeArea: true,
-                    builder: (_) => QuickCollectSheet(
-                      memberId: item.id,
-                      memberName: item.name,
-                    ),
-                  ).then((success) {
-                    if (success == true) onCollected();
-                  }),
+                  onTap: () =>
+                      showAdaptiveSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        useSafeArea: true,
+                        builder: (_) => QuickCollectSheet(
+                          memberId: item.id,
+                          memberName: item.name,
+                        ),
+                      ).then((success) {
+                        if (success == true) onCollected();
+                      }),
                 ),
             ],
           ),

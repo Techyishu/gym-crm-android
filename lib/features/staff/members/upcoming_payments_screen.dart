@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/local_payment_guard.dart';
+import '../../../core/billing/payment_dates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../core/utils/formatters.dart';
@@ -36,6 +37,15 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   String? _nextPaymentDate;
   double? _due;
   bool _partlyPaid = false;
+  DateTime _paidAt = today;
+  DateTime? _validTill;
+  DateTime? _defaultTill;
+
+  /// The open bill this collect settles, and whether it is an older bill
+  /// (joining bill, old due, a balance already extended) rather than the
+  /// current renewal — the server settles those without moving the plan.
+  String? _invoiceId;
+  bool _settlingOldBill = false;
 
   /// Balance still owed on a real open/partial invoice — 0 when there is no
   /// such invoice. Deliberately not `_due`, which falls back to the plan price
@@ -53,7 +63,14 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   @override
   void initState() {
     super.initState();
+    // The valid-till hint switches wording when the amount won't clear the bill.
+    _amountCtrl.addListener(() => setState(() {}));
     _autofill();
+  }
+
+  bool get _isPartial {
+    final amount = double.tryParse(_amountCtrl.text.trim());
+    return _due != null && amount != null && amount < _due!;
   }
 
   @override
@@ -70,7 +87,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       final data = await client
           .from('members')
           .select(
-            'next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
+            'next_payment_date, billing_interval_months, memberships(status, discount_amount, billing_interval_days, membership_plans(price, name, billing_interval, billing_interval_months))',
           )
           .eq('id', widget.memberId)
           .maybeSingle();
@@ -97,28 +114,51 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
         }
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;
+        // A day pass never advances, so it gets no valid-till row.
+        if (active?['billing_interval_days'] == null) {
+          _defaultTill = defaultValidTill(
+            _nextPaymentDate,
+            renewalMonths(
+              plan,
+              (data['billing_interval_months'] as num?)?.toInt(),
+            ),
+          );
+          _validTill = _defaultTill;
+        }
       });
 
       // If there's already an open/partial invoice for this member, its
       // amount (not the plan price) is the real total owed — pre-fill the
       // remaining balance instead of the full plan price.
-      final existing = await client
-          .from('invoices')
-          .select('id, amount')
-          .eq('member_id', widget.memberId)
-          .inFilter('status', ['open', 'partial'])
-          .order('created_at', ascending: true)
-          .limit(1)
-          .maybeSingle();
+      final openInvoices =
+          (await client
+                      .from('invoices')
+                      .select('id, amount, due_at')
+                      .eq('member_id', widget.memberId)
+                      .inFilter('status', ['open', 'partial'])
+                      .order('created_at', ascending: true)
+                  as List)
+              .cast<Map<String, dynamic>>();
+      final existing = preferredCollectInvoice(openInvoices, _nextPaymentDate);
       if (existing != null && mounted) {
         final invoiceAmount = (existing['amount'] as num).toDouble();
         final due = await invoiceDue(existing['id'] as String, invoiceAmount);
         if (!mounted) return;
+        final dueDate = (existing['due_at'] as String?)?.split('T').first;
         setState(() {
           _due = due;
           _partlyPaid = due < invoiceAmount;
           _outstanding = due;
           _amountCtrl.text = due.toStringAsFixed(0);
+          _invoiceId = existing['id'] as String;
+          _settlingOldBill = !billRenewsPlan(
+            dueDate: dueDate,
+            nextPaymentDate: _nextPaymentDate,
+          );
+          if (_settlingOldBill) {
+            _validTill = null;
+            _defaultTill = null;
+          }
         });
       } else {
         _due = finalPrice;
@@ -144,12 +184,26 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
       return;
     }
+    final dateError = paymentDatesError(
+      _paidAt,
+      _validTill,
+      defaultTill: _defaultTill,
+    );
+    if (dateError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(dateError)));
+      return;
+    }
 
     // Only a genuine duplicate is worth stopping. If the member still owes
     // money on an open bill, a second collection today is the rest of that
     // bill, not an accidental re-tap — warning there told owners a normal
-    // instalment looked like a mistake.
-    final prior = _outstanding > 0
+    // instalment looked like a mistake. A backdated entry is catch-up
+    // bookkeeping, not a re-tap — the server's renewal-date check already
+    // stops the same period being collected twice.
+    final backdated = paidAtParam(_paidAt) != null;
+    final prior = _outstanding > 0 || backdated
         ? null
         : await LocalPaymentGuard.check(widget.memberId);
     if (prior != null && mounted) {
@@ -170,16 +224,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
     final early = await confirmEarlyRenewalIfNeeded(
       context,
       nextPaymentDate: _nextPaymentDate,
-      settlingPartialInvoice: _partlyPaid,
+      settlingPartialInvoice: _partlyPaid || _settlingOldBill,
     );
     if (!early) return;
-    if (!mounted) return;
-    final overdueOk = await confirmOverdueRenewalIfNeeded(
-      context,
-      nextPaymentDate: _nextPaymentDate,
-      settlingPartialInvoice: _partlyPaid,
-    );
-    if (!overdueOk) return;
     if (_nextPaymentDate == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -209,9 +256,13 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
         method: _method,
         referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        // Pin the bill shown on screen so the server settles exactly it.
+        invoiceId: _invoiceId,
+        paidAt: paidAtParam(_paidAt),
+        validTill: validTillParam(_validTill, _defaultTill),
       );
 
-      await LocalPaymentGuard.record(widget.memberId, amount);
+      if (!backdated) await LocalPaymentGuard.record(widget.memberId, amount);
 
       if (mounted) {
         Navigator.pop(context, true);
@@ -310,6 +361,15 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
             Text(
               partialPaymentHint,
               style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+            ),
+            const SizedBox(height: 16),
+            PaymentDatesFields(
+              paidAt: _paidAt,
+              onPaidAt: (d) => setState(() => _paidAt = d),
+              validTill: _validTill,
+              defaultTill: _defaultTill,
+              onValidTill: (d) => setState(() => _validTill = d),
+              partial: _isPartial,
             ),
             const SizedBox(height: 16),
             const Text(

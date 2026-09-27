@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/day_pass.dart';
 import '../../../core/billing/local_payment_guard.dart';
+import '../../../core/billing/payment_dates.dart';
 import '../../../core/billing/billing_access.dart';
 import '../../../core/billing/to_collect.dart';
 import '../settings/gym_branches_sheet.dart';
@@ -182,13 +183,19 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
   double sum(List<Map<String, dynamic>> l) =>
       l.fold<double>(0, (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0));
 
-  // "Overdue" = an unsettled invoice whose due date has already passed.
+  // "Overdue" = an unsettled invoice whose due date passed within the same
+  // window Payments Due lists (older ones are old dues, not today's chase).
   // Invoices with no due date are still owed, but they aren't late.
   final todayMidnight = DateTime(now.year, now.month, now.day);
+  final overdueSince = todayMidnight.subtract(
+    const Duration(days: collectWindowDays),
+  );
   final overdue = dueInvoices.where((inv) {
     if (remainingDue(inv) <= 0) return false;
     final due = DateTime.tryParse((inv['due_at'] as String?) ?? '');
-    return due != null && due.isBefore(todayMidnight);
+    return due != null &&
+        due.isBefore(todayMidnight) &&
+        !due.isBefore(overdueSince);
   }).toList();
 
   final collectedToday = sum(todayPaid);
@@ -237,7 +244,8 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'profit': monthRevenue - sum(rows[8]),
     // Members, not invoices — one member with 3 bills is "1 member".
     'dueCount': toCollect.members,
-    'overdueCount': overdue.length,
+    // Members, like the Payments Due rows this tile opens.
+    'overdueCount': overdue.map((i) => i['member_id']).toSet().length,
     'overdueAmount': overdue.fold<double>(0, (s, i) => s + remainingDue(i)),
     'leadsToFollowUp': rows[7].length,
     'birthdays': rows[9].where((m) {
@@ -1631,6 +1639,15 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
   String? _nextPaymentDate;
   double? _due;
   bool _partlyPaid = false;
+  DateTime _paidAt = today;
+  DateTime? _validTill;
+  DateTime? _defaultTill;
+
+  /// The open bill this collect settles, and whether it is an older bill
+  /// (joining bill, old due, a balance already extended) rather than the
+  /// current renewal — the server settles those without moving the plan.
+  String? _invoiceId;
+  bool _settlingOldBill = false;
 
   /// Balance still owed on a real open/partial invoice — 0 when there is no
   /// such invoice. Deliberately not `_due`, which falls back to the plan price
@@ -1648,7 +1665,14 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
   @override
   void initState() {
     super.initState();
+    // The valid-till hint switches wording when the amount won't clear the bill.
+    _amountCtrl.addListener(() => setState(() {}));
     _autofill();
+  }
+
+  bool get _isPartial {
+    final amount = double.tryParse(_amountCtrl.text.trim());
+    return _due != null && amount != null && amount < _due!;
   }
 
   @override
@@ -1667,7 +1691,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
       final data = await client
           .from('members')
           .select(
-            'next_payment_date, memberships(status, discount_amount, membership_plans(price, name))',
+            'next_payment_date, billing_interval_months, memberships(status, discount_amount, billing_interval_days, membership_plans(price, name, billing_interval, billing_interval_months))',
           )
           .eq('id', memberId)
           .maybeSingle();
@@ -1694,28 +1718,51 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         }
         final npd = data['next_payment_date'] as String?;
         if (npd != null) _nextPaymentDate = npd.split('T').first;
+        // A day pass never advances, so it gets no valid-till row.
+        if (active?['billing_interval_days'] == null) {
+          _defaultTill = defaultValidTill(
+            _nextPaymentDate,
+            renewalMonths(
+              plan,
+              (data['billing_interval_months'] as num?)?.toInt(),
+            ),
+          );
+          _validTill = _defaultTill;
+        }
       });
 
       // If there's already an open/partial invoice for this member, its
       // amount (not the plan price) is the real total owed — pre-fill the
       // remaining balance instead of the full plan price.
-      final existing = await client
-          .from('invoices')
-          .select('id, amount')
-          .eq('member_id', memberId)
-          .inFilter('status', ['open', 'partial'])
-          .order('created_at', ascending: true)
-          .limit(1)
-          .maybeSingle();
+      final openInvoices =
+          (await client
+                      .from('invoices')
+                      .select('id, amount, due_at')
+                      .eq('member_id', memberId)
+                      .inFilter('status', ['open', 'partial'])
+                      .order('created_at', ascending: true)
+                  as List)
+              .cast<Map<String, dynamic>>();
+      final existing = preferredCollectInvoice(openInvoices, _nextPaymentDate);
       if (existing != null && mounted) {
         final invoiceAmount = (existing['amount'] as num).toDouble();
         final due = await invoiceDue(existing['id'] as String, invoiceAmount);
         if (!mounted) return;
+        final dueDate = (existing['due_at'] as String?)?.split('T').first;
         setState(() {
           _due = due;
           _partlyPaid = due < invoiceAmount;
           _outstanding = due;
           _amountCtrl.text = due.toStringAsFixed(0);
+          _invoiceId = existing['id'] as String;
+          _settlingOldBill = !billRenewsPlan(
+            dueDate: dueDate,
+            nextPaymentDate: _nextPaymentDate,
+          );
+          if (_settlingOldBill) {
+            _validTill = null;
+            _defaultTill = null;
+          }
         });
       } else {
         _due = finalPrice;
@@ -1741,12 +1788,25 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
       ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
       return;
     }
+    final dateError = paymentDatesError(
+      _paidAt,
+      _validTill,
+      defaultTill: _defaultTill,
+    );
+    if (dateError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(dateError)));
+      return;
+    }
 
     final memberIdForCheck = widget.member['id'] as String;
     // Only a genuine duplicate is worth stopping. If the member still owes
     // money on an open bill, a second collection today is the rest of that
-    // bill, not an accidental re-tap.
-    final prior = _outstanding > 0
+    // bill, not an accidental re-tap. A backdated entry is catch-up
+    // bookkeeping, not a re-tap either.
+    final backdated = paidAtParam(_paidAt) != null;
+    final prior = _outstanding > 0 || backdated
         ? null
         : await LocalPaymentGuard.check(memberIdForCheck);
     if (prior != null && mounted) {
@@ -1770,16 +1830,9 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     final early = await confirmEarlyRenewalIfNeeded(
       context,
       nextPaymentDate: _nextPaymentDate,
-      settlingPartialInvoice: _partlyPaid,
+      settlingPartialInvoice: _partlyPaid || _settlingOldBill,
     );
     if (!early) return;
-    if (!mounted) return;
-    final overdueOk = await confirmOverdueRenewalIfNeeded(
-      context,
-      nextPaymentDate: _nextPaymentDate,
-      settlingPartialInvoice: _partlyPaid,
-    );
-    if (!overdueOk) return;
     if (_nextPaymentDate == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1810,9 +1863,13 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         method: _method,
         referenceNo: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        // Pin the bill shown on screen so the server settles exactly it.
+        invoiceId: _invoiceId,
+        paidAt: paidAtParam(_paidAt),
+        validTill: validTillParam(_validTill, _defaultTill),
       );
 
-      await LocalPaymentGuard.record(memberId, amount);
+      if (!backdated) await LocalPaymentGuard.record(memberId, amount);
 
       if (mounted) {
         Navigator.pop(context);
@@ -1917,6 +1974,15 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
             Text(
               partialPaymentHint,
               style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
+            ),
+            const SizedBox(height: 16),
+            PaymentDatesFields(
+              paidAt: _paidAt,
+              onPaidAt: (d) => setState(() => _paidAt = d),
+              validTill: _validTill,
+              defaultTill: _defaultTill,
+              onValidTill: (d) => setState(() => _validTill = d),
+              partial: _isPartial,
             ),
             const SizedBox(height: 16),
             const Text(

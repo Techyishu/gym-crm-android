@@ -19,6 +19,27 @@ class WhatsNewEntry {
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
     version: '1.0.7+1',
+    date: '26 Sep 2026',
+    title: 'Pick the payment date and valid till',
+    bullets: [
+      'Collect Payment now has a Payment date. Leave it on Today, or pick an earlier day when you record money received before — it then counts on that day in Money and Reports.',
+      'Renewals also show Valid till: when the membership runs out after this payment. It is filled in for you; tap it to change, or tap Reset to go back.',
+      'Part payments now renew the membership straight away, and the rest stays as a due. Paying that due later settles it without adding another month.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.7+1',
+    date: '24 Sep 2026',
+    title: 'Reports for any dates, and profit & loss',
+    bullets: [
+      'Reports now has a Custom option next to 7d, 30d and 12m. Pick any dates — say 5 Sep to 18 Sep — and every figure on the page follows them.',
+      'A new Profit & loss card shows what you collected, minus expenses, as a net profit or loss, with your expenses split by category. No need to open Expenses separately.',
+      'Money has a Custom option too: pick dates to see the total collected and every payment in that range.',
+      'Home\'s money card now says To collect and matches the Money screen exactly — bills that aren\'t due yet no longer count.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.7+1',
     date: '20 Sep 2026',
     title: 'Day passes, a clearer Payments Due, and a smarter Money screen',
     bullets: [
