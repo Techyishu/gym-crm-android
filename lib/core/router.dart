@@ -21,6 +21,7 @@ import '../features/auth/screens/forgot_password_screen.dart';
 import '../features/staff/gym_setup/gym_setup_screen.dart';
 import '../features/staff/onboarding/first_setup_screen.dart';
 import '../features/staff/dashboard/dashboard_screen.dart';
+import '../features/staff/home/home_screen.dart';
 import '../features/staff/members/members_screen.dart';
 import '../features/staff/members/member_detail_screen.dart';
 import '../features/staff/members/payments_due_screen.dart';
@@ -115,6 +116,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (signupHandshakeInProgress.value) return null;
 
       final prefs = _sharedPrefs ??= await SharedPreferences.getInstance();
+      // Staff landing moved from the dashboard to the new Home; upgrade the
+      // cached value from older installs once.
+      if (prefs.getString('home_route') == '/staff/dashboard') {
+        await prefs.setString('home_route', '/staff/home');
+      }
 
       // External deep links (gymcrm://payment-success, io.supabase.gymcrm://
       // login-callback) get forwarded here by the Android engine as a raw
@@ -240,12 +246,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
 
         if (results[0] != null) {
-          await prefs.setString('home_route', '/staff/dashboard');
+          await prefs.setString('home_route', '/staff/home');
           // Navigation is a convenience layer, not the security boundary (RLS
           // remains authoritative), but never render a portal or hidden screen
           // merely because someone guessed its URL.
           if (isMemberRoute || loc == '/gym-setup' || isAuthRoute) {
-            return '/staff/dashboard';
+            return '/staff/home';
           }
           // Per-staff permissions are branch-specific and load through
           // Riverpod. Route builders below render a meaningful denied state;
@@ -311,13 +317,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: '/gym-setup', builder: (_, __) => const GymSetupScreen()),
 
-      // Staff shell — 4 branches: Home, Members, Billing, Check-in
+      // Staff shell — 5 branches: Home, Dashboard, Members, Billing, Check-in.
+      // Only the first three are bottom-nav tabs; Billing and Check-in open
+      // from Home cards.
       StatefulShellRoute.indexedStack(
         builder: (_, __, shell) => StaffShell(shell: shell),
         branches: [
-          // 0 — Home/Dashboard
+          // 0 — Home (feature cards)
           StatefulShellBranch(
             navigatorKey: _staffNavigatorKey,
+            routes: [
+              GoRoute(
+                path: '/staff/home',
+                builder: (_, __) => const HomeScreen(),
+              ),
+            ],
+          ),
+          // 1 — Dashboard (the previous home screen, unchanged)
+          StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/staff/dashboard',
@@ -325,7 +342,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
-          // 1 — Members
+          // 2 — Members
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -350,19 +367,21 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
-          // 2 — Billing
+          // 3 — Billing
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/staff/billing',
-                builder: (_, __) => const PermissionGate(
+                builder: (_, state) => PermissionGate(
                   module: GymModule.payments,
-                  child: BillingScreen(),
+                  child: BillingScreen(
+                    initialTab: state.uri.queryParameters['tab'],
+                  ),
                 ),
               ),
             ],
           ),
-          // 3 — Check-in
+          // 4 — Check-in
           StatefulShellBranch(
             routes: [
               GoRoute(

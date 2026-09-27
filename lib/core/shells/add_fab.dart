@@ -123,7 +123,7 @@ class AddFab extends ConsumerWidget {
     // they are reachable from the dashboard menu below.
     // The dashboard is not "in" any one feature, so it offers everything;
     // every other screen offers only what it owns.
-    final owned = location == '/staff/dashboard'
+    final owned = location == '/staff/dashboard' || location == '/staff/home'
         ? _actions
         : addActionsForRoute(location);
     final available = owned.where(allowed).toList();

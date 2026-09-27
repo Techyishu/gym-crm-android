@@ -390,7 +390,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                       // to pop and pop() leaves a blank screen.
                       onPressed: () => context.canPop()
                           ? context.pop()
-                          : context.go('/staff/dashboard'),
+                          : context.go('/staff/home'),
                       icon: const Icon(
                         AppIcons.arrowBack,
                         size: 20,

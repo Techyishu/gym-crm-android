@@ -425,7 +425,9 @@ class _TxnItem {
 }
 
 class BillingScreen extends ConsumerStatefulWidget {
-  const BillingScreen({super.key});
+  /// `?tab=plans` from Home's Plans card; null opens Dues as before.
+  final String? initialTab;
+  const BillingScreen({super.key, this.initialTab});
 
   @override
   ConsumerState<BillingScreen> createState() => _BillingScreenState();
@@ -434,7 +436,7 @@ class BillingScreen extends ConsumerStatefulWidget {
 class _BillingScreenState extends ConsumerState<BillingScreen> {
   // Dues · Payments · Invoices · Plans
   static const _tabs = ['Dues', 'Payments', 'Invoices', 'Plans'];
-  int _tab = 0;
+  late int _tab = widget.initialTab == 'plans' ? 3 : 0;
 
   // Sub-filter inside the Dues tab: 'overdue' | 'week' | 'all'.
   String _bucket = 'overdue';

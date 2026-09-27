@@ -68,7 +68,7 @@ class NoAccessScreen extends ConsumerWidget {
                 SizedBox(
                   height: 48,
                   child: ElevatedButton(
-                    onPressed: () => context.go('/staff/dashboard'),
+                    onPressed: () => context.go('/staff/home'),
                     child: const Text('Back to Home'),
                   ),
                 ),

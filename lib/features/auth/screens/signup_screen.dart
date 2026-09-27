@@ -181,7 +181,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     // home_route stays the real destination for future cold starts — the
     // first-setup screen below is a one-time interstitial, not where a
     // returning session should land.
-    await prefs.setString('home_route', '/staff/dashboard');
+    await prefs.setString('home_route', '/staff/home');
     container.invalidate(userTypeProvider);
     container.invalidate(staffProfileProvider);
     if (!mounted) {

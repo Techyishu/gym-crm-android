@@ -112,7 +112,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     // home_route stays the real destination for future cold starts — the
     // wizard below is a one-time interstitial, not where a returning
     // session should land.
-    await prefs.setString('home_route', '/staff/dashboard');
+    await prefs.setString('home_route', '/staff/home');
     if (!mounted) return;
     ref.invalidate(userTypeProvider);
     ref.invalidate(staffProfileProvider);

@@ -714,7 +714,7 @@ class _ReadyStep extends ConsumerWidget {
                 // back here.
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.remove(kPendingFirstSetup);
-                if (context.mounted) context.go('/staff/dashboard');
+                if (context.mounted) context.go('/staff/home');
               },
               child: const Text('Go to dashboard'),
             ),

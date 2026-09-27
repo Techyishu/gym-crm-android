@@ -158,7 +158,7 @@ class _ActivityLogScreenState extends ConsumerState<ActivityLogScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        leading: _ActivityBackButton(fallbackRoute: '/staff/dashboard'),
+        leading: _ActivityBackButton(fallbackRoute: '/staff/home'),
         title: const Text('Activity log'),
       ),
       body: ResponsiveContent(

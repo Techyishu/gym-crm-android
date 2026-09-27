@@ -9,28 +9,24 @@ import '../../../core/billing/collect_payment.dart';
 import '../../../core/billing/day_pass.dart';
 import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/billing/payment_dates.dart';
-import '../../../core/billing/billing_access.dart';
 import '../../../core/billing/to_collect.dart';
-import '../settings/gym_branches_sheet.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/offline_checkin_queue.dart';
-import '../../../core/services/review_prompt.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../expenses/expenses_screen.dart' show showAddExpenseSheet;
 import '../members/members_screen.dart' show showAddMemberSheet;
-import '../notifications/notifications_screen.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
-  ref,
-) async {
+/// Also read by Home (checklist, birthdays, alerts) so the two stay in sync.
+final dashboardDataProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   final gymId = await ref.watch(gymIdProvider.future);
   final client = Supabase.instance.client;
 
@@ -98,7 +94,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
           .inFilter('status', ['open', 'partial']),
       client
           .from('payments')
-          .select('amount, created_at, invoices!inner(gym_id)')
+          .select('amount, method, created_at, invoices!inner(gym_id)')
           .eq('invoices.gym_id', gymId)
           .eq('status', 'succeeded')
           .gte('created_at', startOfMonth),
@@ -153,7 +149,7 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
       // This month's logged expenses, for the profit figure below.
       client
           .from('expenses')
-          .select('amount')
+          .select('amount, category')
           .eq('gym_id', gymId)
           .gte('expense_date', startOfMonth.split('T')[0]),
       // Birthdays: PostgREST can't filter on month+day of a date column, so
@@ -224,6 +220,18 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     };
   }).toList();
 
+  // Totals grouped by a text column, largest first.
+  Map<String, double> totalsBy(List<Map<String, dynamic>> l, String key) {
+    final m = <String, double>{};
+    for (final r in l) {
+      final k = (r[key] as String?) ?? 'other';
+      m[k] = (m[k] ?? 0) + ((r['amount'] as num?)?.toDouble() ?? 0);
+    }
+    return Map.fromEntries(
+      m.entries.toList()..sort((a, b) => b.value.compareTo(a.value)),
+    );
+  }
+
   return {
     'activeMembers': counts[0].count,
     'todayCheckins': counts[1].count,
@@ -235,7 +243,10 @@ final _dashboardDataProvider = FutureProvider<Map<String, dynamic>>((
     'todayPayments': todayPaid.length,
     'pendingRevenue': toCollect.total,
     'monthRevenue': monthRevenue,
+    'lastMonthRevenue': lastMonthRevenue,
     'growthPct': growthPct,
+    'monthByMethod': totalsBy(monthPaid, 'method'),
+    'expensesByCategory': totalsBy(rows[8], 'category'),
     // A day pass ends instead of renewing, so it isn't a renewal due.
     'renewals': rows[4].where((m) => !hasActiveDayPass(m)).toList(),
     'recentPaid': recentPaid,
@@ -271,9 +282,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     // These totals are cached, so a payment or check-in recorded on any other
     // screen used to leave stale numbers here until the app restarted.
     gymDataChanged.addListener(_refresh);
-    // The dashboard is the first screen of every staff session, so this is
-    // "on app open" — ReviewPrompt itself decides whether asking is due.
-    unawaited(ReviewPrompt.maybeAskOnLaunch());
   }
 
   @override
@@ -283,18 +291,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   void _refresh() {
-    if (mounted) ref.invalidate(_dashboardDataProvider);
+    if (mounted) ref.invalidate(dashboardDataProvider);
   }
 
   @override
   Widget build(BuildContext context) {
-    final data = ref.watch(_dashboardDataProvider);
+    final data = ref.watch(dashboardDataProvider);
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
         child: RefreshIndicator(
           color: AppTheme.accent,
-          onRefresh: () async => ref.invalidate(_dashboardDataProvider),
+          onRefresh: () async => ref.invalidate(dashboardDataProvider),
           child: data.when(
             loading: () => const _LoadingBody(),
             error: (e, _) => _ErrorBody(error: e.toString()),
@@ -360,7 +368,7 @@ class _ErrorBody extends ConsumerWidget {
               width: 140,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  ref.invalidate(_dashboardDataProvider);
+                  ref.invalidate(dashboardDataProvider);
                   ref.invalidate(gymIdProvider);
                 },
                 icon: const Icon(AppIcons.refresh, size: 16),
@@ -385,72 +393,92 @@ class _DashboardBody extends ConsumerWidget {
     final role = ref.watch(staffRoleProvider).valueOrNull;
     final canBilling = RoleAccess.canSeeBilling(role);
     final canCollect = RoleAccess.canRecordPayment(role);
-    final canLeads = RoleAccess.canSeeLeads(role);
+    final canExpenses = RoleAccess.canSeeExpenses(role);
 
-    final profile = ref.watch(staffProfileProvider).valueOrNull;
-    final gym = profile?['gyms'] as Map<String, dynamic>?;
-    final gymName = gym?['name'] as String? ?? 'My Gym';
-    final memberCount = (data['memberCount'] as int?) ?? 0;
-    final planCount = (data['planCount'] as int?) ?? 0;
-    final allTimeCheckins = (data['allTimeCheckins'] as int?) ?? 0;
-    final showChecklist =
-        memberCount < 3 || planCount == 0 || allTimeCheckins == 0;
-
+    // Money only. Shortcuts, the setup checklist, birthdays, the plan pill and
+    // non-money alerts live on Home now.
     final header = [
-      // Trial/plan status moved into the header itself as a small pill under
-      // the gym name (see _Header) — it used to be a full-width card here,
-      // competing with the checklist for the most valuable spot on a new
-      // gym's dashboard. The member-signup code moved to the Members screen,
-      // where it's contextually relevant (inviting members) instead of
-      // permanently occupying the home screen.
-      _Header(gymName: gymName, gym: gym, showBilling: canBilling),
-      const SizedBox(height: 12),
-      if (showChecklist) ...[
-        _SetupChecklist(
-          gym: gym,
-          memberCount: memberCount,
-          planCount: planCount,
-          allTimeCheckins: allTimeCheckins,
+      const Text(
+        'Dashboard',
+        style: TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.ink,
+          letterSpacing: -0.4,
         ),
-        const SizedBox(height: 12),
-      ],
+      ),
+      const SizedBox(height: 2),
+      const Text(
+        'Collections, dues, expenses and profit',
+        style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+      ),
+      const SizedBox(height: 14),
     ];
 
-    // Action first, then the numbers. Anything that needs a decision today
-    // (money owed, memberships about to lapse, leads past their follow-up,
-    // check-ins still queued offline) sits above the passive "Today" counts.
-    final leftColumn = [
-      if (canBilling) ...[
-        _CollectedHero(data: data),
-        const SizedBox(height: 10),
-      ],
-      _QuickActions(canCollect: canCollect, canLeads: canLeads),
-      const SizedBox(height: 16),
-      _NeedsAttention(
+    // Same card and rows the dashboard always had; hides itself when empty.
+    final attention = Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: NeedsAttention(
         data: data,
         canBilling: canBilling,
-        canLeads: canLeads,
+        canLeads: RoleAccess.canSeeLeads(role),
         canCheckIn: RoleAccess.canCheckIn(role),
       ),
-      const SizedBox(height: 16),
-      _PaymentDueToday(data: data, canCollect: canCollect),
-      const SizedBox(height: 16),
-      _ShortcutPanel(items: _homeShortcuts(context, role)),
-    ];
+    );
 
-    final birthdays = (data['birthdays'] as List<dynamic>? ?? [])
-        .cast<Map<String, dynamic>>();
+    if (!canBilling) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 96),
+        children: [
+          ...header,
+          attention,
+          _PaymentDueToday(data: data, canCollect: canCollect),
+        ],
+      );
+    }
 
-    final rightColumn = [
-      if (birthdays.isNotEmpty) ...[
-        _BirthdaysToday(members: birthdays),
+    final leftColumn = [
+      _CollectedHero(data: data),
+      const SizedBox(height: 10),
+      _DueStats(data: data),
+      const SizedBox(height: 16),
+      attention,
+      if (canExpenses) ...[
+        _ProfitLossCard(data: data),
         const SizedBox(height: 16),
       ],
-      if (canBilling)
-        _RecentPayments(
-          invoices: (data['recentPaid'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>(),
+      _PaymentDueToday(data: data, canCollect: canCollect),
+    ];
+
+    final rightColumn = [
+      _BreakdownCard(
+        title: 'Collected by payment mode',
+        subtitle: 'This month',
+        totals: (data['monthByMethod'] as Map<String, double>?) ?? const {},
+        labelFor: _methodLabel,
+        color: AppTheme.accent,
+        emptyText: 'No payments this month yet',
+        onTap: () => context.push('/staff/billing'),
+      ),
+      const SizedBox(height: 16),
+      if (canExpenses) ...[
+        _BreakdownCard(
+          title: 'Expenses by category',
+          subtitle: 'This month',
+          totals:
+              (data['expensesByCategory'] as Map<String, double>?) ?? const {},
+          labelFor: (k) => k,
+          color: AppTheme.statusDanger,
+          emptyText: 'No expenses logged this month',
+          onTap: () => context.push('/staff/expenses'),
         ),
+        const SizedBox(height: 16),
+      ],
+      _RecentPayments(
+        invoices: (data['recentPaid'] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>(),
+      ),
     ];
 
     final isWide = ResponsiveContent.isWide(context);
@@ -497,10 +525,11 @@ class _DashboardBody extends ConsumerWidget {
 
 // ─── Setup checklist (getting started) ────────────────────────────────────────
 
-class _SetupChecklist extends ConsumerWidget {
+class SetupChecklist extends ConsumerWidget {
   final Map<String, dynamic>? gym;
   final int memberCount, planCount, allTimeCheckins;
-  const _SetupChecklist({
+  const SetupChecklist({
+    super.key,
     required this.gym,
     required this.memberCount,
     required this.planCount,
@@ -522,7 +551,7 @@ class _SetupChecklist extends ConsumerWidget {
         done: memberCount >= 3,
         onTap: () => showAddMemberSheet(
           context,
-        ).then((_) => container.invalidate(_dashboardDataProvider)),
+        ).then((_) => container.invalidate(dashboardDataProvider)),
       ),
       (
         label: 'Set your monthly fee',
@@ -636,127 +665,14 @@ class _SetupChecklist extends ConsumerWidget {
   }
 }
 
-// ─── Quick actions ────────────────────────────────────────────────────────────
-
-class _QuickActions extends ConsumerWidget {
-  final bool canCollect;
-  final bool canLeads;
-  const _QuickActions({required this.canCollect, required this.canLeads});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final role = ref.watch(staffRoleProvider).valueOrNull;
-    final container = ProviderScope.containerOf(context, listen: false);
-    final items = [
-      // Opens the add-member sheet directly instead of routing to the
-      // members list first — same shortcut the dashboard checklist uses.
-      (
-        icon: AppIcons.personAdd,
-        label: 'Add\nmember',
-        accent: true,
-        onTap: () => showAddMemberSheet(
-          context,
-        ).then((_) => container.invalidate(_dashboardDataProvider)),
-      ),
-      if (canCollect)
-        (
-          icon: AppIcons.payments,
-          label: 'Collect\npayment',
-          accent: false,
-          onTap: () => context.push('/staff/billing'),
-        ),
-      if (RoleAccess.canCheckIn(role))
-        (
-          icon: AppIcons.qrScanner,
-          label: 'Check\nin',
-          accent: false,
-          onTap: () => context.push('/staff/check-in'),
-        ),
-      if (canLeads)
-        (
-          icon: AppIcons.personSearch,
-          label: 'Add\nlead',
-          accent: false,
-          onTap: () => context.push('/staff/leads'),
-        ),
-    ];
-
-    // One teal tile — the action a front desk reaches for most — and the rest
-    // on white, so the row has a clear first choice instead of four equals.
-    // A 2-column grid (rather than squeezing every tile into one row) gives
-    // each tile enough width for icon + label side by side without wrapping.
-    Widget tile(_QuickAction item) => GestureDetector(
-      onTap: item.onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-        decoration: item.accent
-            ? BoxDecoration(
-                color: AppTheme.accent,
-                borderRadius: BorderRadius.circular(14),
-              )
-            : AppTheme.cardDecoration(radius: 14),
-        child: Row(
-          children: [
-            Icon(
-              item.icon,
-              size: 20,
-              color: item.accent ? Colors.white : AppTheme.accent,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                item.label.replaceAll('\n', ' '),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  height: 1.2,
-                  fontWeight: FontWeight.w800,
-                  color: item.accent ? Colors.white : AppTheme.ink,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    final rows = <Widget>[];
-    for (var i = 0; i < items.length; i += 2) {
-      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
-      final second = i + 1 < items.length;
-      rows.add(
-        Row(
-          children: [
-            Expanded(child: tile(items[i])),
-            if (second) ...[
-              const SizedBox(width: 8),
-              Expanded(child: tile(items[i + 1])),
-            ],
-          ],
-        ),
-      );
-    }
-    return Column(children: rows);
-  }
-}
-
-typedef _QuickAction = ({
-  IconData icon,
-  String label,
-  bool accent,
-  VoidCallback onTap,
-});
-
 // ─── Birthdays ────────────────────────────────────────────────────────────────
 
 /// Renders only on days someone actually has a birthday, so it costs nothing
 /// on the other 300-odd days. Each row opens WhatsApp with the wish already
 /// typed — the whole point is that it takes one tap at the front desk.
-class _BirthdaysToday extends StatelessWidget {
+class BirthdaysToday extends StatelessWidget {
   final List<Map<String, dynamic>> members;
-  const _BirthdaysToday({required this.members});
+  const BirthdaysToday({super.key, required this.members});
 
   static String _name(Map<String, dynamic> m) =>
       '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
@@ -986,167 +902,6 @@ class _RecentPayments extends StatelessWidget {
   }
 }
 
-// ─── Header (date · gym name · bell · avatar) ─────────────────────────────────
-
-class _Header extends ConsumerWidget {
-  final String gymName;
-  final Map<String, dynamic>? gym;
-  final bool showBilling;
-  const _Header({required this.gymName, this.gym, this.showBilling = false});
-
-  // Same label logic the old full-width _SubscriptionBanner card used —
-  // just rendered as a compact pill under the gym name instead of a
-  // separate card, so it stays visible every time the dashboard opens
-  // without competing with the checklist for space.
-  static String _planLabel(Map<String, dynamic>? gym) {
-    final plan = gym?['plan'] as String?;
-    final daysLeft = planExpiryDaysRemaining(gym);
-    final isTrial =
-        gym?['trial_ends_at'] != null && gym?['plan_expires_at'] == null;
-
-    if (isTrial) {
-      return daysLeft != null
-          ? (daysLeft <= 0
-                ? 'Trial ends today'
-                : 'Trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}')
-          : 'Trial active';
-    }
-    final planName = plan != null && plan.isNotEmpty
-        ? plan[0].toUpperCase() + plan.substring(1)
-        : 'Free';
-    return daysLeft != null
-        ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
-        : '$planName plan';
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final unreadCount =
-        ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // The chevron is the branch switcher the canvas draws — it opens
-              // the same sheet the shell's branch control uses.
-              GestureDetector(
-                onTap: () => showAdaptiveSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  builder: (_) => const GymBranchesSheet(),
-                ),
-                behavior: HitTestBehavior.opaque,
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        gymName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.ink,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Icon(
-                      AppIcons.expandMore,
-                      size: 20,
-                      color: AppTheme.inkSoft,
-                    ),
-                  ],
-                ),
-              ),
-              if (showBilling && gym != null) ...[
-                const SizedBox(height: 6),
-                GestureDetector(
-                  onTap: () => context.push('/staff/subscription'),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        AppIcons.sell,
-                        size: 13,
-                        color: AppTheme.accent,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          _planLabel(gym),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.accent,
-                          ),
-                        ),
-                      ),
-                      const Icon(
-                        AppIcons.chevronRight,
-                        size: 14,
-                        color: AppTheme.accent,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        // Canvas 1a keeps one control up here. What's-new moved into Settings,
-        // and the profile avatar is redundant with More → Settings.
-        GestureDetector(
-          onTap: () => context.push('/staff/notifications'),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: const Icon(
-                  AppIcons.notifications,
-                  size: 21,
-                  color: AppTheme.ink,
-                ),
-              ),
-              if (unreadCount > 0)
-                Positioned(
-                  top: -2,
-                  right: -2,
-                  child: Container(
-                    width: 11,
-                    height: 11,
-                    decoration: BoxDecoration(
-                      color: AppTheme.statusDanger,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: AppTheme.background,
-                        width: 1.5,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 // ─── Collected today hero (dark card) ─────────────────────────────────────────
 
 String _rupees(double v) {
@@ -1165,10 +920,8 @@ String _rupees(double v) {
   return '$currencySymbol${buf.toString()}';
 }
 
-/// Canvas 1a hero: one kicker, one big figure with a trend pill, a rule, and
-/// the single row that asks for an action. Collected-today, expenses and
-/// profit deliberately live in Reports now — the artboard keeps this card to
-/// one decision.
+/// This month's collection with its trend and today's figure, then the one
+/// row that asks for an action: what's left to collect.
 class _CollectedHero extends StatelessWidget {
   final Map<String, dynamic> data;
   const _CollectedHero({required this.data});
@@ -1194,6 +947,8 @@ class _CollectedHero extends StatelessWidget {
     final growth = data['growthPct'] as int?;
     final pending = (data['pendingRevenue'] as double?) ?? 0;
     final dueCount = (data['dueCount'] as int?) ?? 0;
+    final today = (data['collectedToday'] as double?) ?? 0;
+    final todayCount = (data['todayPayments'] as int?) ?? 0;
     final up = growth == null || growth >= 0;
 
     return GestureDetector(
@@ -1269,6 +1024,15 @@ class _CollectedHero extends StatelessWidget {
                 ],
               ],
             ),
+            const SizedBox(height: 8),
+            Text(
+              'Today ${_rupees(today)} · $todayCount payment${todayCount == 1 ? '' : 's'}',
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.onDarkSoft,
+              ),
+            ),
             const SizedBox(height: 16),
             Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
             const SizedBox(height: 14),
@@ -1342,6 +1106,351 @@ class _CollectedHero extends StatelessWidget {
   }
 }
 
+// ─── Due stats (overdue · due this week · last month) ─────────────────────────
+
+class _DueStats extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _DueStats({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final overdueCount = (data['overdueCount'] as int?) ?? 0;
+    final overdueAmount = (data['overdueAmount'] as double?) ?? 0;
+    final renewals = (data['renewals'] as List<dynamic>? ?? const []).length;
+    final lastMonth = (data['lastMonthRevenue'] as double?) ?? 0;
+
+    Widget stat({
+      required String label,
+      required String value,
+      required String hint,
+      required Color color,
+      VoidCallback? onTap,
+    }) => Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+          decoration: AppTheme.cardDecoration(radius: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.inkSoft,
+                ),
+              ),
+              const SizedBox(height: 6),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: AppTheme.numberStyle(fontSize: 18, color: color),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                hint,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: AppTheme.inkHint),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return Row(
+      children: [
+        stat(
+          label: 'Overdue',
+          value: _rupees(overdueAmount),
+          hint: '$overdueCount member${overdueCount == 1 ? '' : 's'}',
+          color: overdueCount > 0 ? AppTheme.statusDanger : AppTheme.ink,
+          // Same destination the old Needs-attention overdue row opened.
+          onTap: () => context.push('/staff/upcoming-payments'),
+        ),
+        const SizedBox(width: 8),
+        stat(
+          label: 'Due in 7 days',
+          value: '$renewals',
+          hint: 'renewals',
+          color: renewals > 0 ? AppTheme.statusWarn : AppTheme.ink,
+          onTap: () => context.push('/staff/upcoming-payments?tab=expiring'),
+        ),
+        const SizedBox(width: 8),
+        stat(
+          label: 'Last month',
+          value: _rupees(lastMonth),
+          hint: 'collected',
+          color: AppTheme.ink,
+          onTap: () => context.push('/staff/reports'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Profit & loss (this month) ───────────────────────────────────────────────
+
+/// Collected − expenses, the same rule Reports uses. Only built for roles that
+/// can read expenses — RLS returns none otherwise and profit would be fake.
+class _ProfitLossCard extends ConsumerWidget {
+  final Map<String, dynamic> data;
+  const _ProfitLossCard({required this.data});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final revenue = (data['monthRevenue'] as double?) ?? 0;
+    final expenses = (data['monthExpenses'] as double?) ?? 0;
+    final profit = (data['profit'] as double?) ?? 0;
+    final margin = revenue > 0 ? (profit / revenue * 100).round() : null;
+    final container = ProviderScope.containerOf(context, listen: false);
+
+    Widget figure(String label, double value, Color color) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _rupees(value.abs()),
+              style: AppTheme.numberStyle(fontSize: 17, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Widget button(String label, IconData icon, VoidCallback onTap) => Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: AppTheme.surface2,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16, color: AppTheme.ink),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: AppTheme.cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Profit & loss', style: AppTheme.sectionTitle),
+              ),
+              if (margin != null)
+                Text(
+                  '$margin% margin',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: profit >= 0
+                        ? AppTheme.statusActive
+                        : AppTheme.statusDanger,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'This month',
+            style: TextStyle(fontSize: 12, color: AppTheme.inkHint),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              figure('Collected', revenue, AppTheme.ink),
+              figure('Expenses', expenses, AppTheme.statusDanger),
+              figure(
+                profit >= 0 ? 'Profit' : 'Loss',
+                profit,
+                profit >= 0 ? AppTheme.statusActive : AppTheme.statusDanger,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              button('Add expense', AppIcons.add, () async {
+                await showAddExpenseSheet(context);
+                container.invalidate(dashboardDataProvider);
+              }),
+              const SizedBox(width: 8),
+              button(
+                'Full report',
+                AppIcons.barChart,
+                () => context.push('/staff/reports'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Breakdown (payment mode / expense category) ──────────────────────────────
+
+String _methodLabel(String method) => switch (method) {
+  'cash' => 'Cash',
+  'upi' => 'UPI',
+  'bank_transfer' => 'Bank transfer',
+  'card' => 'Card',
+  'online' || 'razorpay' => 'Online',
+  _ => method.isEmpty ? 'Other' : method[0].toUpperCase() + method.substring(1),
+};
+
+/// A titled card of horizontal bars — one per key, largest first.
+class _BreakdownCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Map<String, double> totals;
+  final String Function(String) labelFor;
+  final Color color;
+  final String emptyText;
+  final VoidCallback onTap;
+  const _BreakdownCard({
+    required this.title,
+    required this.subtitle,
+    required this.totals,
+    required this.labelFor,
+    required this.color,
+    required this.emptyText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total = totals.values.fold<double>(0, (s, v) => s + v);
+    // ponytail: top 5, the rest folded into "Others" so the card stays short.
+    final entries = totals.entries.toList();
+    final shown = entries.take(5).toList();
+    final rest = entries.skip(5).fold<double>(0, (s, e) => s + e.value);
+
+    Widget bar(String label, double value) {
+      final share = total > 0 ? value / total : 0.0;
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${_rupees(value)} · ${(share * 100).round()}%',
+                  style: AppTheme.numberStyle(
+                    fontSize: 12.5,
+                    color: AppTheme.inkSoft,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: share,
+                minHeight: 6,
+                backgroundColor: AppTheme.surface2,
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+        decoration: AppTheme.cardDecoration(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text(title, style: AppTheme.sectionTitle)),
+                const Icon(
+                  AppIcons.chevronRight,
+                  size: 18,
+                  color: AppTheme.inkHint,
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              total > 0 ? '$subtitle · ${_rupees(total)}' : subtitle,
+              style: const TextStyle(fontSize: 12, color: AppTheme.inkHint),
+            ),
+            if (total <= 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  emptyText,
+                  style: const TextStyle(fontSize: 13, color: AppTheme.inkHint),
+                ),
+              )
+            else ...[
+              for (final e in shown) bar(labelFor(e.key), e.value),
+              if (rest > 0) bar('Others', rest),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Needs attention ──────────────────────────────────────────────────────────
 
 /// Check-ins recorded while offline and still waiting to sync. Read straight
@@ -1354,12 +1463,13 @@ final _pendingSyncProvider = FutureProvider<int>(
 /// One card holding everything that needs a decision today. Each row is only
 /// built from data the backend already returns, and the whole card disappears
 /// when there is nothing to act on.
-class _NeedsAttention extends ConsumerWidget {
+class NeedsAttention extends ConsumerWidget {
   final Map<String, dynamic> data;
   final bool canBilling;
   final bool canLeads;
   final bool canCheckIn;
-  const _NeedsAttention({
+  const NeedsAttention({
+    super.key,
     required this.data,
     required this.canBilling,
     required this.canLeads,
@@ -1463,7 +1573,7 @@ class _PaymentDueToday extends ConsumerWidget {
       useSafeArea: true,
       builder: (_) => _CollectPaymentSheet(
         member: member,
-        onPaid: () => container.invalidate(_dashboardDataProvider),
+        onPaid: () => container.invalidate(dashboardDataProvider),
       ),
     );
   }
@@ -2072,130 +2182,6 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
           ],
         ),
       ),
-    );
-  }
-}
-
-// ─── Shortcuts (the More-sheet destinations a front desk actually opens) ──────
-
-typedef _Shortcut = ({IconData icon, String label, VoidCallback onTap});
-
-/// Six destinations, not a second More menu: the ones a front desk opens
-/// mid-shift. Everything else (Workouts, Diet plans, Staff, Export, Activity
-/// log, Settings) stays in the More sheet, which is one tap away and is
-/// already organised for browsing. Same routes and icons as that sheet — this
-/// is a second door, not a second copy. Role gating mirrors
-/// `_visibleMoreItemsFor` in the shell, expressed with RoleAccess because
-/// that's what the dashboard already holds.
-List<_Shortcut> _homeShortcuts(BuildContext context, String? role) => [
-  if (RoleAccess.canSeeReports(role))
-    (
-      icon: AppIcons.barChart,
-      label: 'Reports',
-      onTap: () => context.push('/staff/reports'),
-    ),
-  if (RoleAccess.canCheckIn(role))
-    (
-      icon: AppIcons.calendarMonth,
-      label: 'Attendance',
-      onTap: () => context.push('/staff/attendance-calendar'),
-    ),
-  if (RoleAccess.canSeeBatches(role))
-    (
-      icon: AppIcons.calendarToday,
-      label: 'Batches',
-      onTap: () => context.push('/staff/classes'),
-    ),
-  if (RoleAccess.canSeeLeads(role))
-    (
-      icon: AppIcons.personAdd,
-      label: 'Leads',
-      onTap: () => context.push('/staff/leads'),
-    ),
-  if (RoleAccess.canSeeSettings(role))
-    (
-      icon: AppIcons.campaign,
-      label: 'Reminders',
-      onTap: () => context.push('/staff/reminders'),
-    ),
-  if (RoleAccess.canSeeExpenses(role))
-    (
-      icon: AppIcons.receipt,
-      label: 'Expenses',
-      onTap: () => context.push('/staff/expenses'),
-    ),
-];
-
-/// One unlabelled card, a single row of icon tiles. No section header: four
-/// icons explain themselves, and a "Manage"/"Records" title only invited more
-/// tiles under it. Hidden entirely when a role can reach none of them.
-class _ShortcutPanel extends StatelessWidget {
-  final List<_Shortcut> items;
-  const _ShortcutPanel({required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
-
-    Widget tile(_Shortcut item) => GestureDetector(
-      onTap: item.onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Column(
-          children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                color: AppTheme.accentSoft,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              alignment: Alignment.center,
-              child: Icon(item.icon, size: 24, color: AppTheme.accent),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              item.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.ink,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    // Rows of three: six tiles crammed into one row leaves ~60px each, too
-    // narrow for both the icon and a label like "Attendance". A trailing short
-    // row keeps the three-column grid (blank slots, not spread-out tiles), but
-    // a role with a single short row gets its tiles spread across the card.
-    final rows = <Widget>[];
-    final columns = items.length <= 3 ? items.length : 3;
-    for (var i = 0; i < items.length; i += columns) {
-      final slice = items.skip(i).take(columns).toList();
-      rows.add(
-        Row(
-          children: [
-            for (var c = 0; c < columns; c++)
-              Expanded(
-                child: c < slice.length
-                    ? tile(slice[c])
-                    : const SizedBox.shrink(),
-              ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      decoration: AppTheme.cardDecoration(),
-      child: Column(children: rows),
     );
   }
 }
