@@ -11,6 +11,7 @@ import 'access/gym_permissions.dart';
 import 'access/permission_gate.dart';
 import '../features/auth/providers/auth_provider.dart';
 import '../features/auth/screens/welcome_screen.dart';
+import '../features/auth/screens/language_screen.dart';
 import '../features/auth/screens/login_screen.dart';
 import '../features/auth/screens/member_login_screen.dart';
 import '../features/auth/screens/member_help_screen.dart';
@@ -136,6 +137,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final loc = state.matchedLocation;
       final isAuthRoute =
           loc == '/welcome' ||
+          loc == '/language' ||
           loc.startsWith('/login') ||
           loc.startsWith('/signup') ||
           loc.startsWith('/forgot-password') ||
@@ -294,6 +296,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ConsentScreen(),
       ),
       GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
+      GoRoute(path: '/language', builder: (_, __) => const LanguageScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(
         path: '/login/member',

@@ -10,6 +10,7 @@ import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Classes'),
+        title: Text(context.l10n.classes),
         leading: const BackButton(),
         actions: [
           if (canAdd)
@@ -258,14 +259,17 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                           container.invalidate(_classesProvider);
                           container.invalidate(_upcomingSessionsProvider);
                         }),
-                    onAddSession: () => showAdaptiveSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      useSafeArea: true,
-                      builder: (_) => _AddSessionSheet(gymClass: classes[i]),
-                    ).then(
-                      (_) => container.invalidate(_upcomingSessionsProvider),
-                    ),
+                    onAddSession: () =>
+                        showAdaptiveSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          useSafeArea: true,
+                          builder: (_) =>
+                              _AddSessionSheet(gymClass: classes[i]),
+                        ).then(
+                          (_) =>
+                              container.invalidate(_upcomingSessionsProvider),
+                        ),
                     onEnroll: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -276,10 +280,9 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                     onDelete: () async {
                       final confirmed = await showConfirmDialog(
                         context,
-                        title: 'Delete batch',
-                        body:
-                            'Delete "${classes[i].name}"? All sessions and enrollments will also be removed. This cannot be undone.',
-                        confirmLabel: 'Delete',
+                        title: context.l10n.deleteBatch,
+                        body: context.l10n.deleteBatchBody(classes[i].name),
+                        confirmLabel: context.l10n.delete,
                         icon: AppIcons.delete,
                       );
                       if (!mounted) return;
@@ -294,7 +297,9 @@ class _ClassesScreenState extends ConsumerState<ClassesScreen> {
                       } catch (e) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Failed to delete: $e')),
+                            SnackBar(
+                              content: Text(context.l10n.failedToDelete('$e')),
+                            ),
                           );
                         }
                       }
@@ -449,9 +454,9 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -470,7 +475,10 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SheetHeader(title: 'Add session', subtitle: widget.gymClass.name),
+          SheetHeader(
+            title: context.l10n.addSession,
+            subtitle: widget.gymClass.name,
+          ),
           const SizedBox(height: 18),
           Row(
             children: [
@@ -478,7 +486,7 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FieldLabel('Date'),
+                    FieldLabel(context.l10n.date),
                     InkWell(
                       onTap: _pickDate,
                       borderRadius: BorderRadius.circular(14),
@@ -499,7 +507,7 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FieldLabel('Time'),
+                    FieldLabel(context.l10n.time),
                     InkWell(
                       onTap: _pickTime,
                       borderRadius: BorderRadius.circular(14),
@@ -527,7 +535,7 @@ class _AddSessionSheetState extends State<_AddSessionSheet> {
                       strokeWidth: 2,
                     ),
                   )
-                : const Text('Add session'),
+                : Text(context.l10n.addSession),
           ),
         ],
       ),
@@ -674,7 +682,10 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              'Capacity: ${cls.capacity}  ·  ${cls.durationMin} min',
+                              context.l10n.capacityDuration(
+                                cls.capacity,
+                                cls.durationMin,
+                              ),
                               style: const TextStyle(
                                 fontSize: 12,
                                 color: AppTheme.inkSoft,
@@ -775,8 +786,8 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                                 children: [
                                   Text(
                                     _expanded
-                                        ? 'Hide Sessions'
-                                        : 'View Sessions',
+                                        ? context.l10n.hideSessions
+                                        : context.l10n.viewSessions,
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -833,12 +844,15 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
           if (_expanded) ...[
             const Divider(height: 1),
             if (sessions.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16),
+              Padding(
+                padding: const EdgeInsets.all(16),
                 child: Center(
                   child: Text(
-                    'No upcoming sessions',
-                    style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
+                    context.l10n.noUpcomingSessions,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.inkHint,
+                    ),
                   ),
                 ),
               )
@@ -852,7 +866,7 @@ class _ClassCardState extends ConsumerState<_ClassCard> {
                 child: OutlinedButton.icon(
                   onPressed: widget.onAddSession,
                   icon: const Icon(AppIcons.add, size: 16),
-                  label: const Text('Add session'),
+                  label: Text(context.l10n.addSession),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 42),
                   ),
@@ -999,18 +1013,18 @@ class _EmptyBatches extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
-              'No batches yet',
-              style: TextStyle(
+            Text(
+              context.l10n.noBatchesYet,
+              style: const TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 17,
                 color: AppTheme.ink,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Add your first class to get started.',
-              style: TextStyle(color: AppTheme.inkSoft, fontSize: 14),
+            Text(
+              context.l10n.addFirstClass,
+              style: const TextStyle(color: AppTheme.inkSoft, fontSize: 14),
               textAlign: TextAlign.center,
             ),
             if (onAdd != null) ...[
@@ -1020,7 +1034,7 @@ class _EmptyBatches extends StatelessWidget {
                 child: ElevatedButton.icon(
                   onPressed: onAdd,
                   icon: const Icon(AppIcons.add, size: 18),
-                  label: const Text('Add Batch'),
+                  label: Text(context.l10n.addBatch),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(0, 44),
                   ),
@@ -1183,9 +1197,9 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -1207,16 +1221,18 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SheetHeader(title: _isEdit ? 'Edit class' : 'Add class'),
+              SheetHeader(
+                title: _isEdit ? context.l10n.editClass : context.l10n.addClass,
+              ),
               const SizedBox(height: 18),
-              const FieldLabel('Class name'),
+              FieldLabel(context.l10n.className),
               TextFormField(
                 controller: _nameCtrl,
                 validator: (v) =>
                     (v?.trim().isEmpty ?? true) ? 'Required' : null,
               ),
               const SizedBox(height: 14),
-              const FieldLabel('Type'),
+              FieldLabel(context.l10n.type),
               DropdownButtonFormField<String>(
                 value: _type,
                 items: _classTypes
@@ -1236,7 +1252,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const FieldLabel('Coach'),
+                        FieldLabel(context.l10n.coach),
                         TextFormField(controller: _trainerCtrl),
                       ],
                     ),
@@ -1246,7 +1262,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const FieldLabel('Capacity'),
+                        FieldLabel(context.l10n.capacity),
                         TextFormField(
                           controller: _capacityCtrl,
                           keyboardType: TextInputType.number,
@@ -1263,7 +1279,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const FieldLabel('Time'),
+                        FieldLabel(context.l10n.time),
                         InkWell(
                           onTap: () => _pickTime(true),
                           borderRadius: BorderRadius.circular(14),
@@ -1282,7 +1298,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const FieldLabel('Duration'),
+                        FieldLabel(context.l10n.duration),
                         InkWell(
                           onTap: () => _pickTime(false),
                           borderRadius: BorderRadius.circular(14),
@@ -1301,7 +1317,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
               const SizedBox(height: 16),
 
               // Runs-on day selector (drives auto-generated sessions)
-              const FieldLabel('Runs on'),
+              FieldLabel(context.l10n.runsOn),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: _days.map((d) {
@@ -1336,7 +1352,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   _scheduleDays.isEmpty
-                      ? 'No days selected — add sessions manually from the calendar.'
+                      ? context.l10n.noDaysSelected
                       : '${_scheduleDays.length} day${_scheduleDays.length > 1 ? 's' : ''} selected',
                   style: const TextStyle(
                     fontSize: 11.5,
@@ -1347,7 +1363,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
               const SizedBox(height: 16),
 
               // Color picker
-              const FieldLabel('Colour'),
+              FieldLabel(context.l10n.colour),
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
@@ -1386,7 +1402,7 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                 }).toList(),
               ),
               const SizedBox(height: 14),
-              const FieldLabel('Description (optional)'),
+              FieldLabel(context.l10n.descriptionOptional),
               TextFormField(controller: _descCtrl, maxLines: 2),
               const SizedBox(height: 20),
 
@@ -1401,7 +1417,11 @@ class _ClassFormSheetState extends ConsumerState<_ClassFormSheet> {
                           strokeWidth: 2,
                         ),
                       )
-                    : Text(_isEdit ? 'Save changes' : 'Save class'),
+                    : Text(
+                        _isEdit
+                            ? context.l10n.saveChanges
+                            : context.l10n.saveClass,
+                      ),
               ),
             ],
           ),
@@ -1549,9 +1569,9 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
     final container = ProviderScope.containerOf(context, listen: false);
     final confirmed = await showConfirmDialog(
       context,
-      title: 'Remove from batch',
-      body: 'Remove $name from ${widget.gymClass.name}?',
-      confirmLabel: 'Remove',
+      title: context.l10n.removeFromBatch,
+      body: context.l10n.removeMemberFromBatch(name, widget.gymClass.name),
+      confirmLabel: context.l10n.remove,
       icon: AppIcons.personRemove,
     );
     if (!mounted) return;
@@ -1567,9 +1587,9 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
       container.invalidate(_classEnrollmentsProvider(widget.gymClass.id));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to remove: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.removeFailed('$e'))),
+        );
       }
     } finally {
       if (mounted) setState(() => _busyMemberId = null);
@@ -1659,8 +1679,8 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
               enabled: !_loadingMembers,
               decoration: InputDecoration(
                 hintText: _loadingMembers
-                    ? 'Loading members…'
-                    : 'Search members',
+                    ? context.l10n.loadingEllipsis
+                    : context.l10n.searchMembers,
                 prefixIcon: const Icon(AppIcons.search, size: 18),
               ),
               onChanged: (v) => setState(() => _search = v),
@@ -1682,8 +1702,8 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         child: Text(
                           query.isEmpty
-                              ? 'All members are already enrolled.'
-                              : 'No members found',
+                              ? context.l10n.allMembersEnrolled
+                              : context.l10n.noMembersFound,
                           style: const TextStyle(
                             fontSize: 13,
                             color: AppTheme.inkSoft,
@@ -1737,17 +1757,17 @@ class _BatchEnrollmentSheetState extends ConsumerState<_BatchEnrollmentSheet> {
                         }).toList(),
                       ),
                     const SizedBox(height: 20),
-                    const SectionHeader(title: 'Enrolled'),
+                    SectionHeader(title: context.l10n.enrolled),
                     const SizedBox(height: 10),
                     ...enrollmentsAsync.maybeWhen(
                       data: (rows) {
                         if (rows.isEmpty) {
                           return [
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Text(
-                                'No members enrolled yet — add one above.',
-                                style: TextStyle(
+                                context.l10n.noMembersEnrolled,
+                                style: const TextStyle(
                                   fontSize: 13,
                                   color: AppTheme.inkSoft,
                                 ),

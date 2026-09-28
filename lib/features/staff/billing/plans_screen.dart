@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/responsive_content.dart';
+import '../../../l10n/l10n.dart';
 import 'billing_screen.dart' show PlansBody;
 
 /// New design's Plans page (Home → Plans). The same list, form and day-pass
@@ -12,7 +13,10 @@ class PlansScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Plans'), leading: const BackButton()),
+      appBar: AppBar(
+        title: Text(context.l10n.featPlans),
+        leading: const BackButton(),
+      ),
       body: const ResponsiveContent(child: PlansBody()),
     );
   }

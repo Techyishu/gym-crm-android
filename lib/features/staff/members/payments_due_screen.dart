@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/services/data_refresh.dart';
@@ -227,7 +228,7 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Payments Due'),
+        title: Text(context.l10n.paymentsDue),
         leading: const BackButton(),
       ),
       body: ResponsiveContent(
@@ -267,9 +268,7 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final overdue =
-        items
-            .where((i) => i.days < 0 && i.days >= -_recentOverdueDays)
-            .toList()
+        items.where((i) => i.days < 0 && i.days >= -_recentOverdueDays).toList()
           ..sort((a, b) => a.days.compareTo(b.days));
     final oldOverdue = items
         .where((i) => i.days < -_recentOverdueDays)
@@ -298,10 +297,10 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
     final parts = <Widget>[];
     if (items.isEmpty) {
       parts.add(
-        const _EmptyNote(
+        _EmptyNote(
           icon: AppIcons.checkCircle,
-          title: 'All caught up',
-          sub: 'No overdue or upcoming payments right now.',
+          title: context.l10n.allCaughtUp,
+          sub: context.l10n.noOverdueUpcoming,
         ),
       );
     } else if (_day != null) {
@@ -310,13 +309,13 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
       parts.add(_DayFilterBar(onClear: () => setState(() => _day = null)));
       parts.add(
         list.isEmpty
-            ? const _EmptyNote(
+            ? _EmptyNote(
                 icon: AppIcons.checkCircle,
-                title: 'Nothing due that day',
-                sub: 'Pick another day or clear the filter.',
+                title: context.l10n.nothingDueThatDay,
+                sub: context.l10n.pickAnotherDay,
               )
             : group(
-                _dayHeading(day, today),
+                _dayHeading(context, day, today),
                 list,
                 tone: day == today ? _Tone.today : _Tone.coming,
               ),
@@ -327,7 +326,7 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
           if (overdue.isNotEmpty) {
             parts.add(
               group(
-                'OVERDUE',
+                context.l10n.overdue.toUpperCase(),
                 overdue,
                 tone: _Tone.overdue,
                 cap: _showAllOverdue ? null : _collapsedOverdue,
@@ -341,7 +340,11 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
           }
           if (dueToday.isNotEmpty) {
             parts.add(
-              group(_dayHeading(today, today), dueToday, tone: _Tone.today),
+              group(
+                _dayHeading(context, today, today),
+                dueToday,
+                tone: _Tone.today,
+              ),
             );
           }
           parts.addAll(_comingGroups(coming, today, group));
@@ -351,10 +354,10 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
             // there are still old, unresolved dues sitting in Expired.
             parts.add(
               oldOverdue.isEmpty
-                  ? const _EmptyNote(
+                  ? _EmptyNote(
                       icon: AppIcons.checkCircle,
-                      title: 'No overdue payments',
-                      sub: 'Everyone is up to date.',
+                      title: context.l10n.noOverduePayments,
+                      sub: context.l10n.everyoneUpToDate,
                     )
                   : _EmptyNote(
                       icon: AppIcons.history,
@@ -368,7 +371,13 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
           } else {
             parts.add(_OverdueBanner(items: overdue));
             parts.add(const SizedBox(height: 14));
-            parts.add(group('OLDEST FIRST', overdue, tone: _Tone.overdue));
+            parts.add(
+              group(
+                context.l10n.oldestFirst.toUpperCase(),
+                overdue,
+                tone: _Tone.overdue,
+              ),
+            );
           }
           if (oldOverdue.isNotEmpty) {
             parts.add(const SizedBox(height: 4));
@@ -377,21 +386,25 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
         case _Filter.today:
           parts.add(
             dueToday.isEmpty
-                ? const _EmptyNote(
+                ? _EmptyNote(
                     icon: AppIcons.checkCircle,
-                    title: 'Nothing due today',
-                    sub: 'Check what is coming up next.',
+                    title: context.l10n.nothingDueToday,
+                    sub: context.l10n.checkComingNext,
                   )
-                : group(_dayHeading(today, today), dueToday, tone: _Tone.today),
+                : group(
+                    _dayHeading(context, today, today),
+                    dueToday,
+                    tone: _Tone.today,
+                  ),
           );
         case _Filter.coming:
           parts.addAll(
             coming.isEmpty
-                ? const [
+                ? [
                     _EmptyNote(
                       icon: AppIcons.checkCircle,
-                      title: 'Nothing coming up',
-                      sub: 'No payments due in the next 30 days.',
+                      title: context.l10n.nothingComingUp,
+                      sub: context.l10n.noPaymentsNext30Days,
                     ),
                   ]
                 : _comingGroups(coming, today, group),
@@ -484,17 +497,18 @@ class _PaymentsDueScreenState extends ConsumerState<PaymentsDueScreen> {
     }
     return [
       for (final e in byDay.entries)
-        group(_dayHeading(e.key, today), e.value, tone: _Tone.coming),
-      if (later.isNotEmpty) group('LATER', later, tone: _Tone.coming),
+        group(_dayHeading(context, e.key, today), e.value, tone: _Tone.coming),
+      if (later.isNotEmpty)
+        group(context.l10n.later.toUpperCase(), later, tone: _Tone.coming),
     ];
   }
 }
 
-String _dayHeading(DateTime d, DateTime today) {
+String _dayHeading(BuildContext context, DateTime d, DateTime today) {
   final diff = d.difference(today).inDays;
   final date = DateFormat('EEE d MMM').format(d).toUpperCase();
-  if (diff == 0) return 'TODAY · $date';
-  if (diff == 1) return 'TOMORROW · $date';
+  if (diff == 0) return '${context.l10n.today.toUpperCase()} · $date';
+  if (diff == 1) return '${context.l10n.tomorrow.toUpperCase()} · $date';
   return date;
 }
 
@@ -512,11 +526,11 @@ class _FilterRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const labels = {
-      _Filter.all: 'All',
-      _Filter.overdue: 'Overdue',
-      _Filter.today: 'Today',
-      _Filter.coming: 'Coming',
+    final labels = {
+      _Filter.all: context.l10n.all,
+      _Filter.overdue: context.l10n.overdue,
+      _Filter.today: context.l10n.today,
+      _Filter.coming: context.l10n.coming,
     };
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -740,16 +754,16 @@ class _DayFilterBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: const Text(
-              'Showing one day only',
-              style: TextStyle(
+            child: Text(
+              context.l10n.showingOneDay,
+              style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AppTheme.inkSoft,
               ),
             ),
           ),
-          TextButton(onPressed: onClear, child: const Text('Clear day')),
+          TextButton(onPressed: onClear, child: Text(context.l10n.clearDay)),
         ],
       ),
     );
@@ -784,9 +798,9 @@ class _OldOverdueLink extends StatelessWidget {
                 ),
               ),
             ),
-            const Text(
-              'View expired members',
-              style: TextStyle(
+            Text(
+              context.l10n.viewExpiredMembers,
+              style: const TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.accent,
@@ -826,9 +840,9 @@ class _OverdueBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'TOTAL OVERDUE',
-                  style: TextStyle(
+                Text(
+                  context.l10n.totalOverdue,
+                  style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.4,
@@ -997,12 +1011,12 @@ class _DueTile extends StatelessWidget {
     required this.onCollected,
   });
 
-  String get _when {
+  String _when(BuildContext context) {
     final d = item.days;
-    if (d < 0) return '${-d} day${d == -1 ? '' : 's'} late';
-    if (d == 0) return 'due today';
-    if (d == 1) return 'tomorrow';
-    return 'in $d days';
+    if (d < 0) return context.l10n.daysLate(-d);
+    if (d == 0) return context.l10n.dueTodayLabel;
+    if (d == 1) return context.l10n.tomorrow;
+    return context.l10n.inDays(d);
   }
 
   @override
@@ -1075,7 +1089,7 @@ class _DueTile extends StatelessWidget {
                                       ),
                                       const TextSpan(text: ' · '),
                                     ],
-                                    TextSpan(text: _when),
+                                    TextSpan(text: _when(context)),
                                     if (roomy && item.planName != null)
                                       TextSpan(text: ' · ${item.planName}'),
                                   ],
@@ -1182,7 +1196,7 @@ class _WhatsAppIcon extends StatelessWidget {
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open WhatsApp')),
+          SnackBar(content: Text(context.l10n.whatsappOpenFailed)),
         );
       }
     }

@@ -733,9 +733,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     final container = ProviderScope.containerOf(context, listen: false);
     final npd = m.nextPaymentDate;
     if (npd == null || npd.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.renewalDateMissing)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.renewalDateMissing)));
       return;
     }
     final openInvoices =
@@ -1149,7 +1149,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SectionHeader(title: 'Contact'),
+              _SectionHeader(title: context.l10n.contact),
               const SizedBox(height: 12),
               if (m.customId != null && m.customId!.isNotEmpty)
                 _InfoRow(label: 'Member ID', value: m.customId!),
@@ -1204,7 +1204,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     final ctrl = TextEditingController(text: m.biometricId ?? '');
     final saved = await showAppDialog<bool>(
       context,
-      title: 'Biometric Device ID',
+      title: context.l10n.biometricDeviceId,
       content: Padding(
         padding: const EdgeInsets.only(top: 12),
         child: TextFormField(
@@ -1241,9 +1241,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       container.invalidate(_memberDetailProvider(m.id));
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(context.l10n.couldNotSaveError('$e'))),
         );
       }
@@ -1261,7 +1259,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SectionHeader(title: 'Enrolled Batches'),
+              _SectionHeader(title: context.l10n.enrolledBatches),
               const SizedBox(height: 12),
               batches.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -1342,7 +1340,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SectionHeader(title: 'Recent Check-ins'),
+              _SectionHeader(title: context.l10n.recentCheckIns),
               const SizedBox(height: 12),
               checkIns.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -1795,11 +1793,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
         : allPlans;
     if (!mounted) return;
     if (plans.isEmpty) {
-      _toast(
-        convert
-            ? context.l10n.noFullPlans
-            : context.l10n.noActivePlans,
-      );
+      _toast(convert ? context.l10n.noFullPlans : context.l10n.noActivePlans);
       return;
     }
     final currentPlanId = m.currentMembership?.plan?.id;
@@ -1903,7 +1897,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
-        title: 'Recurring Discount',
+        title: context.l10n.recurringDiscount,
         helperText: context.l10n.recurringDiscountBody,
         controller: discountCtrl,
         confirmLabel: context.l10n.confirm,
@@ -2029,7 +2023,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
-        title: 'Edit Recurring Discount',
+        title: context.l10n.editRecurringDiscountTitle,
         helperText: context.l10n.editDiscountBody,
         controller: discountCtrl,
         confirmLabel: context.l10n.save,
@@ -2315,7 +2309,7 @@ class _DiscountSheet extends StatelessWidget {
             children: [
               SheetHeader(title: title, subtitle: helperText),
               const SizedBox(height: 18),
-              const FieldLabel('Discount amount'),
+              FieldLabel(context.l10n.discountAmount),
               TextField(
                 controller: controller,
                 keyboardType: const TextInputType.numberWithOptions(
@@ -2750,15 +2744,15 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     final email = _emailCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
     if (email.isNotEmpty && !isValidEmail(email)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.enterValidEmail)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.enterValidEmail)));
       return;
     }
     if (phone.isNotEmpty && !isValidIndianMobile(phone)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.enterValidMobile)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.enterValidMobile)));
       return;
     }
     setState(() => _loading = true);
@@ -2821,9 +2815,9 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.saveFailed)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.saveFailed)));
         setState(() => _loading = false);
       }
     }
@@ -2841,11 +2835,11 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('1 · MEMBER', style: AppTheme.kicker),
+                Text(context.l10n.stepMember, style: AppTheme.kicker),
                 const SizedBox(height: 8),
                 SheetCard(child: _memberSection()),
                 const SizedBox(height: 18),
-                const Text('2 · MEMBERSHIP', style: AppTheme.kicker),
+                Text(context.l10n.stepMembership, style: AppTheme.kicker),
                 const SizedBox(height: 8),
                 SheetCard(child: _membershipSection()),
                 const SizedBox(height: 16),
@@ -2949,15 +2943,15 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
               TextFormField(
                 controller: _nameCtrl,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(hintText: 'Full name'),
+                decoration: InputDecoration(hintText: context.l10n.fullName),
               ),
               const SizedBox(height: 10),
               TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  prefixIcon: Padding(
+                decoration: InputDecoration(
+                  prefixIcon: const Padding(
                     padding: EdgeInsets.only(left: 12, right: 4),
                     child: Text(
                       '+91',
@@ -2968,8 +2962,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                       ),
                     ),
                   ),
-                  prefixIconConstraints: BoxConstraints(minWidth: 0),
-                  hintText: 'Mobile number',
+                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
+                  hintText: context.l10n.mobileNumber,
                 ),
               ),
             ],
@@ -3071,7 +3065,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             controller: _emailCtrl,
             keyboardType: TextInputType.emailAddress,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'Email'),
+            decoration: InputDecoration(labelText: context.l10n.email),
           ),
           if (_emailCtrl.text.trim().isEmpty) ...[
             const SizedBox(height: 4),
@@ -3084,8 +3078,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
           TextFormField(
             controller: _customIdCtrl,
             maxLength: 50,
-            decoration: const InputDecoration(
-              labelText: 'Member ID',
+            decoration: InputDecoration(
+              labelText: context.l10n.memberId,
               hintText: 'e.g. GYM-001',
               counterText: '',
             ),
@@ -3096,7 +3090,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             maxLength: 20,
             keyboardType: TextInputType.number,
             decoration: InputDecoration(
-              labelText: 'Biometric device ID',
+              labelText: context.l10n.biometricDeviceId,
               hintText: 'e.g. 001',
               counterText: '',
               helperText: context.l10n.fingerprintHelper,
@@ -3123,15 +3117,15 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             ],
           ),
           const SizedBox(height: 16),
-          const Text('EMERGENCY CONTACT', style: AppTheme.kicker),
+          Text(context.l10n.emergencyContact, style: AppTheme.kicker),
           const SizedBox(height: 8),
           TextFormField(
             controller: _emergencyNameCtrl,
             maxLength: 120,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Name',
-              hintText: 'e.g. Ramesh (father)',
+            decoration: InputDecoration(
+              labelText: context.l10n.name,
+              hintText: context.l10n.emergencyNameHint,
               counterText: '',
             ),
           ),
@@ -3140,8 +3134,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             controller: _emergencyPhoneCtrl,
             maxLength: 20,
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Number',
+            decoration: InputDecoration(
+              labelText: context.l10n.number,
               counterText: '',
             ),
           ),
@@ -3149,7 +3143,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
           TextFormField(
             controller: _notesCtrl,
             maxLines: 2,
-            decoration: const InputDecoration(labelText: 'Notes'),
+            decoration: InputDecoration(labelText: context.l10n.notes),
           ),
         ],
       ),

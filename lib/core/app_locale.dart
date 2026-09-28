@@ -7,6 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// English so nobody's app changes until they pick a language in Settings.
 const _prefsKey = 'app_locale';
 
+Future<bool> hasChosenAppLocale() async {
+  try {
+    return (await SharedPreferences.getInstance()).containsKey(_prefsKey);
+  } catch (_) {
+    return false;
+  }
+}
+
 /// The language saved on this phone, read once in main() before runApp.
 Future<Locale> loadSavedLocale() async {
   try {

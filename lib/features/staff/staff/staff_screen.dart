@@ -14,6 +14,7 @@ import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 final staffListProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -61,6 +62,18 @@ const _kRoles = [
   ('staff', 'Staff', 'Basic access to members and check-ins'),
 ];
 
+String _roleLabel(BuildContext context, String role) => switch (role) {
+  'manager' => context.l10n.manager,
+  'trainer' => context.l10n.trainer,
+  _ => context.l10n.staff,
+};
+
+String _roleHint(BuildContext context, String role) => switch (role) {
+  'manager' => context.l10n.managerAccessHint,
+  'trainer' => context.l10n.trainerAccessHint,
+  _ => context.l10n.staffAccessHint,
+};
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 class StaffScreen extends ConsumerWidget {
   const StaffScreen({super.key});
@@ -81,12 +94,12 @@ class StaffScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Staff & roles'),
+        title: Text(context.l10n.staffAndRoles),
         leading: const BackButton(),
         actions: [
           if (isOwner)
             IconButton(
-              tooltip: 'Permissions',
+              tooltip: context.l10n.permissions,
               onPressed: () => context.push('/staff/staff/permissions'),
               icon: const Icon(AppIcons.adminPanel),
             ),
@@ -96,9 +109,9 @@ class StaffScreen extends ConsumerWidget {
         child: staffAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => Center(
-            child: const Text(
-              'Could not load staff. Pull down to retry.',
-              style: TextStyle(color: AppTheme.inkSoft),
+            child: Text(
+              context.l10n.staffLoadFailed,
+              style: const TextStyle(color: AppTheme.inkSoft),
             ),
           ),
           data: (list) => ListView(
@@ -107,7 +120,7 @@ class StaffScreen extends ConsumerWidget {
               _RoleGuide(),
               const SizedBox(height: 16),
               Text(
-                '${list.length} team member${list.length != 1 ? 's' : ''}',
+                context.l10n.teamMembersCount(list.length),
                 style: const TextStyle(
                   fontSize: 12,
                   color: AppTheme.inkSoft,
@@ -116,12 +129,12 @@ class StaffScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
               if (list.isEmpty)
-                const Center(
+                Center(
                   child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
+                    padding: const EdgeInsets.symmetric(vertical: 40),
                     child: Text(
-                      'No staff members yet.',
-                      style: TextStyle(color: AppTheme.inkSoft),
+                      context.l10n.noStaffMembers,
+                      style: const TextStyle(color: AppTheme.inkSoft),
                     ),
                   ),
                 )
@@ -143,14 +156,18 @@ class StaffScreen extends ConsumerWidget {
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(AppIcons.add, size: 18, color: AppTheme.accent),
-                          SizedBox(width: 6),
+                          const Icon(
+                            AppIcons.add,
+                            size: 18,
+                            color: AppTheme.accent,
+                          ),
+                          const SizedBox(width: 6),
                           Text(
-                            'Invite staff member',
-                            style: TextStyle(
+                            context.l10n.inviteStaffMember,
+                            style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
                               color: AppTheme.accent,
@@ -186,9 +203,9 @@ class StaffScreen extends ConsumerWidget {
     final last = member['last_name'] as String? ?? '';
     final confirmed = await showConfirmDialog(
       context,
-      title: 'Remove $first $last?',
-      body: "They'll lose access to this gym's dashboard immediately.",
-      confirmLabel: 'Remove',
+      title: context.l10n.removeStaffTitle('$first $last'.trim()),
+      body: context.l10n.removeStaffBody,
+      confirmLabel: context.l10n.remove,
       icon: AppIcons.delete,
     );
     if (confirmed != true || !context.mounted) return;
@@ -201,11 +218,9 @@ class StaffScreen extends ConsumerWidget {
       final token = session?.accessToken;
       if (token == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Session expired. Please sign in again.'),
-            ),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(context.l10n.sessionExpired)));
         }
         return;
       }
@@ -228,9 +243,9 @@ class StaffScreen extends ConsumerWidget {
           role: member['role'] as String? ?? 'staff',
         );
         if (!context.mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Staff member removed')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.staffMemberRemoved)),
+        );
         ref.invalidate(staffListProvider);
       } else {
         final err =
@@ -241,9 +256,9 @@ class StaffScreen extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
       }
     }
   }
@@ -259,9 +274,9 @@ class _RoleGuide extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Roles',
-            style: TextStyle(
+          Text(
+            context.l10n.roles,
+            style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
               color: AppTheme.ink,
@@ -278,7 +293,7 @@ class _RoleGuide extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      r.$3,
+                      _roleHint(context, r.$1),
                       style: const TextStyle(
                         fontSize: 12,
                         color: AppTheme.inkSoft,
@@ -464,11 +479,7 @@ Future<void> showInviteStaffSheet(BuildContext context) async {
     if (current >= limit) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Starter includes $limit login. Upgrade to Pro to add staff.',
-          ),
-        ),
+        SnackBar(content: Text(context.l10n.starterStaffLimit(limit))),
       );
       return;
     }
@@ -510,11 +521,11 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
     final email = _emailCtrl.text.trim();
 
     if (first.isEmpty || last.isEmpty) {
-      setState(() => _error = 'First and last name are required.');
+      setState(() => _error = context.l10n.firstLastNameRequired);
       return;
     }
     if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(email)) {
-      setState(() => _error = 'Enter a valid email address.');
+      setState(() => _error = context.l10n.enterValidEmail);
       return;
     }
 
@@ -529,7 +540,7 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
       if (!mounted) return;
       final token = session?.accessToken;
       if (token == null) {
-        setState(() => _error = 'Session expired. Please sign in again.');
+        setState(() => _error = context.l10n.sessionExpired);
         return;
       }
       final res = await http.post(
@@ -570,17 +581,18 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
         );
         if (!mounted) return;
         Navigator.pop(context);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Invite sent to $email')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.inviteSentTo(email))),
+        );
       } else {
         final body = jsonDecode(res.body) as Map;
         setState(
-          () => _error = body['error']?.toString() ?? 'Failed to send invite',
+          () => _error =
+              body['error']?.toString() ?? context.l10n.failedSendInvite,
         );
       }
     } catch (e) {
-      if (mounted) setState(() => _error = 'Error: $e');
+      if (mounted) setState(() => _error = context.l10n.errorWithMessage('$e'));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -599,10 +611,9 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SheetHeader(
-            title: 'Invite staff',
-            subtitle:
-                "They'll receive an email to set their password and log in.",
+          SheetHeader(
+            title: context.l10n.inviteStaff,
+            subtitle: context.l10n.inviteStaffHelp,
           ),
           const SizedBox(height: 18),
 
@@ -613,7 +624,7 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FieldLabel('First name'),
+                    FieldLabel(context.l10n.firstName),
                     TextField(
                       controller: _firstCtrl,
                       textCapitalization: TextCapitalization.words,
@@ -626,7 +637,7 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FieldLabel('Last name'),
+                    FieldLabel(context.l10n.lastName),
                     TextField(
                       controller: _lastCtrl,
                       textCapitalization: TextCapitalization.words,
@@ -638,7 +649,7 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
           ),
           const SizedBox(height: 14),
 
-          const FieldLabel('Email'),
+          FieldLabel(context.l10n.email),
           TextField(
             controller: _emailCtrl,
             keyboardType: TextInputType.emailAddress,
@@ -648,14 +659,14 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
           const SizedBox(height: 16),
 
           // Role chips
-          const FieldLabel('Role'),
+          FieldLabel(context.l10n.role),
           Row(
             children: _kRoles
                 .map(
                   (r) => Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: PillChip(
-                      label: r.$2,
+                      label: _roleLabel(context, r.$1),
                       selected: _role == r.$1,
                       onTap: () => setState(() => _role = r.$1),
                     ),
@@ -665,7 +676,7 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
           ),
           const SizedBox(height: 8),
           Text(
-            _kRoles.firstWhere((r) => r.$1 == _role).$3,
+            _roleHint(context, _role),
             style: const TextStyle(
               fontSize: 12,
               color: AppTheme.inkSoft,
@@ -707,7 +718,9 @@ class _InviteStaffSheetState extends ConsumerState<_InviteStaffSheet> {
                       ),
                     )
                   : const Icon(AppIcons.send, size: 18),
-              label: Text(_sending ? 'Sending invite…' : 'Send invite'),
+              label: Text(
+                _sending ? context.l10n.sendingInvite : context.l10n.sendInvite,
+              ),
             ),
           ),
         ],

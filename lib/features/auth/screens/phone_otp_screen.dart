@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 // MSG91 widget keys — client-facing widget config, not the sensitive
 // server authkey (that lives only as the MSG91_AUTHKEY Supabase secret,
@@ -85,7 +86,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   Future<void> _sendOtp() async {
     final digits = _phoneCtrl.text.trim();
     if (!_digitsOnly.hasMatch(digits)) {
-      setState(() => _error = 'Enter a valid mobile number');
+      setState(() => _error = context.l10n.validMobile);
       return;
     }
     setState(() {
@@ -104,14 +105,14 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         _startResendTimer();
       } else {
         setState(() {
-          _error = 'Could not send OTP. Please try again.';
+          _error = context.l10n.otpSendFailed;
           _sending = false;
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not send OTP. Please try again.';
+        _error = context.l10n.otpSendFailed;
         _sending = false;
       });
     }
@@ -125,14 +126,12 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       _startResendTimer();
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Code resent via SMS.')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.codeResentSms)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not resend code. Please try again.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.resendFailed)));
     }
   }
 
@@ -158,7 +157,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       if (response == null ||
           response['type'] != 'success' ||
           accessToken == null) {
-        _failOtp('Incorrect code. Please try again.');
+        _failOtp(context.l10n.incorrectCode);
         return;
       }
 
@@ -177,7 +176,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       // Router redirect handles navigation from here (staff vs member vs
       // brand-new /gym-setup), same as email OTP login.
     } catch (e) {
-      _failOtp('Verification failed. Please try again.');
+      _failOtp(context.l10n.verificationFailed);
     }
   }
 
@@ -224,13 +223,13 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
           ],
         ),
         const SizedBox(height: 8),
-        const AuthLogoBadge(
-          label: 'MOBILE ACCESS',
-          headline: 'One code.\nYou are in.',
+        AuthLogoBadge(
+          label: context.l10n.mobileAccess,
+          headline: context.l10n.mobileAccessHeadline,
         ),
         const SizedBox(height: 28),
         Text(
-          'Log in with mobile',
+          context.l10n.loginWithMobile,
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w800,
             color: AppTheme.textPrimary,
@@ -239,7 +238,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          "We'll text you a one-time code.",
+          context.l10n.mobileOtpHelp,
           style: Theme.of(
             context,
           ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
@@ -249,7 +248,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
           _PhoneErrorBanner(message: _error!),
           const SizedBox(height: 16),
         ],
-        const AuthFieldLabel('Mobile number'),
+        AuthFieldLabel(context.l10n.mobileNumber),
         const SizedBox(height: 6),
         AuthPillField(
           controller: _phoneCtrl,
@@ -276,7 +275,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         ),
         const SizedBox(height: 24),
         AuthGradientButton(
-          label: 'Send code',
+          label: context.l10n.sendCode,
           loading: _sending,
           onPressed: _sending ? null : _sendOtp,
         ),
@@ -291,9 +290,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(height: 24),
-        const AuthLogoBadge(
-          label: 'VERIFY YOUR NUMBER',
-          headline: 'Check your messages.',
+        AuthLogoBadge(
+          label: context.l10n.verifyYourNumber,
+          headline: context.l10n.checkMessages,
         ),
         const SizedBox(height: 28),
         Container(
@@ -307,7 +306,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         ),
         const SizedBox(height: 16),
         Text(
-          'Enter verification code',
+          context.l10n.enterVerificationCode,
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
             color: AppTheme.ink,
@@ -316,7 +315,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(
-            text: 'We sent a 6-digit code to\n',
+            text: context.l10n.sentSixDigitCode,
             style: const TextStyle(
               color: AppTheme.textSecondary,
               fontSize: 14,
@@ -368,7 +367,7 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
         ],
         const SizedBox(height: 22),
         AuthGradientButton(
-          label: 'Verify',
+          label: context.l10n.verify,
           loading: _verifying,
           onPressed: (_verifying || !allFilled) ? null : _verifyOtp,
         ),
@@ -377,8 +376,8 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
           onTap: _resendCooldown > 0 ? null : _resendOtp,
           child: Text(
             _resendCooldown > 0
-                ? 'Resend code in ${_resendCooldown}s'
-                : 'Resend code',
+                ? context.l10n.resendCodeIn(_resendCooldown)
+                : context.l10n.resendCode,
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -399,9 +398,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
               _resendCooldown = 0;
             });
           },
-          child: const Text(
-            'Change number',
-            style: TextStyle(
+          child: Text(
+            context.l10n.changeNumber,
+            style: const TextStyle(
               fontSize: 13,
               color: AppTheme.inkHint,
               fontWeight: FontWeight.w500,

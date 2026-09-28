@@ -13,6 +13,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/utils/validators.dart';
 import '../../../core/widgets/auth_canvas_kit.dart';
 import '../../../features/auth/providers/auth_provider.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/widgets/redesign.dart' show SelectChip;
 
 /// Canvas `w2`/`w3`/`w4` — steps 2–4 of the "Set up your gym" wizard. Step 1
@@ -53,7 +54,7 @@ class _FirstSetupScreenState extends ConsumerState<FirstSetupScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    'Step $_stepIndex of 4',
+                    context.l10n.setupStep(_stepIndex),
                     style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
@@ -102,13 +103,23 @@ class _CreatePlanStep extends ConsumerStatefulWidget {
 }
 
 class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
-  final _nameCtrl = TextEditingController(text: 'Monthly membership');
+  final _nameCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _featureCtrl = TextEditingController();
   String _interval = 'monthly';
   final List<String> _features = [];
   bool _loading = false;
   String? _error;
+  bool _nameInitialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_nameInitialized) {
+      _nameCtrl.text = context.l10n.monthlyMembership;
+      _nameInitialized = true;
+    }
+  }
 
   @override
   void dispose() {
@@ -131,11 +142,11 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
     final name = _nameCtrl.text.trim();
     final price = double.tryParse(_priceCtrl.text.trim());
     if (name.isEmpty) {
-      setState(() => _error = 'Plan name is required.');
+      setState(() => _error = context.l10n.planNameRequired);
       return;
     }
     if (price == null || price <= 0) {
-      setState(() => _error = 'Enter a price for this plan.');
+      setState(() => _error = context.l10n.planPriceRequired);
       return;
     }
     setState(() {
@@ -162,7 +173,7 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
       widget.onCreated(created);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Could not create the plan. Please try again.');
+      setState(() => _error = context.l10n.planCreateFailed);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -173,9 +184,9 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const CanvasHeading(
-          title: 'Create your first membership plan',
-          subtitle: 'Set the plan your members will join.',
+        CanvasHeading(
+          title: context.l10n.createFirstPlan,
+          subtitle: context.l10n.createFirstPlanHelp,
         ),
         const SizedBox(height: 18),
         if (_error != null) ...[
@@ -183,15 +194,17 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
           const SizedBox(height: 16),
         ],
         CanvasField(
-          label: 'Plan name',
+          label: context.l10n.planName,
           child: TextField(
             controller: _nameCtrl,
-            decoration: canvasFieldDecoration(hint: 'Monthly membership'),
+            decoration: canvasFieldDecoration(
+              hint: context.l10n.monthlyMembership,
+            ),
           ),
         ),
         const SizedBox(height: 16),
         CanvasField(
-          label: 'Price',
+          label: context.l10n.price,
           child: TextField(
             controller: _priceCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -212,9 +225,9 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
           ),
         ),
         const SizedBox(height: 16),
-        const Text(
-          'Billing cycle',
-          style: TextStyle(
+        Text(
+          context.l10n.billingCycle,
+          style: const TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w700,
             color: AppTheme.ink,
@@ -225,10 +238,10 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
           spacing: 7,
           runSpacing: 7,
           children: [
-            for (final i in const [
-              ('monthly', 'Monthly'),
-              ('quarterly', 'Quarterly'),
-              ('annual', 'Yearly'),
+            for (final i in [
+              ('monthly', context.l10n.monthly),
+              ('quarterly', context.l10n.quarterly),
+              ('annual', context.l10n.yearly),
             ])
               SelectChip(
                 label: i.$2,
@@ -239,14 +252,16 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
         ),
         const SizedBox(height: 16),
         CanvasField(
-          label: "What's included",
+          label: context.l10n.whatsIncluded,
           optional: true,
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _featureCtrl,
-                  decoration: canvasFieldDecoration(hint: 'Add a feature'),
+                  decoration: canvasFieldDecoration(
+                    hint: context.l10n.addFeature,
+                  ),
                   onSubmitted: (_) => _addFeature(),
                 ),
               ),
@@ -262,9 +277,9 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
                     color: AppTheme.surface2,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Text(
-                    'Add',
-                    style: TextStyle(
+                  child: Text(
+                    context.l10n.add,
+                    style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.ink,
@@ -308,8 +323,8 @@ class _CreatePlanStepState extends ConsumerState<_CreatePlanStep> {
         ],
         const SizedBox(height: 20),
         CanvasButton(
-          label: 'Create plan & continue',
-          loadingLabel: 'Creating plan…',
+          label: context.l10n.createPlanContinue,
+          loadingLabel: context.l10n.creatingPlan,
           loading: _loading,
           onPressed: _submit,
         ),
@@ -360,7 +375,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
 
   Future<void> _submit() async {
     if (_firstCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'First name is required.');
+      setState(() => _error = context.l10n.firstNameRequired);
       return;
     }
     setState(() {
@@ -439,9 +454,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
     } catch (e) {
       if (!mounted) return;
       setState(
-        () => _error =
-            duplicatePhoneMessage(e) ??
-            'Could not add this member. Please try again.',
+        () => _error = duplicatePhoneMessage(e) ?? context.l10n.memberAddFailed,
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -453,9 +466,9 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const CanvasHeading(
-          title: 'Add your first member',
-          subtitle: 'You can add more members anytime.',
+        CanvasHeading(
+          title: context.l10n.addFirstMember,
+          subtitle: context.l10n.addFirstMemberHelp,
         ),
         const SizedBox(height: 18),
         if (_error != null) ...[
@@ -466,7 +479,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
           children: [
             Expanded(
               child: CanvasField(
-                label: 'First name',
+                label: context.l10n.firstName,
                 child: TextField(
                   controller: _firstCtrl,
                   textCapitalization: TextCapitalization.words,
@@ -477,7 +490,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
             const SizedBox(width: 10),
             Expanded(
               child: CanvasField(
-                label: 'Last name',
+                label: context.l10n.lastName,
                 optional: true,
                 child: TextField(
                   controller: _lastCtrl,
@@ -490,7 +503,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
         ),
         const SizedBox(height: 16),
         CanvasField(
-          label: 'Mobile number',
+          label: context.l10n.mobileNumber,
           optional: true,
           child: TextField(
             controller: _phoneCtrl,
@@ -513,7 +526,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
         ),
         const SizedBox(height: 16),
         CanvasField(
-          label: 'Email',
+          label: context.l10n.email,
           optional: true,
           child: TextField(
             controller: _emailCtrl,
@@ -523,7 +536,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
         ),
         const SizedBox(height: 16),
         CanvasField(
-          label: 'Plan',
+          label: context.l10n.plan,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
             decoration: BoxDecoration(
@@ -541,9 +554,9 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
           GestureDetector(
             onTap: () => setState(() => _moreDetails = true),
             behavior: HitTestBehavior.opaque,
-            child: const Text(
-              'More details — member ID, amount paid, notes',
-              style: TextStyle(
+            child: Text(
+              context.l10n.moreMemberDetails,
+              style: const TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.inkSoft,
@@ -555,7 +568,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               CanvasField(
-                label: 'Member ID',
+                label: context.l10n.memberId,
                 optional: true,
                 child: TextField(
                   controller: _customIdCtrl,
@@ -564,7 +577,7 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
               ),
               const SizedBox(height: 14),
               CanvasField(
-                label: 'Amount paid',
+                label: context.l10n.amountPaid,
                 optional: true,
                 child: TextField(
                   controller: _paidCtrl,
@@ -589,12 +602,12 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
               ),
               const SizedBox(height: 14),
               CanvasField(
-                label: 'Notes',
+                label: context.l10n.notes,
                 optional: true,
                 child: TextField(
                   controller: _notesCtrl,
                   decoration: canvasFieldDecoration(
-                    hint: 'Anything to remember',
+                    hint: context.l10n.notesHint,
                   ),
                 ),
               ),
@@ -602,8 +615,8 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
           ),
         const SizedBox(height: 20),
         CanvasButton(
-          label: 'Add member',
-          loadingLabel: 'Adding member…',
+          label: context.l10n.addMember,
+          loadingLabel: context.l10n.addingMember,
           loading: _loading,
           onPressed: _submit,
         ),
@@ -611,9 +624,9 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
         Center(
           child: TextButton(
             onPressed: _loading ? null : widget.onSkip,
-            child: const Text(
-              'Skip for now',
-              style: TextStyle(
+            child: Text(
+              context.l10n.skipForNow,
+              style: const TextStyle(
                 color: AppTheme.inkSoft,
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -639,7 +652,7 @@ class _ReadyStep extends ConsumerWidget {
         (ref.watch(staffProfileProvider).valueOrNull?['gyms']
                 as Map<String, dynamic>?)?['name']
             as String? ??
-        'Your gym';
+        context.l10n.yourGym;
     final planName = plan?['name'] as String?;
     final planPrice = (plan?['price'] as num?)?.toDouble();
     final planInterval = plan?['billing_interval'] as String?;
@@ -678,9 +691,9 @@ class _ReadyStep extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  'Your gym is ready',
-                  style: TextStyle(
+                Text(
+                  context.l10n.gymReady,
+                  style: const TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.7,
@@ -688,11 +701,11 @@ class _ReadyStep extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 18),
-                _ReadyRow(label: 'Gym created', detail: gymName),
+                _ReadyRow(label: context.l10n.gymCreated, detail: gymName),
                 if (planName != null && planPrice != null) ...[
                   const SizedBox(height: 11),
                   _ReadyRow(
-                    label: 'First plan created',
+                    label: context.l10n.firstPlanCreated,
                     detail:
                         '${formatCurrency(planPrice)}'
                         '${planInterval != null ? ' $planInterval' : ''}',
@@ -700,7 +713,10 @@ class _ReadyStep extends ConsumerWidget {
                 ],
                 if (memberName != null) ...[
                   const SizedBox(height: 11),
-                  _ReadyRow(label: 'First member added', detail: memberName),
+                  _ReadyRow(
+                    label: context.l10n.firstMemberAdded,
+                    detail: memberName,
+                  ),
                 ],
               ],
             ),
@@ -716,12 +732,12 @@ class _ReadyStep extends ConsumerWidget {
                 await prefs.remove(kPendingFirstSetup);
                 if (context.mounted) context.go('/staff/home');
               },
-              child: const Text('Go to dashboard'),
+              child: Text(context.l10n.goToDashboard),
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'You can add more plans, members and staff from the dashboard.',
+          Text(
+            context.l10n.setupReadyHelp,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 13,

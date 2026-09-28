@@ -9,6 +9,7 @@ import 'package:currency_picker/currency_picker.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../l10n/l10n.dart';
 import '../../auth/providers/auth_provider.dart';
 
 /// Step 1 of the "Set up your gym" wizard — canvas `w1`. Reached ONLY by the
@@ -48,8 +49,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     if (phone.isNotEmpty) {
       _phoneCtrl.text = phone;
     } else {
-      // No phone field on iOS (App Review 5.1.1).
-      _needsPhone = !isIOS;
+      _needsPhone = true;
     }
   }
 
@@ -63,14 +63,13 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
   Future<void> _submit() async {
     final name = _gymNameCtrl.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = 'Gym name is required.');
+      setState(() => _error = context.l10n.gymNameRequired);
       return;
     }
     if (_needsPhone) {
       final digits = _phoneCtrl.text.trim();
-      // Optional (App Review 5.1.1) — validate format only when provided.
-      if (digits.isNotEmpty && !_digitsOnly.hasMatch(digits)) {
-        setState(() => _error = 'Enter a valid mobile number.');
+      if (!_digitsOnly.hasMatch(digits)) {
+        setState(() => _error = context.l10n.validMobile);
         return;
       }
     }
@@ -145,17 +144,17 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          'Set up your gym',
-                          style: TextStyle(
+                        Text(
+                          context.l10n.setUpYourGym,
+                          style: const TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
                             color: AppTheme.inkSoft,
                           ),
                         ),
-                        const Text(
-                          'Step 1 of 4',
-                          style: TextStyle(
+                        Text(
+                          context.l10n.setupStep(1),
+                          style: const TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
                             color: AppTheme.inkHint,
@@ -179,9 +178,9 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                       }),
                     ),
                     const SizedBox(height: 22),
-                    const Text(
-                      'Tell us about your gym',
-                      style: TextStyle(
+                    Text(
+                      context.l10n.tellUsAboutGym,
+                      style: const TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.8,
@@ -190,9 +189,12 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'This is what members will see.',
-                      style: TextStyle(fontSize: 14.5, color: AppTheme.inkSoft),
+                    Text(
+                      context.l10n.membersWillSee,
+                      style: const TextStyle(
+                        fontSize: 14.5,
+                        color: AppTheme.inkSoft,
+                      ),
                     ),
                     if (_error.isNotEmpty) ...[
                       const SizedBox(height: 16),
@@ -218,7 +220,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                     ],
                     const SizedBox(height: 16),
                     _field(
-                      label: 'Gym name',
+                      label: context.l10n.gymName,
                       child: TextField(
                         controller: _gymNameCtrl,
                         textCapitalization: TextCapitalization.words,
@@ -232,7 +234,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                     ),
                     const SizedBox(height: 16),
                     _field(
-                      label: 'Country and currency',
+                      label: context.l10n.countryCurrency,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () => showCountryPicker(
@@ -270,9 +272,9 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                                   color: AppTheme.ink,
                                 ),
                               ),
-                              const Text(
-                                'Change',
-                                style: TextStyle(
+                              Text(
+                                context.l10n.change,
+                                style: const TextStyle(
                                   fontSize: 13,
                                   color: AppTheme.inkHint,
                                 ),
@@ -285,8 +287,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                     if (_needsPhone) ...[
                       const SizedBox(height: 16),
                       _field(
-                        label: 'Mobile number',
-                        optional: true,
+                        label: context.l10n.mobileNumber,
                         child: TextField(
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
@@ -327,7 +328,11 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                         children: [
                           ElevatedButton(
                             onPressed: _submitting ? null : _submit,
-                            child: Text(isIOS ? 'Create Gym' : 'Continue'),
+                            child: Text(
+                              isIOS
+                                  ? context.l10n.createGym
+                                  : context.l10n.continueLabel,
+                            ),
                           ),
                           if (_submitting)
                             Positioned.fill(
@@ -336,10 +341,10 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                                   color: AppTheme.accentDark,
                                   borderRadius: BorderRadius.circular(14),
                                 ),
-                                child: const Row(
+                                child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    SizedBox(
+                                    const SizedBox(
                                       width: 16,
                                       height: 16,
                                       child: CircularProgressIndicator(
@@ -350,10 +355,10 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                                             ),
                                       ),
                                     ),
-                                    SizedBox(width: 10),
+                                    const SizedBox(width: 10),
                                     Text(
-                                      'Saving…',
-                                      style: TextStyle(
+                                      context.l10n.saving,
+                                      style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 15.5,
                                         fontWeight: FontWeight.w700,
@@ -368,10 +373,10 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                     ),
                     if (!isIOS) ...[
                       const SizedBox(height: 14),
-                      const Center(
+                      Center(
                         child: Text(
-                          '3-day free trial · No credit card needed',
-                          style: TextStyle(
+                          context.l10n.freeTrialNoCard,
+                          style: const TextStyle(
                             fontSize: 11,
                             color: AppTheme.inkHint,
                             letterSpacing: 0.5,
@@ -409,9 +414,9 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
             ),
             if (optional) ...[
               const SizedBox(width: 6),
-              const Text(
-                '— optional',
-                style: TextStyle(
+              Text(
+                context.l10n.optionalLabel,
+                style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.inkHint,

@@ -12,6 +12,7 @@ import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/services/data_refresh.dart';
+import '../../../l10n/l10n.dart';
 
 Future<void> _dialPhone(String phone) async {
   final uri = Uri.parse('tel:$phone');
@@ -72,6 +73,20 @@ Color _statusFg(String s) => switch (s) {
 String _capitalize(String s) =>
     s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
+String _leadLabel(BuildContext context, String value) => switch (value) {
+  'new' => context.l10n.statusNew,
+  'contacted' => context.l10n.statusContacted,
+  'trial' => context.l10n.statusTrial,
+  'converted' => context.l10n.statusConverted,
+  'lost' => context.l10n.statusLost,
+  'manual' => context.l10n.sourceManual,
+  'website' => context.l10n.sourceWebsite,
+  'referral' => context.l10n.sourceReferral,
+  'walk-in' => context.l10n.sourceWalkIn,
+  'social' => context.l10n.sourceSocial,
+  _ => _capitalize(value),
+};
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 class LeadsScreen extends ConsumerStatefulWidget {
@@ -109,7 +124,7 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Leads'),
+        title: Text(context.l10n.leads),
         leading: const BackButton(),
         actions: [
           if (canAdd)
@@ -124,7 +139,11 @@ class _LeadsScreenState extends ConsumerState<LeadsScreen> {
                     color: AppTheme.accent,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Icon(AppIcons.add, size: 22, color: Colors.white),
+                  child: const Icon(
+                    AppIcons.add,
+                    size: 22,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -301,9 +320,9 @@ class _SummaryStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     // Follow-up first — it is the only bucket that needs action today.
     final chips = <(String, String, int)>[
-      ('followup', 'Follow-up', followUpCount),
-      for (final s in _statuses) (s, _capitalize(s), counts[s] ?? 0),
-      ('all', 'All', total),
+      ('followup', context.l10n.followUp, followUpCount),
+      for (final s in _statuses) (s, _leadLabel(context, s), counts[s] ?? 0),
+      ('all', context.l10n.all, total),
     ];
     return Container(
       color: AppTheme.surface,
@@ -472,7 +491,7 @@ class _LeadCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${lead.source != null ? _capitalize(lead.source!) : 'Manual'} · ${timeAgo(lead.createdAt)}',
+                        '${_leadLabel(context, lead.source ?? 'manual')} · ${timeAgo(lead.createdAt)}',
                         style: const TextStyle(
                           fontSize: 12,
                           color: AppTheme.inkSoft,
@@ -509,17 +528,16 @@ class _LeadCard extends StatelessWidget {
                           if (v == 'delete') {
                             final ok = await showConfirmDialog(
                               context,
-                              title: 'Delete enquiry?',
-                              body:
-                                  'Delete ${lead.name}? This cannot be undone.',
-                              confirmLabel: 'Delete',
+                              title: context.l10n.deleteEnquiryTitle,
+                              body: context.l10n.deleteEnquiryBody(lead.name),
+                              confirmLabel: context.l10n.delete,
                               icon: AppIcons.delete,
                             );
                             if (ok == true) onDelete!();
                           }
                         },
                         itemBuilder: (_) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'delete',
                             child: Row(
                               children: [
@@ -530,8 +548,8 @@ class _LeadCard extends StatelessWidget {
                                 ),
                                 SizedBox(width: 8),
                                 Text(
-                                  'Delete',
-                                  style: TextStyle(
+                                  context.l10n.delete,
+                                  style: const TextStyle(
                                     color: AppTheme.statusDanger,
                                   ),
                                 ),
@@ -602,7 +620,7 @@ class _LeadCard extends StatelessWidget {
                   const Spacer(),
                   _ActionIconBtn(
                     icon: AppIcons.call,
-                    tooltip: 'Call',
+                    tooltip: context.l10n.callTooltip,
                     onTap: () => _dialPhone(lead.phone!),
                   ),
                   const SizedBox(width: 8),
@@ -654,7 +672,7 @@ class _LeadCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SheetHeader(title: 'Update status'),
+            SheetHeader(title: context.l10n.updateStatus),
             const SizedBox(height: 16),
             ..._statuses.map((s) {
               final selected = s == lead.status;
@@ -705,7 +723,7 @@ class _LeadCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 12),
                         Text(
-                          _capitalize(s),
+                          _leadLabel(context, s),
                           style: const TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 14.5,
@@ -740,7 +758,7 @@ class _StatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        _capitalize(status),
+        _leadLabel(context, status),
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -789,14 +807,12 @@ class _ActionIconBtn extends StatelessWidget {
 /// Opens the add-lead sheet from anywhere (the shell's floating Add button),
 /// not just the leads list. Resolves when the sheet closes; callers refresh
 /// whatever they own.
-Future<void> showAddLeadSheet(BuildContext context) =>
-    showAdaptiveSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const _AddLeadSheet(),
-    );
-
+Future<void> showAddLeadSheet(BuildContext context) => showAdaptiveSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  builder: (_) => const _AddLeadSheet(),
+);
 
 class _AddLeadSheet extends ConsumerStatefulWidget {
   const _AddLeadSheet();
@@ -861,9 +877,9 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -883,7 +899,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SheetHeader(title: 'Add enquiry'),
+            SheetHeader(title: context.l10n.addEnquiry),
             const SizedBox(height: 18),
             Row(
               children: [
@@ -891,7 +907,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const FieldLabel('First name'),
+                      FieldLabel(context.l10n.firstName),
                       TextFormField(controller: _firstCtrl),
                     ],
                   ),
@@ -901,7 +917,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const FieldLabel('Last name'),
+                      FieldLabel(context.l10n.lastName),
                       TextFormField(controller: _lastCtrl),
                     ],
                   ),
@@ -909,43 +925,47 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
               ],
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Phone'),
+            FieldLabel(context.l10n.phone),
             TextFormField(
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Email'),
+            FieldLabel(context.l10n.email),
             TextFormField(
               controller: _emailCtrl,
               keyboardType: TextInputType.emailAddress,
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Source'),
+            FieldLabel(context.l10n.source),
             DropdownButtonFormField<String>(
               value: _source,
               items: _sources
                   .map(
-                    (s) =>
-                        DropdownMenuItem(value: s, child: Text(_capitalize(s))),
+                    (s) => DropdownMenuItem(
+                      value: s,
+                      child: Text(_leadLabel(context, s)),
+                    ),
                   )
                   .toList(),
               onChanged: (v) => setState(() => _source = v!),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Initial status'),
+            FieldLabel(context.l10n.initialStatus),
             DropdownButtonFormField<String>(
               value: _status,
               items: _statuses
                   .map(
-                    (s) =>
-                        DropdownMenuItem(value: s, child: Text(_capitalize(s))),
+                    (s) => DropdownMenuItem(
+                      value: s,
+                      child: Text(_leadLabel(context, s)),
+                    ),
                   )
                   .toList(),
               onChanged: (v) => setState(() => _status = v!),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Follow-up date (optional)'),
+            FieldLabel(context.l10n.followUpDateOptional),
             InkWell(
               onTap: _pickFollowUp,
               borderRadius: BorderRadius.circular(14),
@@ -961,7 +981,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                 child: Text(
                   _followUpAt != null
                       ? formatDateFromString(_followUpAt)
-                      : 'Select date',
+                      : context.l10n.selectDate,
                   style: TextStyle(
                     color: _followUpAt != null
                         ? AppTheme.ink
@@ -971,7 +991,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
               ),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Notes'),
+            FieldLabel(context.l10n.notes),
             TextFormField(controller: _notesCtrl, maxLines: 2),
             const SizedBox(height: 20),
             ElevatedButton(
@@ -985,7 +1005,7 @@ class _AddLeadSheetState extends ConsumerState<_AddLeadSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Save enquiry'),
+                  : Text(context.l10n.saveEnquiry),
             ),
           ],
         ),
@@ -1001,12 +1021,10 @@ class _EmptyLeads extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const StateMessage(
+    return StateMessage(
       icon: AppIcons.personSearch,
-      title: 'No leads yet',
-      body:
-          'Add the people who walk in or call, and this list tells you who to '
-          'follow up with each day.',
+      title: context.l10n.noLeadsYet,
+      body: context.l10n.noLeadsYetBody,
     );
   }
 }

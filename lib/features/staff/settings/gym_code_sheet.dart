@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 /// The code a gym owner hands to members so they can self-register in the
 /// member portal. Setup-once config, not a daily concern — lives in More
@@ -48,18 +49,18 @@ class GymCodeSheet extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Member signup code',
-                    style: TextStyle(
+                  Text(
+                    context.l10n.memberSignupCode,
+                    style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w800,
                       color: AppTheme.ink,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
-                    'Members enter this code — plus their phone number — to create their own portal account.',
-                    style: TextStyle(
+                  Text(
+                    context.l10n.signupCodeHelp,
+                    style: const TextStyle(
                       fontSize: 13.5,
                       color: AppTheme.inkSoft,
                       height: 1.5,
@@ -67,16 +68,19 @@ class GymCodeSheet extends ConsumerWidget {
                   ),
                   const SizedBox(height: 20),
                   if (code == null || code.isEmpty)
-                    const Text(
-                      'No code available yet.',
-                      style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+                    Text(
+                      context.l10n.noCodeAvailable,
+                      style: const TextStyle(
+                        color: AppTheme.inkHint,
+                        fontSize: 13,
+                      ),
                     )
                   else ...[
                     GestureDetector(
                       onTap: () {
                         Clipboard.setData(ClipboardData(text: code));
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Gym code copied')),
+                          SnackBar(content: Text(context.l10n.gymCodeCopied)),
                         );
                       },
                       child: Container(
@@ -99,10 +103,10 @@ class GymCodeSheet extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Center(
+                    Center(
                       child: Text(
-                        'Tap to copy',
-                        style: TextStyle(
+                        context.l10n.tapToCopy,
+                        style: const TextStyle(
                           fontSize: 12,
                           color: AppTheme.inkHint,
                           fontWeight: FontWeight.w600,
@@ -125,7 +129,7 @@ class GymCodeSheet extends ConsumerWidget {
                           );
                         },
                         icon: const Icon(AppIcons.share, size: 18),
-                        label: const Text('Share with members'),
+                        label: Text(context.l10n.shareWithMembers),
                       ),
                     ),
                   ],

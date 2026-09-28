@@ -332,8 +332,9 @@ const _kFilterKeys = {
 };
 
 class _MembersScreenState extends ConsumerState<MembersScreen> {
-  late String _filter =
-      _kFilterKeys.contains(widget.initialFilter) ? widget.initialFilter! : 'all';
+  late String _filter = _kFilterKeys.contains(widget.initialFilter)
+      ? widget.initialFilter!
+      : 'all';
   String _search = '';
   int _lapsingDays = 7;
   int _joinedDays = 30;
@@ -453,9 +454,9 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: SheetHeader(title: 'Filter by plan'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: SheetHeader(title: context.l10n.filterByPlan),
             ),
             if (plans.isEmpty)
               Padding(
@@ -486,7 +487,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   }
 
   void _pickLapsingWindow() => _pickDayWindow(
-    title: 'Lapsing within',
+    title: context.l10n.lapsingWithin,
     windows: _kLapsingWindows,
     current: _lapsingDays,
     filterKey: 'lapsing',
@@ -494,7 +495,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
   );
 
   void _pickJoinedWindow() => _pickDayWindow(
-    title: 'Joined within',
+    title: context.l10n.joinedWithin,
     windows: _kJoinedWindows,
     current: _joinedDays,
     filterKey: 'joined',
@@ -746,7 +747,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             ),
             ListTile(
               leading: const Icon(AppIcons.schedule, color: AppTheme.ink),
-              title: const Text('Expiring soon'),
+              title: Text(context.l10n.expiringSoon),
               onTap: () {
                 Navigator.pop(ctx);
                 context.push('/staff/upcoming-payments');
@@ -754,7 +755,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             ),
             ListTile(
               leading: const Icon(AppIcons.qrCode, color: AppTheme.ink),
-              title: const Text('Member signup code'),
+              title: Text(context.l10n.memberSignupCode),
               subtitle: Text(context.l10n.inviteMembersHint),
               onTap: () {
                 Navigator.pop(ctx);
@@ -783,20 +784,29 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
       'frozen': all.where((m) => m.status == 'frozen').length,
     };
     final filters = [
-      ('all', 'All', null, null),
-      ('due', 'Due', AppTheme.statusDangerBg, AppTheme.statusDanger),
-      ('lapsing', 'Expiring', AppTheme.statusWarnBg, AppTheme.statusWarn),
-      ('joined', 'Joined', null, null),
-      ('expired', 'Expired', null, null),
-      ('active', 'Active', null, null),
-      ('frozen', 'On hold', null, null),
+      ('all', context.l10n.all, null, null),
+      ('due', context.l10n.due, AppTheme.statusDangerBg, AppTheme.statusDanger),
+      (
+        'lapsing',
+        context.l10n.expiring,
+        AppTheme.statusWarnBg,
+        AppTheme.statusWarn,
+      ),
+      ('joined', context.l10n.joined, null, null),
+      ('expired', context.l10n.expired, null, null),
+      ('active', context.l10n.active, null, null),
+      ('frozen', context.l10n.onHold, null, null),
     ];
 
     final search = TextField(
       controller: _searchCtrl,
-      decoration: const InputDecoration(
-        hintText: 'Name, mobile or member ID',
-        prefixIcon: Icon(AppIcons.search, color: AppTheme.inkHint, size: 20),
+      decoration: InputDecoration(
+        hintText: context.l10n.searchMemberHint,
+        prefixIcon: const Icon(
+          AppIcons.search,
+          color: AppTheme.inkHint,
+          size: 20,
+        ),
         isDense: true,
       ),
       onChanged: (v) => setState(() => _search = v),
@@ -1826,13 +1836,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     // With zero plans the dropdown isn't in the tree, so validate() can't catch
     // this one — the empty-state box is shown instead.
     if (_planId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            l.createPlanFirst,
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l.createPlanFirst)));
       return;
     }
     final paidAmount = _paidAmount;
@@ -1956,9 +1962,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           );
         } catch (undoError) {
           debugPrint('[GymCRM] AddMember rollback failed: $undoError');
-          throw _AddMemberException(
-            l.planNotAssigned,
-          );
+          throw _AddMemberException(l.planNotAssigned);
         }
         rethrow;
       }
@@ -1975,9 +1979,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         } catch (e) {
           debugPrint('[GymCRM] AddMember batch enrolment failed: $e');
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(l.batchNotSet)),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(l.batchNotSet)));
           }
         }
       }
@@ -2117,15 +2121,15 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('1 · MEMBER', style: AppTheme.kicker),
+                  Text(context.l10n.stepMember, style: AppTheme.kicker),
                   const SizedBox(height: 6),
                   SheetCard(child: _memberSection()),
                   const SizedBox(height: 14),
-                  const Text('2 · MEMBERSHIP', style: AppTheme.kicker),
+                  Text(context.l10n.stepMembership, style: AppTheme.kicker),
                   const SizedBox(height: 6),
                   SheetCard(child: _membershipSection()),
                   const SizedBox(height: 14),
-                  const Text('3 · PAYMENT', style: AppTheme.kicker),
+                  Text(context.l10n.stepPayment, style: AppTheme.kicker),
                   const SizedBox(height: 6),
                   SheetCard(child: _paymentSection()),
                   const SizedBox(height: 14),
@@ -2216,8 +2220,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 controller: _nameCtrl,
                 maxLength: 120,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  hintText: 'Full name',
+                decoration: InputDecoration(
+                  hintText: context.l10n.fullName,
                   counterText: '',
                 ),
                 validator: (v) =>
@@ -2230,8 +2234,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 keyboardType: TextInputType.phone,
                 // prefixIcon, not prefixText — prefixText stays hidden until
                 // the field has focus, and the canvas shows +91 at rest.
-                decoration: const InputDecoration(
-                  prefixIcon: Padding(
+                decoration: InputDecoration(
+                  prefixIcon: const Padding(
                     padding: EdgeInsets.only(left: 12, right: 4),
                     child: Text(
                       '+91',
@@ -2242,8 +2246,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                       ),
                     ),
                   ),
-                  prefixIconConstraints: BoxConstraints(minWidth: 0),
-                  hintText: 'Mobile number',
+                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
+                  hintText: context.l10n.mobileNumber,
                   counterText: '',
                 ),
                 validator: validateOptionalPhone,
@@ -2339,7 +2343,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 12),
-            const Text('Batch', style: AppTheme.kicker),
+            Text(context.l10n.batch, style: AppTheme.kicker),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -2391,7 +2395,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     final ctrl = TextEditingController(text: _customIdCtrl.text);
     final saved = await showAppDialog<bool>(
       context,
-      title: 'Member ID',
+      title: context.l10n.memberId,
       content: Padding(
         padding: const EdgeInsets.only(top: 12),
         child: TextField(
@@ -2438,7 +2442,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         TextFormField(
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
-            labelText: 'Discount',
+            labelText: context.l10n.discount,
             hintText: '0',
             prefixText: '$currencySymbol ',
           ),
@@ -2459,7 +2463,10 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         ),
         const SizedBox(height: 12),
         _FieldPair(
-          _AmountTile(label: 'Amount payable', value: formatCurrency(_planAmount)),
+          _AmountTile(
+            label: 'Amount payable',
+            value: formatCurrency(_planAmount),
+          ),
           _AmountTile(
             label: 'Due amount',
             value: formatCurrency(_dueAmount),
@@ -2474,7 +2481,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           autovalidateMode: AutovalidateMode.onUserInteraction,
           decoration: InputDecoration(
-            labelText: 'Amount collected',
+            labelText: context.l10n.amountCollected,
             hintText: '0',
             prefixText: '$currencySymbol ',
           ),
@@ -2565,8 +2572,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             controller: _emailCtrl,
             maxLength: 254,
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'Email',
+            decoration: InputDecoration(
+              labelText: context.l10n.email,
               counterText: '',
             ),
             validator: validateOptionalEmail,
@@ -2593,16 +2600,16 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           ),
           _batchPicker(),
           const SizedBox(height: 16),
-          const Text('EMERGENCY CONTACT', style: AppTheme.kicker),
+          Text(context.l10n.emergencyContact, style: AppTheme.kicker),
           const SizedBox(height: 8),
           _FieldPair(
             TextFormField(
               controller: _emergencyNameCtrl,
               maxLength: 120,
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                hintText: 'e.g. Ramesh (father)',
+              decoration: InputDecoration(
+                labelText: context.l10n.name,
+                hintText: context.l10n.emergencyNameHint,
                 counterText: '',
               ),
             ),
@@ -2610,8 +2617,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
               controller: _emergencyPhoneCtrl,
               maxLength: 20,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Number',
+              decoration: InputDecoration(
+                labelText: context.l10n.number,
                 counterText: '',
               ),
               validator: validateOptionalPhone,
@@ -2622,8 +2629,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             controller: _notesCtrl,
             maxLines: 2,
             maxLength: 500,
-            decoration: const InputDecoration(
-              labelText: 'Notes',
+            decoration: InputDecoration(
+              labelText: context.l10n.notes,
               counterText: '',
             ),
           ),

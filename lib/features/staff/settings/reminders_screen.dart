@@ -18,6 +18,7 @@ import '../../../core/utils/platform_info.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 // pack key → (Dodo checkout key [Android], App Store product ID [iOS]).
 const _kCreditPacks = [
@@ -103,7 +104,7 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Reminders'),
+        title: Text(context.l10n.reminders),
         leading: const BackButton(),
       ),
       body: ResponsiveContent(
@@ -111,7 +112,8 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (_, _) => const ErrorState(what: 'your message settings'),
           data: (gym) {
-            if (gym == null) return const Center(child: Text('Gym not found'));
+            if (gym == null)
+              return Center(child: Text(context.l10n.gymNotFound));
             void onChanged() => container.invalidate(_remindersGymProvider);
             final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
             final showInvoiceBadge =
@@ -120,19 +122,19 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
             final tabs = [
               (
                 icon: AppIcons.notifications,
-                label: 'Push',
+                label: context.l10n.push,
                 on: gym['push_reminder_enabled'] as bool? ?? false,
                 isNew: false,
               ),
               (
                 icon: AppIcons.chat,
-                label: 'WhatsApp',
+                label: context.l10n.whatsapp,
                 on: gym['whatsapp_reminder_enabled'] as bool? ?? false,
                 isNew: false,
               ),
               (
                 icon: AppIcons.receipt,
-                label: 'Invoices',
+                label: context.l10n.invoices,
                 on: gym['whatsapp_invoice_enabled'] as bool? ?? false,
                 isNew: showInvoiceBadge,
               ),
@@ -141,11 +143,11 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 2, 20, 14),
                   child: Text(
-                    'Automatic nudges before a membership expires',
-                    style: TextStyle(
+                    context.l10n.automaticRenewalNudges,
+                    style: const TextStyle(
                       fontSize: 13,
                       color: AppTheme.inkHint,
                       fontWeight: FontWeight.w600,
@@ -273,7 +275,7 @@ class _ChannelTab extends StatelessWidget {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      on ? 'On' : 'Off',
+                      on ? context.l10n.on : context.l10n.off,
                       style: TextStyle(
                         fontSize: 9.5,
                         fontWeight: FontWeight.w700,
@@ -574,15 +576,15 @@ class _PushReminderCardState extends State<_PushReminderCard> {
     final days = _currentDays();
 
     return _ChannelCard(
-      title: 'Push reminders',
-      subtitle: 'In-app notification to the member',
+      title: context.l10n.pushReminders,
+      subtitle: context.l10n.pushReminderSubtitle,
       enabled: enabled,
       saving: _saving,
       onToggle: (v) => _save(enabled: v),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('SEND BEFORE RENEWAL'),
+          _SectionLabel(context.l10n.sendBeforeRenewal),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -599,9 +601,9 @@ class _PushReminderCardState extends State<_PushReminderCard> {
                 .toList(),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Reminders are sent once a day for members whose renewal date matches one of the selected windows.',
-            style: TextStyle(
+          Text(
+            context.l10n.reminderWindowsHint,
+            style: const TextStyle(
               fontSize: 11.5,
               color: AppTheme.inkHint,
               height: 1.5,
@@ -660,9 +662,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       if (response.statusCode != 200) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not start checkout. Please try again.'),
-            ),
+            SnackBar(content: Text(context.l10n.checkoutStartFailed)),
           );
         }
         return;
@@ -675,9 +675,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not start checkout. Please try again.'),
-          ),
+          SnackBar(content: Text(context.l10n.checkoutStartFailed)),
         );
       }
     }
@@ -691,11 +689,9 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       final products = await Purchases.getProducts([productId]);
       if (products.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('This pack is not available right now.'),
-            ),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(context.l10n.packUnavailable)));
         }
         return;
       }
@@ -703,9 +699,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       widget.onChanged();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Purchase successful — credits will appear shortly.'),
-          ),
+          SnackBar(content: Text(context.l10n.purchaseSuccessful)),
         );
       }
     } on PlatformException catch (e) {
@@ -713,7 +707,9 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       if (code == PurchasesErrorCode.purchaseCancelledError) return;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Purchase failed: ${e.message}')),
+          SnackBar(
+            content: Text(context.l10n.purchaseFailed(e.message ?? e.code)),
+          ),
         );
       }
     }
@@ -747,7 +743,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
+        ).showSnackBar(SnackBar(content: Text(context.l10n.sendFailed('$e'))));
       }
     } finally {
       if (mounted) setState(() => _sendingNow = false);
@@ -829,15 +825,15 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
     final template = _kWhatsAppTemplates.firstWhere((t) => t.id == templateId);
 
     return _ChannelCard(
-      title: 'WhatsApp reminders',
-      subtitle: "Message sent to the member's WhatsApp",
+      title: context.l10n.whatsappReminders,
+      subtitle: context.l10n.whatsappReminderSubtitle,
       enabled: enabled,
       saving: _saving,
       onToggle: (v) => _save(enabled: v),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('SEND BEFORE RENEWAL'),
+          _SectionLabel(context.l10n.sendBeforeRenewal),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -854,16 +850,16 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
                 .toList(),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'One message per member per window. Each send uses one credit.',
-            style: TextStyle(
+          Text(
+            context.l10n.oneMessagePerWindow,
+            style: const TextStyle(
               fontSize: 11.5,
               color: AppTheme.inkHint,
               height: 1.5,
             ),
           ),
           const _PanelDivider(),
-          const _SectionLabel('MESSAGE'),
+          _SectionLabel(context.l10n.message),
           const SizedBox(height: 10),
           // Picker only earns its space once there's a real choice.
           if (_kWhatsAppTemplates.length > 1) ...[
@@ -891,9 +887,9 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'PREVIEW',
-                  style: TextStyle(
+                Text(
+                  context.l10n.preview,
+                  style: const TextStyle(
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.6,
@@ -929,7 +925,7 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
             ),
           ),
           const _PanelDivider(),
-          const _SectionLabel('CREDITS'),
+          _SectionLabel(context.l10n.credits),
           const SizedBox(height: 11),
           _CreditsBlock(quota: quota, quotaUsed: quotaUsed, credits: credits),
           const SizedBox(height: 12),
@@ -968,7 +964,11 @@ class _WhatsAppReminderCardState extends State<_WhatsAppReminderCard> {
                       ),
                     )
                   : const Icon(AppIcons.send, size: 17),
-              label: Text(_sendingNow ? 'Sending…' : 'Send reminders now'),
+              label: Text(
+                _sendingNow
+                    ? context.l10n.sending
+                    : context.l10n.sendRemindersNow,
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.accent,
                 foregroundColor: AppTheme.accentFg,
@@ -1026,8 +1026,8 @@ class _InvoiceWhatsAppCardState extends State<_InvoiceWhatsAppCard> {
     final enabled = widget.gym['whatsapp_invoice_enabled'] as bool? ?? false;
 
     return _ChannelCard(
-      title: 'Invoice WhatsApp messages',
-      subtitle: 'Auto-send invoice + payment receipt to the member',
+      title: context.l10n.invoiceWhatsappMessages,
+      subtitle: context.l10n.invoiceWhatsappSubtitle,
       enabled: enabled,
       saving: _saving,
       onToggle: _save,
@@ -1061,10 +1061,10 @@ class _InvoiceWhatsAppCardState extends State<_InvoiceWhatsAppCard> {
                   ),
                 ),
                 const SizedBox(width: 9),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Uses the same WhatsApp credits as reminders.',
-                    style: TextStyle(
+                    context.l10n.sameWhatsappCredits,
+                    style: const TextStyle(
                       fontSize: 11.5,
                       height: 1.45,
                       color: AppTheme.inkHint,
@@ -1103,10 +1103,10 @@ class _CreditsBlock extends StatelessWidget {
         if (quota > 0) ...[
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Free monthly quota',
-                  style: TextStyle(
+                  context.l10n.freeMonthlyQuota,
+                  style: const TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.inkSoft,
@@ -1130,9 +1130,9 @@ class _CreditsBlock extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Resets on the 1st of the month',
-            style: TextStyle(
+          Text(
+            context.l10n.resetsFirstMonth,
+            style: const TextStyle(
               fontSize: 11,
               color: AppTheme.inkHint,
               fontWeight: FontWeight.w600,
@@ -1142,10 +1142,10 @@ class _CreditsBlock extends StatelessWidget {
         ],
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
-                'Purchased credits',
-                style: TextStyle(
+                context.l10n.purchasedCredits,
+                style: const TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.inkSoft,

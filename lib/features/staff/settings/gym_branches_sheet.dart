@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 /// Lists every gym branch the current owner/staff member is linked to,
 /// lets them switch the active branch (every screen re-scopes to it), and
@@ -41,13 +42,13 @@ class GymBranchesSheet extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Gym Branches',
-                  style: TextStyle(
+                  context.l10n.gymBranches,
+                  style: const TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.ink,
@@ -64,7 +65,7 @@ class GymBranchesSheet extends ConsumerWidget {
                 error: (e, _) => Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
-                    'Could not load branches: $e',
+                    context.l10n.branchesLoadFailed('$e'),
                     style: const TextStyle(color: AppTheme.statusDanger),
                   ),
                 ),
@@ -78,11 +79,14 @@ class GymBranchesSheet extends ConsumerWidget {
                       final row = branches[i];
                       final gym = row['gyms'] as Map<String, dynamic>?;
                       final gymId = row['gym_id'] as String;
-                      final name = (gym?['name'] as String?) ?? 'Gym';
+                      final name =
+                          (gym?['name'] as String?) ?? context.l10n.gym;
                       final active = gymId == activeGymId;
                       return ListTile(
                         leading: Icon(
-                          active ? AppIcons.checkCircleActive : AppIcons.business,
+                          active
+                              ? AppIcons.checkCircleActive
+                              : AppIcons.business,
                           color: active ? AppTheme.accent : AppTheme.inkHint,
                         ),
                         title: Text(
@@ -126,7 +130,7 @@ class GymBranchesSheet extends ConsumerWidget {
                       );
                     },
                     icon: const Icon(AppIcons.add),
-                    label: const Text('Add Branch'),
+                    label: Text(context.l10n.addBranch),
                   ),
                 ),
               ),
@@ -160,7 +164,7 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
   Future<void> _submit() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = 'Branch name is required.');
+      setState(() => _error = context.l10n.branchNameRequired);
       return;
     }
     setState(() {
@@ -203,9 +207,9 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Add Gym Branch',
-            style: TextStyle(
+          Text(
+            context.l10n.addGymBranch,
+            style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w800,
               color: AppTheme.ink,
@@ -214,17 +218,17 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
           const SizedBox(height: 16),
           TextField(
             controller: _nameCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Branch name',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: context.l10n.branchName,
+              border: const OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _cityCtrl,
-            decoration: const InputDecoration(
-              labelText: 'City (optional)',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: context.l10n.cityOptional,
+              border: const OutlineInputBorder(),
             ),
           ),
           if (_error != null) ...[
@@ -245,7 +249,7 @@ class _AddGymBranchSheetState extends ConsumerState<_AddGymBranchSheet> {
                         color: Colors.white,
                       ),
                     )
-                  : const Text('Create Branch'),
+                  : Text(context.l10n.createBranch),
             ),
           ),
         ],

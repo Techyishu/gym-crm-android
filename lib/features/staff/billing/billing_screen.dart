@@ -1226,7 +1226,7 @@ class _CustomRangeBar extends StatelessWidget {
           ),
           TextButton(onPressed: onChange, child: Text(context.l10n.change)),
           IconButton(
-            tooltip: 'Clear dates',
+            tooltip: context.l10n.clearDates,
             onPressed: onClear,
             icon: const Icon(AppIcons.close, size: 18, color: AppTheme.inkSoft),
           ),
@@ -1463,7 +1463,7 @@ class _DueRow extends StatelessWidget {
                           ],
                           TextSpan(text: _when),
                           if (item.isPartial)
-                            const TextSpan(text: ' · partly paid'),
+                            TextSpan(text: ' · ${context.l10n.partlyPaid}'),
                           if (roomy && item.planName.isNotEmpty)
                             TextSpan(text: ' · ${item.planName}'),
                         ],
@@ -1508,9 +1508,7 @@ class _DueCollectPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final label = early
-        ? (roomy ? l.collectEarly : l.earlyShort)
-        : l.collect;
+    final label = early ? (roomy ? l.collectEarly : l.earlyShort) : l.collect;
     return Tooltip(
       message: early ? l.collectEarly : l.collectPayment,
       child: Material(
@@ -1766,9 +1764,9 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       final userId = client.auth.currentUser?.id;
       if (userId == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(context.l10n.sessionExpired)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(context.l10n.sessionExpired)));
           setState(() => _loading = false);
         }
         return;
@@ -1865,7 +1863,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
                   '${widget.invoice.description != null ? ' · ${widget.invoice.description}' : ''}',
             ),
             const SizedBox(height: 18),
-            const FieldLabel('Amount'),
+            FieldLabel(context.l10n.amount),
             TextFormField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(
@@ -1889,7 +1887,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
               partial: _isPartial,
             ),
             const SizedBox(height: 16),
-            const FieldLabel('Method'),
+            FieldLabel(context.l10n.method),
             SizedBox(
               height: 44,
               child: ListView.separated(
@@ -1911,7 +1909,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
             }),
             TextFormField(controller: _refCtrl),
             const SizedBox(height: 14),
-            const FieldLabel('Notes (optional)'),
+            FieldLabel(context.l10n.notesOptional),
             TextFormField(controller: _notesCtrl, maxLines: 2),
             const SizedBox(height: 20),
             ElevatedButton(
@@ -2063,9 +2061,9 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -2099,7 +2097,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
           children: [
             SheetHeader(title: context.l10n.createInvoice),
             const SizedBox(height: 18),
-            const FieldLabel('Member'),
+            FieldLabel(context.l10n.member),
             members.when(
               loading: () => const LinearProgressIndicator(),
               error: (e, _) => const SizedBox.shrink(),
@@ -2122,7 +2120,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            const FieldLabel('Amount'),
+            FieldLabel(context.l10n.amount),
             TextFormField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(
@@ -2139,7 +2137,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               ),
             ],
             const SizedBox(height: 14),
-            const FieldLabel('Admission fee (optional)'),
+            FieldLabel(context.l10n.admissionFeeOptional),
             TextFormField(
               controller: _admissionCtrl,
               keyboardType: const TextInputType.numberWithOptions(
@@ -2149,7 +2147,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               decoration: InputDecoration(prefixText: '$currencySymbol '),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Discount (optional)'),
+            FieldLabel(context.l10n.discountOptional),
             TextFormField(
               controller: _discountCtrl,
               keyboardType: const TextInputType.numberWithOptions(
@@ -2159,7 +2157,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               decoration: InputDecoration(prefixText: '$currencySymbol '),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Description (optional)'),
+            FieldLabel(context.l10n.descriptionOptional),
             TextFormField(controller: _descCtrl),
             const SizedBox(height: 16),
             if (total != null) ...[
@@ -2260,7 +2258,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               ),
               const SizedBox(height: 16),
             ],
-            const FieldLabel('Due date (optional)'),
+            FieldLabel(context.l10n.dueDateOptional),
             InkWell(
               onTap: _pickDueDate,
               borderRadius: BorderRadius.circular(14),
@@ -2320,9 +2318,9 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
   Future<void> _share() async {
     final phone = widget.invoice.member?.phone ?? '';
     if (phone.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.noPhoneAddInProfile)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.noPhoneAddInProfile)));
       return;
     }
 
@@ -2387,9 +2385,9 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.invoicePdfFailed)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.invoicePdfFailed)));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -2814,9 +2812,9 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
       if (mounted) Navigator.pop(context, created);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -2825,11 +2823,11 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
   Future<void> _delete() async {
     final ok = await showConfirmDialog(
       context,
-      title: 'Delete plan?',
+      title: context.l10n.deletePlanTitle,
       body:
           "This permanently deletes '${_nameCtrl.text.trim()}'. This can't be undone.",
       cancelLabel: 'Cancel',
-      confirmLabel: 'Delete',
+      confirmLabel: context.l10n.delete,
     );
     if (!mounted) return;
     if (ok != true) return;
@@ -2852,9 +2850,9 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -2882,7 +2880,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                     : (_isEdit ? 'Edit plan' : 'New plan'),
               ),
               const SizedBox(height: 18),
-              const FieldLabel('Plan name'),
+              FieldLabel(context.l10n.planName),
               TextFormField(
                 controller: _nameCtrl,
                 validator: (v) =>
@@ -2895,7 +2893,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const FieldLabel('Price'),
+                        FieldLabel(context.l10n.price),
                         TextFormField(
                           controller: _priceCtrl,
                           keyboardType: const TextInputType.numberWithOptions(
@@ -2937,26 +2935,26 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                         else
                           DropdownButtonFormField<String>(
                             value: _interval,
-                            items: const [
+                            items: [
                               DropdownMenuItem(
                                 value: 'monthly',
-                                child: Text('Monthly'),
+                                child: Text(context.l10n.monthly),
                               ),
                               DropdownMenuItem(
                                 value: 'quarterly',
-                                child: Text('Quarterly'),
+                                child: Text(context.l10n.quarterly),
                               ),
                               DropdownMenuItem(
                                 value: 'biannual',
-                                child: Text('6 months'),
+                                child: Text(context.l10n.sixMonths),
                               ),
                               DropdownMenuItem(
                                 value: 'annual',
-                                child: Text('Yearly'),
+                                child: Text(context.l10n.yearly),
                               ),
                               DropdownMenuItem(
                                 value: 'custom',
-                                child: Text('Custom…'),
+                                child: Text(context.l10n.custom),
                               ),
                             ],
                             onChanged: (v) => setState(() => _interval = v!),
@@ -2968,7 +2966,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
               ),
               if (!_isPass && _interval == 'custom') ...[
                 const SizedBox(height: 14),
-                const FieldLabel('Duration (months)'),
+                FieldLabel(context.l10n.durationMonths),
                 TextFormField(
                   controller: _monthsCtrl,
                   keyboardType: TextInputType.number,
@@ -2983,20 +2981,20 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                 ),
               ],
               const SizedBox(height: 14),
-              const FieldLabel('Max classes (blank = unlimited)'),
+              FieldLabel(context.l10n.maxClassesOptional),
               TextFormField(
                 controller: _maxClassesCtrl,
                 keyboardType: TextInputType.number,
               ),
               const SizedBox(height: 18),
-              const FieldLabel('Includes'),
+              FieldLabel(context.l10n.includes),
               Row(
                 children: [
                   Expanded(
                     child: TextFormField(
                       controller: _featureCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Add a feature',
+                      decoration: InputDecoration(
+                        hintText: context.l10n.addFeature,
                         isDense: true,
                       ),
                       onFieldSubmitted: (_) => _addFeature(),
@@ -3084,7 +3082,7 @@ class _PlanFormSheetState extends ConsumerState<PlanFormSheet> {
                           strokeWidth: 2,
                         ),
                       )
-                    : const Text('Save plan'),
+                    : Text(context.l10n.savePlan),
               ),
               if (_isEdit) ...[
                 const SizedBox(height: 10),

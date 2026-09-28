@@ -11,6 +11,7 @@ import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/services/data_refresh.dart';
+import '../../../l10n/l10n.dart';
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ class ExpensesScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Expenses'),
+        title: Text(context.l10n.expenses),
         leading: const BackButton(),
         actions: [
           if (canAdd)
@@ -63,7 +64,11 @@ class ExpensesScreen extends ConsumerWidget {
                     color: AppTheme.accent,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Icon(AppIcons.add, size: 22, color: Colors.white),
+                  child: const Icon(
+                    AppIcons.add,
+                    size: 22,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -148,8 +153,8 @@ class _MonthSummary extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          const Text(
-            'This month',
+          Text(
+            context.l10n.thisMonth,
             style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
           ),
           const Spacer(),
@@ -244,17 +249,19 @@ class _ExpenseCard extends StatelessWidget {
                     if (v == 'delete') {
                       final ok = await showConfirmDialog(
                         context,
-                        title: 'Delete expense?',
-                        body:
-                            'Delete this ${expense.category} entry of ${formatCurrency(expense.amount)}? This cannot be undone.',
-                        confirmLabel: 'Delete',
+                        title: context.l10n.deleteExpenseTitle,
+                        body: context.l10n.deleteExpenseBody(
+                          expense.category,
+                          formatCurrency(expense.amount),
+                        ),
+                        confirmLabel: context.l10n.delete,
                         icon: AppIcons.delete,
                       );
                       if (ok == true) onDelete();
                     }
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'delete',
                       child: Row(
                         children: [
@@ -265,8 +272,10 @@ class _ExpenseCard extends StatelessWidget {
                           ),
                           SizedBox(width: 8),
                           Text(
-                            'Delete',
-                            style: TextStyle(color: AppTheme.statusDanger),
+                            context.l10n.delete,
+                            style: const TextStyle(
+                              color: AppTheme.statusDanger,
+                            ),
                           ),
                         ],
                       ),
@@ -293,7 +302,6 @@ Future<void> showAddExpenseSheet(BuildContext context) =>
       useSafeArea: true,
       builder: (_) => const _AddExpenseSheet(),
     );
-
 
 class _AddExpenseSheet extends ConsumerStatefulWidget {
   const _AddExpenseSheet();
@@ -348,9 +356,9 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errorWithMessage('$e'))),
+        );
         setState(() => _loading = false);
       }
     }
@@ -370,9 +378,9 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SheetHeader(title: 'Add expense'),
+            SheetHeader(title: context.l10n.addExpense),
             const SizedBox(height: 18),
-            const FieldLabel('Category'),
+            FieldLabel(context.l10n.category),
             DropdownButtonFormField<String>(
               initialValue: _category,
               items: kExpenseCategories
@@ -381,7 +389,7 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
               onChanged: (v) => setState(() => _category = v!),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Amount'),
+            FieldLabel(context.l10n.amount),
             TextFormField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(
@@ -389,7 +397,7 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
               ),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Date'),
+            FieldLabel(context.l10n.date),
             InkWell(
               onTap: _pickDate,
               borderRadius: BorderRadius.circular(14),
@@ -404,7 +412,7 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
               ),
             ),
             const SizedBox(height: 14),
-            const FieldLabel('Note (optional)'),
+            FieldLabel(context.l10n.noteOptional),
             TextFormField(controller: _noteCtrl, maxLines: 2),
             const SizedBox(height: 20),
             ElevatedButton(
@@ -418,7 +426,7 @@ class _AddExpenseSheetState extends ConsumerState<_AddExpenseSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Save expense'),
+                  : Text(context.l10n.saveExpense),
             ),
           ],
         ),
@@ -434,24 +442,24 @@ class _EmptyExpenses extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(AppIcons.receipt, size: 64, color: AppTheme.inkHint),
-          SizedBox(height: 16),
+          const Icon(AppIcons.receipt, size: 64, color: AppTheme.inkHint),
+          const SizedBox(height: 16),
           Text(
-            'No expenses logged',
-            style: TextStyle(
+            context.l10n.noExpensesLogged,
+            style: const TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 16,
               color: AppTheme.ink,
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
-            'Log rent, salary, and other gym expenses here',
-            style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
+            context.l10n.noExpensesLoggedBody,
+            style: const TextStyle(color: AppTheme.inkSoft, fontSize: 13),
           ),
         ],
       ),

@@ -14,6 +14,7 @@ import '../../../core/widgets/auth_canvas_kit.dart' show OrbitFormCard;
 import '../../../core/widgets/auth_form_kit.dart';
 import '../providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 /// Matches the web `/(auth)/signup` form 1:1 in fields, validation and flow:
 /// first name, last name, email, +91 mobile, password (with strength meter),
@@ -204,9 +205,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     if (!mounted) return;
     if (error == null) {
       _startResendTimer();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Code resent — check your email.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.codeResentEmail)));
     } else {
       ScaffoldMessenger.of(
         context,
@@ -313,9 +314,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                 minimumSize: const Size(0, 0),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text(
-                '← Back',
-                style: TextStyle(
+              child: Text(
+                context.l10n.back,
+                style: const TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textSecondary,
@@ -324,16 +325,16 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const AuthLogoBadge(
-            label: 'BUILD WITH GYMCRM',
-            headline: 'Your gym.\nOne place.',
+          AuthLogoBadge(
+            label: context.l10n.buildWithGymcrm,
+            headline: context.l10n.gymOnePlace,
           ),
           const SizedBox(height: 12),
           OrbitFormCard(
             children: [
-              const Text(
-                'GYM OWNER',
-                style: TextStyle(
+              Text(
+                context.l10n.gymOwner.toUpperCase(),
+                style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.1,
@@ -342,7 +343,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               ),
               const SizedBox(height: 5),
               Text(
-                'Create your gym',
+                context.l10n.createYourGym,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: AppTheme.textPrimary,
@@ -351,7 +352,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               ),
               const SizedBox(height: 5),
               Text(
-                'Takes about a minute.',
+                context.l10n.oneMinute,
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
@@ -374,7 +375,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   onPressed: (_googleLoading || _loading)
                       ? null
                       : _signUpWithGoogle,
-                  label: 'Sign up with Google',
+                  label: context.l10n.signupGoogle,
                 ),
                 const SizedBox(height: 20),
                 const AuthOrDivider(),
@@ -383,14 +384,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
               // Gym name — was a separate onboarding screen; merged in here so
               // email signups land straight on the dashboard after OTP verify.
-              const AuthFieldLabel('Gym name'),
+              AuthFieldLabel(context.l10n.gymName),
               const SizedBox(height: 6),
               AuthPillField(
                 controller: _gymNameCtrl,
                 textCapitalization: TextCapitalization.words,
                 hint: 'FitZone Gym',
                 validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Gym name is required'
+                    ? context.l10n.gymNameRequired
                     : null,
               ),
               const SizedBox(height: 16),
@@ -398,7 +399,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               // Country & currency — one pick sets the gym's currency (and the
               // phone dial code below). Always visible: iOS hides the phone field,
               // so this is the only place iOS owners set their currency.
-              const AuthFieldLabel('Country & currency'),
+              AuthFieldLabel(context.l10n.countryCurrency),
               const SizedBox(height: 6),
               InkWell(
                 borderRadius: BorderRadius.circular(16),
@@ -444,18 +445,19 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               // exist. Still wired to the same firstName param/column; asked
               // later in Settings if the owner wants a last name filled in, and
               // setup_gym already tolerates it being blank.
-              const AuthFieldLabel('Your name'),
+              AuthFieldLabel(context.l10n.yourName),
               const SizedBox(height: 6),
               AuthPillField(
                 controller: _firstCtrl,
                 textCapitalization: TextCapitalization.words,
                 hint: 'Rahul',
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? context.l10n.nameRequired
+                    : null,
               ),
               const SizedBox(height: 16),
 
-              const AuthFieldLabel('Email'),
+              AuthFieldLabel(context.l10n.email),
               const SizedBox(height: 6),
               AuthPillField(
                 controller: _emailCtrl,
@@ -467,66 +469,61 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   final ok = RegExp(
                     r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
                   ).hasMatch(value);
-                  return ok ? null : 'Enter a valid email address';
+                  return ok ? null : context.l10n.enterValidEmail;
                 },
               ),
               const SizedBox(height: 16),
 
-              // Mobile number with +91 prefix — hidden on iOS (App Review 5.1.1:
-              // phone is not required for core functionality).
-              if (!isIOS) ...[
-                const AuthFieldLabel('Mobile number (optional)'),
-                const SizedBox(height: 6),
-                AuthPillField(
-                  controller: _phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  maxLength: 14,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  hint: '9876543210',
-                  prefixIcon: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
+              AuthFieldLabel(context.l10n.mobileNumber),
+              const SizedBox(height: 6),
+              AuthPillField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                maxLength: 14,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                hint: '9876543210',
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
+                  child: GestureDetector(
+                    onTap: () => showCountryPicker(
+                      context: context,
+                      showPhoneCode: true,
+                      exclude: const ['PK', 'BD'],
+                      onSelect: _selectCountry,
                     ),
-                    child: GestureDetector(
-                      onTap: () => showCountryPicker(
-                        context: context,
-                        showPhoneCode: true,
-                        exclude: const ['PK', 'BD'],
-                        onSelect: _selectCountry,
-                      ),
-                      child: Text(
-                        '${_country.flagEmoji} +${_country.phoneCode}',
-                        style: const TextStyle(fontSize: 14),
-                      ),
+                    child: Text(
+                      '${_country.flagEmoji} +${_country.phoneCode}',
+                      style: const TextStyle(fontSize: 14),
                     ),
                   ),
-                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
-                  validator: (v) {
-                    final value = v?.trim() ?? '';
-                    if (value.isEmpty) return null; // optional
-                    return _digitsOnly.hasMatch(value)
-                        ? null
-                        : 'Enter a valid mobile number';
-                  },
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, left: 4),
-                  child: Text(
-                    'Tap the flag to change country',
-                    style: TextStyle(fontSize: 12, color: AppTheme.inkHint),
-                  ),
+                prefixIconConstraints: const BoxConstraints(minWidth: 0),
+                validator: (v) {
+                  final value = v?.trim() ?? '';
+                  return _digitsOnly.hasMatch(value)
+                      ? null
+                      : context.l10n.validMobile;
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 4),
+                child: Text(
+                  context.l10n.tapFlagCountry,
+                  style: TextStyle(fontSize: 12, color: AppTheme.inkHint),
                 ),
-              ],
+              ),
               const SizedBox(height: 16),
 
               // Password + strength meter
-              const AuthFieldLabel('Password'),
+              AuthFieldLabel(context.l10n.password),
               const SizedBox(height: 6),
               AuthPillField(
                 controller: _passwordCtrl,
                 obscureText: _obscure,
-                hint: 'Min. 8 characters',
+                hint: context.l10n.minEightCharacters,
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscure ? AppIcons.visibility : AppIcons.visibilityOff,
@@ -536,7 +533,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   onPressed: () => setState(() => _obscure = !_obscure),
                 ),
                 validator: (v) => (v == null || v.length < 8)
-                    ? 'Password must be at least 8 characters'
+                    ? context.l10n.passwordEightCharacters
                     : null,
               ),
               if (_strength > 0) ...[
@@ -557,7 +554,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               const SizedBox(height: 24),
 
               AuthGradientButton(
-                label: 'Create your gym',
+                label: context.l10n.createYourGym,
                 loading: _loading,
                 onPressed: (_loading || _googleLoading) ? null : _submit,
               ),
@@ -567,7 +564,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      'Already on GymCRM? ',
+                      context.l10n.alreadyGymcrm,
                       style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 14,
@@ -575,9 +572,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     ),
                     GestureDetector(
                       onTap: () => context.go('/login'),
-                      child: const Text(
-                        'Log in',
-                        style: TextStyle(
+                      child: Text(
+                        context.l10n.login,
+                        style: const TextStyle(
                           color: AppTheme.accent,
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -621,9 +618,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               minimumSize: const Size(0, 0),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: const Text(
-              '← Change email',
-              style: TextStyle(
+            child: Text(
+              context.l10n.changeEmail,
+              style: const TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.textSecondary,
@@ -632,13 +629,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        const AuthLogoBadge(
-          label: 'VERIFY YOUR EMAIL',
-          headline: 'Almost there.',
+        AuthLogoBadge(
+          label: context.l10n.verifyEmailLabel,
+          headline: context.l10n.almostThere,
         ),
         const SizedBox(height: 24),
         Text(
-          'Check your email',
+          context.l10n.checkYourEmail,
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.w800,
             color: AppTheme.ink,
@@ -647,7 +644,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(
-            text: 'We sent a 6-digit code to\n',
+            text: context.l10n.sentSixDigitCode,
             style: const TextStyle(
               color: AppTheme.textSecondary,
               fontSize: 14,
@@ -704,7 +701,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         const SizedBox(height: 22),
 
         AuthGradientButton(
-          label: 'Verify',
+          label: context.l10n.verify,
           loading: _verifying,
           onPressed: (_verifying || !allFilled) ? null : _verifyOtp,
         ),
@@ -715,8 +712,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           onTap: _resendCooldown > 0 ? null : _resendOtp,
           child: Text(
             _resendCooldown > 0
-                ? 'Resend code in ${_resendCooldown}s'
-                : 'Resend code',
+                ? context.l10n.resendCodeIn(_resendCooldown)
+                : context.l10n.resendCode,
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -742,7 +739,12 @@ class _StrengthMeter extends StatelessWidget {
       AppTheme.statusWarn,
       AppTheme.ink,
     ];
-    const labels = ['', 'Weak', 'Fair', 'Strong'];
+    final labels = [
+      '',
+      context.l10n.weak,
+      context.l10n.fair,
+      context.l10n.strong,
+    ];
     return Row(
       children: [
         Expanded(
@@ -906,7 +908,7 @@ class _TermsCheckbox extends StatelessWidget {
             Expanded(
               child: Text.rich(
                 TextSpan(
-                  text: 'I agree to the ',
+                  text: context.l10n.agreeTo,
                   style: const TextStyle(
                     fontSize: 13,
                     color: AppTheme.textSecondary,
@@ -916,7 +918,7 @@ class _TermsCheckbox extends StatelessWidget {
                     ..onTap = () => onChanged(!value),
                   children: [
                     TextSpan(
-                      text: 'Terms of Service',
+                      text: context.l10n.termsOfService,
                       style: const TextStyle(
                         color: AppTheme.ink,
                         fontWeight: FontWeight.w600,
@@ -926,12 +928,12 @@ class _TermsCheckbox extends StatelessWidget {
                         ..onTap = () => context.push('/legal/terms'),
                     ),
                     TextSpan(
-                      text: ' and ',
+                      text: context.l10n.and,
                       recognizer: TapGestureRecognizer()
                         ..onTap = () => onChanged(!value),
                     ),
                     TextSpan(
-                      text: 'Privacy Policy',
+                      text: context.l10n.privacyPolicy,
                       style: const TextStyle(
                         color: AppTheme.ink,
                         fontWeight: FontWeight.w600,
@@ -952,11 +954,11 @@ class _TermsCheckbox extends StatelessWidget {
           ],
         ),
         if (showError)
-          const Padding(
-            padding: EdgeInsets.only(top: 6, left: 34),
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 34),
             child: Text(
-              'Please accept the Terms of Service and Privacy Policy to continue.',
-              style: TextStyle(fontSize: 12, color: AppTheme.error),
+              context.l10n.acceptTermsError,
+              style: const TextStyle(fontSize: 12, color: AppTheme.error),
             ),
           ),
       ],

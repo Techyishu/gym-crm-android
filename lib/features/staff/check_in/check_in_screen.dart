@@ -249,7 +249,11 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         avatarUrl: r.avatarUrl,
       );
     } catch (e) {
-      return _CheckResult(success: false, title: 'Error', subtitle: '$e');
+      return _CheckResult(
+        success: false,
+        title: context.l10n.error,
+        subtitle: '$e',
+      );
     } finally {
       if (mounted) setState(() => _processing = false);
     }
@@ -803,9 +807,7 @@ class _ScanTabSwitch extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(
-            child: _segment(context, 0, context.l10n.staffScansMember),
-          ),
+          Expanded(child: _segment(context, 0, context.l10n.staffScansMember)),
           Expanded(child: _segment(context, 1, context.l10n.membersScanGym)),
         ],
       ),
@@ -1080,7 +1082,7 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Gym QR')),
+      appBar: AppBar(title: Text(context.l10n.gymQr)),
       body: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
@@ -1402,11 +1404,7 @@ class _InitialsAvatar extends StatelessWidget {
         color: AppTheme.activeBg,
         shape: BoxShape.circle,
       ),
-      child: Icon(
-        AppIcons.person,
-        size: size * 0.5,
-        color: AppTheme.inkSoft,
-      ),
+      child: Icon(AppIcons.person, size: size * 0.5, color: AppTheme.inkSoft),
     );
   }
 }
@@ -1670,7 +1668,7 @@ class _SearchResultRow extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                child: const Text('Check In'),
+                child: Text(context.l10n.checkIn),
               ),
             ),
         ],

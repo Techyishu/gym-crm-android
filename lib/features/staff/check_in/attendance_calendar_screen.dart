@@ -9,6 +9,7 @@ import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 class AttendanceCalendarScreen extends ConsumerStatefulWidget {
   const AttendanceCalendarScreen({super.key});
@@ -90,11 +91,11 @@ class _AttendanceCalendarScreenState
 
   Future<void> _openEditor([Map<String, dynamic>? record]) async {
     if (record == null && _permissions['add'] != true) {
-      _denied('add attendance');
+      _denied(context.l10n.addAttendance);
       return;
     }
     if (record != null && _permissions['edit'] != true) {
-      _denied('edit attendance');
+      _denied(context.l10n.editCorrection);
       return;
     }
     final changed = await showModalBottomSheet<bool>(
@@ -112,14 +113,14 @@ class _AttendanceCalendarScreenState
 
   Future<void> _delete(Map<String, dynamic> record) async {
     if (_permissions['delete'] != true) {
-      _denied('delete attendance');
+      _denied(context.l10n.deleteAttendanceTitle);
       return;
     }
     final reason = await showDialog<String>(
       context: context,
-      builder: (_) => const _ReasonDialog(
-        title: 'Delete attendance?',
-        actionLabel: 'Delete',
+      builder: (_) => _ReasonDialog(
+        title: context.l10n.deleteAttendanceTitle,
+        actionLabel: context.l10n.delete,
       ),
     );
     if (!mounted) return;
@@ -149,7 +150,7 @@ class _AttendanceCalendarScreenState
 
   void _denied(String action) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("You don't have permission to $action.")),
+      SnackBar(content: Text(context.l10n.permissionToActionDenied(action))),
     );
   }
 
@@ -157,7 +158,7 @@ class _AttendanceCalendarScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Attendance calendar')),
+      appBar: AppBar(title: Text(context.l10n.attendanceCalendar)),
       body: ResponsiveContent(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -181,18 +182,17 @@ class _AttendanceCalendarScreenState
                           ),
                         ),
                         Text(
-                          '${_selectedRecords.length} present',
+                          context.l10n.presentCount(_selectedRecords.length),
                           style: const TextStyle(color: AppTheme.inkSoft),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     if (_selectedRecords.isEmpty)
-                      const StateMessage(
+                      StateMessage(
                         icon: AppIcons.eventBusy,
-                        title: 'No attendance recorded',
-                        body:
-                            'Choose Add attendance to record a manual correction.',
+                        title: context.l10n.noAttendanceRecorded,
+                        body: context.l10n.attendanceEmptyHint,
                       )
                     else
                       Container(
@@ -220,7 +220,7 @@ class _AttendanceCalendarScreenState
           ? FloatingActionButton.extended(
               onPressed: () => _openEditor(),
               icon: const Icon(AppIcons.add),
-              label: const Text('Add attendance'),
+              label: Text(context.l10n.addAttendance),
             )
           : null,
     );
@@ -360,7 +360,7 @@ class _AttendanceCalendarScreenState
     final outAt = outRaw == null ? null : DateTime.parse(outRaw).toLocal();
     return ListTile(
       title: Text(
-        record['member_name'] as String? ?? 'Member',
+        record['member_name'] as String? ?? context.l10n.member,
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
       subtitle: Text(
@@ -371,9 +371,12 @@ class _AttendanceCalendarScreenState
             value == 'edit' ? _openEditor(record) : _delete(record),
         itemBuilder: (_) => [
           if (_permissions['edit'] == true)
-            const PopupMenuItem(value: 'edit', child: Text('Edit correction')),
+            PopupMenuItem(
+              value: 'edit',
+              child: Text(context.l10n.editCorrection),
+            ),
           if (_permissions['delete'] == true)
-            const PopupMenuItem(value: 'delete', child: Text('Delete')),
+            PopupMenuItem(value: 'delete', child: Text(context.l10n.delete)),
         ],
       ),
       onTap: _permissions['edit'] == true ? () => _openEditor(record) : null,
@@ -483,11 +486,11 @@ class _AttendanceEditorSheetState
 
   Future<void> _save() async {
     if (_memberId == null) {
-      setState(() => _error = 'Select a member.');
+      setState(() => _error = context.l10n.selectMemberError);
       return;
     }
     if (_reason.text.trim().length < 5) {
-      setState(() => _error = 'Enter a clear reason (at least 5 characters).');
+      setState(() => _error = context.l10n.clearReasonError);
       return;
     }
     setState(() {
@@ -532,7 +535,9 @@ class _AttendanceEditorSheetState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              widget.record == null ? 'Add attendance' : 'Correct attendance',
+              widget.record == null
+                  ? context.l10n.addAttendance
+                  : context.l10n.correctAttendance,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 4),
@@ -546,7 +551,7 @@ class _AttendanceEditorSheetState
                 controller: _search,
                 onChanged: _searchChanged,
                 decoration: InputDecoration(
-                  labelText: 'Search member',
+                  labelText: context.l10n.searchMember,
                   prefixIcon: const Icon(AppIcons.search),
                   suffixIcon: _searching
                       ? const Padding(
@@ -577,14 +582,14 @@ class _AttendanceEditorSheetState
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const CircleAvatar(child: Icon(AppIcons.person)),
-                title: Text(_memberName ?? 'Member'),
+                title: Text(_memberName ?? context.l10n.member),
                 trailing: widget.record == null
                     ? TextButton(
                         onPressed: () => setState(() {
                           _memberId = null;
                           _memberName = null;
                         }),
-                        child: const Text('Change'),
+                        child: Text(context.l10n.change),
                       )
                     : null,
               ),
@@ -595,7 +600,9 @@ class _AttendanceEditorSheetState
                   child: OutlinedButton.icon(
                     onPressed: () => _pickTime(false),
                     icon: const Icon(AppIcons.login),
-                    label: Text('In ${_checkIn.format(context)}'),
+                    label: Text(
+                      context.l10n.checkInAt(_checkIn.format(context)),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -605,8 +612,8 @@ class _AttendanceEditorSheetState
                     icon: const Icon(AppIcons.logout),
                     label: Text(
                       _checkOut == null
-                          ? 'No checkout'
-                          : 'Out ${_checkOut!.format(context)}',
+                          ? context.l10n.noCheckout
+                          : context.l10n.checkOutAt(_checkOut!.format(context)),
                     ),
                   ),
                 ),
@@ -617,9 +624,9 @@ class _AttendanceEditorSheetState
               controller: _reason,
               minLines: 2,
               maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Reason for manual change',
-                hintText: 'Example: biometric device was offline',
+              decoration: InputDecoration(
+                labelText: context.l10n.manualChangeReason,
+                hintText: context.l10n.manualChangeHint,
               ),
             ),
             if (_error != null) ...[
@@ -634,7 +641,9 @@ class _AttendanceEditorSheetState
               width: double.infinity,
               child: FilledButton(
                 onPressed: _saving ? null : _save,
-                child: Text(_saving ? 'Saving…' : 'Save attendance'),
+                child: Text(
+                  _saving ? context.l10n.saving : context.l10n.saveAttendance,
+                ),
               ),
             ),
           ],
@@ -690,14 +699,17 @@ class _ReasonDialogState extends State<_ReasonDialog> {
             autofocus: true,
             minLines: 2,
             maxLines: 4,
-            decoration: InputDecoration(labelText: 'Reason', errorText: _error),
+            decoration: InputDecoration(
+              labelText: context.l10n.reason,
+              errorText: _error,
+            ),
           ),
           const SizedBox(height: 22),
           Row(
             children: [
               Expanded(
                 child: DialogButton(
-                  label: 'Cancel',
+                  label: context.l10n.cancel,
                   onTap: () => Navigator.pop(context),
                 ),
               ),
@@ -708,7 +720,7 @@ class _ReasonDialogState extends State<_ReasonDialog> {
                   filled: true,
                   onTap: () {
                     if (_controller.text.trim().length < 5) {
-                      setState(() => _error = 'Enter at least 5 characters');
+                      setState(() => _error = context.l10n.enterFiveCharacters);
                       return;
                     }
                     Navigator.pop(context, _controller.text.trim());

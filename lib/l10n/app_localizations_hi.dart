@@ -1072,4 +1072,1421 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get languageHindi => 'हिन्दी';
+
+  @override
+  String get expenses => 'खर्चे';
+
+  @override
+  String get deleteExpenseTitle => 'खर्च हटाएं?';
+
+  @override
+  String deleteExpenseBody(Object amount, Object category) {
+    return '$category की $amount राशि वाली एंट्री हटाएं? इसे वापस नहीं लिया जा सकता।';
+  }
+
+  @override
+  String get category => 'श्रेणी';
+
+  @override
+  String get amount => 'राशि';
+
+  @override
+  String get date => 'तारीख';
+
+  @override
+  String get noteOptional => 'नोट (वैकल्पिक)';
+
+  @override
+  String get saveExpense => 'खर्च सहेजें';
+
+  @override
+  String get noExpensesLogged => 'कोई खर्च दर्ज नहीं है';
+
+  @override
+  String get noExpensesLoggedBody =>
+      'किराया, वेतन और जिम के अन्य खर्चे यहां दर्ज करें';
+
+  @override
+  String errorWithMessage(Object error) {
+    return 'गलती: $error';
+  }
+
+  @override
+  String get staffPermissions => 'स्टाफ अनुमतियां';
+
+  @override
+  String get ownersKeepAccess => 'मालिक के पास हमेशा पूरा एक्सेस रहेगा';
+
+  @override
+  String get permissionSetupHint =>
+      'पहले रोल की डिफ़ॉल्ट अनुमतियां तय करें, फिर जरूरत पर किसी स्टाफ के लिए बदलें।';
+
+  @override
+  String get roleDefaults => 'रोल की डिफ़ॉल्ट';
+
+  @override
+  String get staffOverride => 'स्टाफ के लिए बदलाव';
+
+  @override
+  String get configureRole => 'रोल चुनें';
+
+  @override
+  String get manager => 'मैनेजर';
+
+  @override
+  String get trainer => 'ट्रेनर';
+
+  @override
+  String get staff => 'स्टाफ';
+
+  @override
+  String get noStaffToConfigure => 'सेट करने के लिए कोई स्टाफ नहीं है';
+
+  @override
+  String get inviteStaffFirst =>
+      'पहले किसी मैनेजर, ट्रेनर या स्टाफ को आमंत्रित करें।';
+
+  @override
+  String get configureStaffMember => 'स्टाफ सदस्य चुनें';
+
+  @override
+  String get useRoleDefault => 'रोल की डिफ़ॉल्ट लगाएं';
+
+  @override
+  String get view => 'देखें';
+
+  @override
+  String get edit => 'बदलें';
+
+  @override
+  String get freeze => 'रोकें';
+
+  @override
+  String get export => 'एक्सपोर्ट';
+
+  @override
+  String get ownerPermissionsLocked =>
+      'मालिक की अनुमतियां कम नहीं की जा सकतीं।';
+
+  @override
+  String get permissionDeniedStaffAccess =>
+      'आपके पास स्टाफ एक्सेस बदलने की अनुमति नहीं है।';
+
+  @override
+  String get permissionsSaveFailed =>
+      'अनुमतियां सहेजी नहीं जा सकीं। दोबारा कोशिश करें।';
+
+  @override
+  String get gymBranches => 'जिम ब्रांच';
+
+  @override
+  String branchesLoadFailed(Object error) {
+    return 'ब्रांच लोड नहीं हुईं: $error';
+  }
+
+  @override
+  String get gym => 'जिम';
+
+  @override
+  String get addBranch => 'ब्रांच जोड़ें';
+
+  @override
+  String get addGymBranch => 'जिम ब्रांच जोड़ें';
+
+  @override
+  String get branchName => 'ब्रांच का नाम';
+
+  @override
+  String get cityOptional => 'शहर (वैकल्पिक)';
+
+  @override
+  String get branchNameRequired => 'ब्रांच का नाम जरूरी है।';
+
+  @override
+  String get createBranch => 'ब्रांच बनाएं';
+
+  @override
+  String get memberSignupCode => 'मेंबर साइनअप कोड';
+
+  @override
+  String get signupCodeHelp =>
+      'मेंबर अपना पोर्टल अकाउंट बनाने के लिए अपने फ़ोन नंबर के साथ यह कोड डालें।';
+
+  @override
+  String get noCodeAvailable => 'अभी कोई कोड उपलब्ध नहीं है।';
+
+  @override
+  String get gymCodeCopied => 'जिम कोड कॉपी हुआ';
+
+  @override
+  String get tapToCopy => 'कॉपी करने के लिए टैप करें';
+
+  @override
+  String get shareWithMembers => 'मेंबरों के साथ शेयर करें';
+
+  @override
+  String get attendanceCalendar => 'अटेंडेंस कैलेंडर';
+
+  @override
+  String get deleteAttendanceTitle => 'अटेंडेंस हटाएं?';
+
+  @override
+  String permissionToActionDenied(Object action) {
+    return 'आपके पास $action की अनुमति नहीं है।';
+  }
+
+  @override
+  String get noAttendanceRecorded => 'कोई अटेंडेंस दर्ज नहीं है';
+
+  @override
+  String get addAttendance => 'अटेंडेंस जोड़ें';
+
+  @override
+  String get editCorrection => 'सुधार बदलें';
+
+  @override
+  String get searchMember => 'मेंबर खोजें';
+
+  @override
+  String get member => 'मेंबर';
+
+  @override
+  String checkInAt(Object time) {
+    return 'अंदर $time';
+  }
+
+  @override
+  String get manualChangeReason => 'हाथ से बदलाव का कारण';
+
+  @override
+  String get manualChangeHint => 'उदाहरण: बायोमेट्रिक डिवाइस ऑफ़लाइन थी';
+
+  @override
+  String get saveAttendance => 'अटेंडेंस सहेजें';
+
+  @override
+  String get reason => 'कारण';
+
+  @override
+  String presentCount(Object count) {
+    return '$count उपस्थित';
+  }
+
+  @override
+  String get attendanceEmptyHint =>
+      'हाथ से सुधार दर्ज करने के लिए अटेंडेंस जोड़ें चुनें।';
+
+  @override
+  String get correctAttendance => 'अटेंडेंस सुधारें';
+
+  @override
+  String get selectMemberError => 'एक मेंबर चुनें।';
+
+  @override
+  String get clearReasonError => 'साफ़ कारण लिखें (कम से कम 5 अक्षर)।';
+
+  @override
+  String get noCheckout => 'चेकआउट नहीं';
+
+  @override
+  String checkOutAt(Object time) {
+    return 'बाहर $time';
+  }
+
+  @override
+  String get enterFiveCharacters => 'कम से कम 5 अक्षर लिखें';
+
+  @override
+  String get leads => 'लीड्स';
+
+  @override
+  String get followUp => 'फ़ॉलो-अप';
+
+  @override
+  String get all => 'सभी';
+
+  @override
+  String get deleteEnquiryTitle => 'इनक्वायरी हटाएं?';
+
+  @override
+  String deleteEnquiryBody(Object name) {
+    return '$name को हटाएं? इसे वापस नहीं लिया जा सकता।';
+  }
+
+  @override
+  String get updateStatus => 'स्टेटस बदलें';
+
+  @override
+  String get addEnquiry => 'इनक्वायरी जोड़ें';
+
+  @override
+  String get phone => 'फ़ोन';
+
+  @override
+  String get email => 'ईमेल';
+
+  @override
+  String get source => 'स्रोत';
+
+  @override
+  String get followUpDateOptional => 'फ़ॉलो-अप की तारीख (वैकल्पिक)';
+
+  @override
+  String get notes => 'नोट्स';
+
+  @override
+  String get saveEnquiry => 'इनक्वायरी सहेजें';
+
+  @override
+  String get noLeadsYet => 'अभी कोई लीड नहीं है';
+
+  @override
+  String get noLeadsYetBody =>
+      'जो लोग जिम आएं या फ़ोन करें, उन्हें यहां जोड़ें। यह सूची बताएगी कि हर दिन किसे फ़ॉलो-अप करना है।';
+
+  @override
+  String get reminders => 'रिमाइंडर';
+
+  @override
+  String get gymNotFound => 'जिम नहीं मिला';
+
+  @override
+  String get push => 'पुश';
+
+  @override
+  String get whatsapp => 'WhatsApp';
+
+  @override
+  String get invoices => 'इनवॉइस';
+
+  @override
+  String get automaticRenewalNudges =>
+      'मेंबरशिप खत्म होने से पहले अपने-आप रिमाइंडर';
+
+  @override
+  String get on => 'चालू';
+
+  @override
+  String get off => 'बंद';
+
+  @override
+  String get sendBeforeRenewal => 'रिन्यूअल से पहले भेजें';
+
+  @override
+  String get pushReminders => 'पुश रिमाइंडर';
+
+  @override
+  String get pushReminderSubtitle => 'मेंबर को ऐप में नोटिफ़िकेशन';
+
+  @override
+  String get reminderWindowsHint =>
+      'चुने गए दिनों में रिन्यूअल वाले मेंबरों को दिन में एक बार रिमाइंडर भेजा जाता है।';
+
+  @override
+  String get whatsappReminders => 'WhatsApp रिमाइंडर';
+
+  @override
+  String get whatsappReminderSubtitle => 'मेंबर के WhatsApp पर भेजा गया संदेश';
+
+  @override
+  String get oneMessagePerWindow =>
+      'हर मेंबर को हर समय खिड़की में एक संदेश। हर संदेश में एक क्रेडिट लगता है।';
+
+  @override
+  String get message => 'संदेश';
+
+  @override
+  String get preview => 'झलक';
+
+  @override
+  String get credits => 'क्रेडिट';
+
+  @override
+  String get sendRemindersNow => 'अभी रिमाइंडर भेजें';
+
+  @override
+  String get invoiceWhatsappMessages => 'इनवॉइस WhatsApp संदेश';
+
+  @override
+  String get invoiceWhatsappSubtitle =>
+      'मेंबर को इनवॉइस और पेमेंट रसीद अपने-आप भेजें';
+
+  @override
+  String get sameWhatsappCredits => 'रिमाइंडर वाले WhatsApp क्रेडिट ही लगेंगे।';
+
+  @override
+  String get freeMonthlyQuota => 'मासिक मुफ़्त कोटा';
+
+  @override
+  String get resetsFirstMonth => 'हर महीने की 1 तारीख को रीसेट';
+
+  @override
+  String get purchasedCredits => 'खरीदे गए क्रेडिट';
+
+  @override
+  String get staffAndRoles => 'स्टाफ और रोल';
+
+  @override
+  String get permissions => 'अनुमतियां';
+
+  @override
+  String get staffLoadFailed =>
+      'स्टाफ लोड नहीं हुआ। दोबारा कोशिश के लिए नीचे खींचें।';
+
+  @override
+  String get noStaffMembers => 'अभी कोई स्टाफ नहीं है।';
+
+  @override
+  String get inviteStaffMember => 'स्टाफ को आमंत्रित करें';
+
+  @override
+  String removeStaffTitle(Object name) {
+    return '$name को हटाएं?';
+  }
+
+  @override
+  String get removeStaffBody =>
+      'इस जिम के डैशबोर्ड पर उनका एक्सेस तुरंत बंद हो जाएगा।';
+
+  @override
+  String get remove => 'हटाएं';
+
+  @override
+  String get staffMemberRemoved => 'स्टाफ हटाया गया';
+
+  @override
+  String get roles => 'रोल';
+
+  @override
+  String get you => 'आप';
+
+  @override
+  String get firstLastNameRequired => 'पहला और आखिरी नाम जरूरी है।';
+
+  @override
+  String get inviteStaff => 'स्टाफ को आमंत्रित करें';
+
+  @override
+  String get inviteStaffHelp =>
+      'उन्हें पासवर्ड बनाने और लॉगिन करने के लिए ईमेल मिलेगा।';
+
+  @override
+  String get role => 'रोल';
+
+  @override
+  String get sendingInvite => 'आमंत्रण भेजा जा रहा है…';
+
+  @override
+  String get sendInvite => 'आमंत्रण भेजें';
+
+  @override
+  String get classes => 'बैच';
+
+  @override
+  String get deleteBatch => 'बैच हटाएं';
+
+  @override
+  String deleteBatchBody(Object name) {
+    return '\"$name\" हटाएं? इसके सभी सेशन और नामांकन भी हट जाएंगे। इसे वापस नहीं लिया जा सकता।';
+  }
+
+  @override
+  String failedToDelete(Object error) {
+    return 'हटाना विफल: $error';
+  }
+
+  @override
+  String get addSession => 'सेशन जोड़ें';
+
+  @override
+  String get time => 'समय';
+
+  @override
+  String capacityDuration(Object capacity, Object minutes) {
+    return 'क्षमता: $capacity · $minutes मिनट';
+  }
+
+  @override
+  String get hideSessions => 'सेशन छिपाएं';
+
+  @override
+  String get viewSessions => 'सेशन देखें';
+
+  @override
+  String get noUpcomingSessions => 'कोई आगामी सेशन नहीं';
+
+  @override
+  String get noBatchesYet => 'अभी कोई बैच नहीं है';
+
+  @override
+  String get addFirstClass => 'शुरू करने के लिए अपना पहला बैच जोड़ें।';
+
+  @override
+  String get addBatch => 'बैच जोड़ें';
+
+  @override
+  String get editClass => 'बैच बदलें';
+
+  @override
+  String get addClass => 'बैच जोड़ें';
+
+  @override
+  String get type => 'प्रकार';
+
+  @override
+  String get coach => 'कोच';
+
+  @override
+  String get capacity => 'क्षमता';
+
+  @override
+  String get duration => 'अवधि';
+
+  @override
+  String get runsOn => 'किन दिनों पर';
+
+  @override
+  String get noDaysSelected =>
+      'कोई दिन नहीं चुना — कैलेंडर से हाथ से सेशन जोड़ें।';
+
+  @override
+  String get colour => 'रंग';
+
+  @override
+  String get descriptionOptional => 'विवरण (वैकल्पिक)';
+
+  @override
+  String get saveClass => 'बैच सहेजें';
+
+  @override
+  String get removeFromBatch => 'बैच से हटाएं';
+
+  @override
+  String removeMemberFromBatch(Object batch, Object name) {
+    return '$name को $batch से हटाएं?';
+  }
+
+  @override
+  String get searchMembers => 'मेंबर खोजें';
+
+  @override
+  String get allMembersEnrolled => 'सभी मेंबर पहले से नामांकित हैं।';
+
+  @override
+  String get noMembersFound => 'कोई मेंबर नहीं मिला';
+
+  @override
+  String get enrolled => 'नामांकित';
+
+  @override
+  String get noMembersEnrolled =>
+      'अभी कोई मेंबर नामांकित नहीं है — ऊपर से जोड़ें।';
+
+  @override
+  String get paymentsDue => 'बाकी पेमेंट';
+
+  @override
+  String get allCaughtUp => 'सब पूरा है';
+
+  @override
+  String get noOverdueUpcoming => 'अभी कोई बकाया या आगामी पेमेंट नहीं है।';
+
+  @override
+  String get nothingDueThatDay => 'उस दिन कुछ बाकी नहीं';
+
+  @override
+  String get pickAnotherDay => 'दूसरा दिन चुनें या फ़िल्टर हटाएं।';
+
+  @override
+  String get overdue => 'बकाया';
+
+  @override
+  String get noOverduePayments => 'कोई बकाया पेमेंट नहीं';
+
+  @override
+  String get everyoneUpToDate => 'सभी का पेमेंट पूरा है।';
+
+  @override
+  String get oldestFirst => 'सबसे पुराना पहले';
+
+  @override
+  String get nothingDueToday => 'आज कुछ बाकी नहीं';
+
+  @override
+  String get checkComingNext => 'अगला बाकी पेमेंट देखें।';
+
+  @override
+  String get nothingComingUp => 'आगे कुछ नहीं';
+
+  @override
+  String get noPaymentsNext30Days => 'अगले 30 दिनों में कोई पेमेंट बाकी नहीं।';
+
+  @override
+  String get coming => 'आगामी';
+
+  @override
+  String get later => 'बाद में';
+
+  @override
+  String get showingOneDay => 'केवल एक दिन दिख रहा है';
+
+  @override
+  String get clearDay => 'दिन का फ़िल्टर हटाएं';
+
+  @override
+  String get viewExpiredMembers => 'एक्सपायर मेंबर देखें';
+
+  @override
+  String get totalOverdue => 'कुल बकाया';
+
+  @override
+  String get firstName => 'पहला नाम';
+
+  @override
+  String get lastName => 'आखिरी नाम';
+
+  @override
+  String get initialStatus => 'शुरुआती स्टेटस';
+
+  @override
+  String teamMembersCount(num count) {
+    return '$count टीम सदस्य';
+  }
+
+  @override
+  String inviteSentTo(Object email) {
+    return '$email पर आमंत्रण भेजा गया';
+  }
+
+  @override
+  String get failedSendInvite => 'आमंत्रण भेजना विफल';
+
+  @override
+  String starterStaffLimit(Object count) {
+    return 'Starter में $count लॉगिन मिलता है। स्टाफ जोड़ने के लिए Pro पर अपग्रेड करें।';
+  }
+
+  @override
+  String get today => 'आज';
+
+  @override
+  String get tomorrow => 'कल';
+
+  @override
+  String get filterByPlan => 'प्लान से फ़िल्टर';
+
+  @override
+  String get lapsingWithin => 'इतने दिन में खत्म';
+
+  @override
+  String get joinedWithin => 'इतने दिन में जुड़े';
+
+  @override
+  String get expiringSoon => 'जल्द खत्म होने वाले';
+
+  @override
+  String get searchMemberHint => 'नाम, मोबाइल या मेंबर आईडी';
+
+  @override
+  String get stepMember => '1 · मेंबर';
+
+  @override
+  String get stepMembership => '2 · मेंबरशिप';
+
+  @override
+  String get stepPayment => '3 · पेमेंट';
+
+  @override
+  String get fullName => 'पूरा नाम';
+
+  @override
+  String get mobileNumber => 'मोबाइल नंबर';
+
+  @override
+  String get batch => 'बैच';
+
+  @override
+  String get memberId => 'मेंबर आईडी';
+
+  @override
+  String get discount => 'छूट';
+
+  @override
+  String get amountCollected => 'ली गई राशि';
+
+  @override
+  String get emergencyContact => 'आपातकालीन संपर्क';
+
+  @override
+  String get name => 'नाम';
+
+  @override
+  String get number => 'नंबर';
+
+  @override
+  String get emergencyNameHint => 'जैसे रमेश (पिता)';
+
+  @override
+  String get contact => 'संपर्क';
+
+  @override
+  String get biometricDeviceId => 'बायोमेट्रिक डिवाइस आईडी';
+
+  @override
+  String get enrolledBatches => 'नामांकित बैच';
+
+  @override
+  String get recentCheckIns => 'हाल के चेक-इन';
+
+  @override
+  String get recurringDiscount => 'हर बार मिलने वाली छूट';
+
+  @override
+  String get editRecurringDiscountTitle => 'हर बार की छूट बदलें';
+
+  @override
+  String get discountAmount => 'छूट की राशि';
+
+  @override
+  String get due => 'बाकी';
+
+  @override
+  String get dueTodayLabel => 'आज बाकी';
+
+  @override
+  String daysOverdue(Object days) {
+    return '$days दिन बकाया';
+  }
+
+  @override
+  String upcomingInDays(Object days) {
+    return '$days दिन में आने वाला';
+  }
+
+  @override
+  String get clearDates => 'तारीखें हटाएं';
+
+  @override
+  String get partlyPaid => 'कुछ भुगतान हुआ';
+
+  @override
+  String get method => 'तरीका';
+
+  @override
+  String get notesOptional => 'नोट्स (वैकल्पिक)';
+
+  @override
+  String get admissionFeeOptional => 'एडमिशन फ़ीस (वैकल्पिक)';
+
+  @override
+  String get discountOptional => 'छूट (वैकल्पिक)';
+
+  @override
+  String get dueDateOptional => 'बाकी तारीख (वैकल्पिक)';
+
+  @override
+  String get deletePlanTitle => 'प्लान हटाएं?';
+
+  @override
+  String get planName => 'प्लान का नाम';
+
+  @override
+  String get price => 'कीमत';
+
+  @override
+  String get monthly => 'मासिक';
+
+  @override
+  String get quarterly => 'तिमाही';
+
+  @override
+  String get sixMonths => '6 महीने';
+
+  @override
+  String get yearly => 'सालाना';
+
+  @override
+  String get custom => 'कस्टम…';
+
+  @override
+  String get durationMonths => 'अवधि (महीने)';
+
+  @override
+  String get maxClassesOptional => 'अधिकतम क्लास (खाली = असीमित)';
+
+  @override
+  String get includes => 'शामिल';
+
+  @override
+  String get addFeature => 'सुविधा जोड़ें';
+
+  @override
+  String get savePlan => 'प्लान सहेजें';
+
+  @override
+  String get language => 'भाषा';
+
+  @override
+  String get tryNewDesignTitle => 'नया डिज़ाइन आज़माएं?';
+
+  @override
+  String get switchBackClassicTitle => 'पुराने डिज़ाइन पर लौटें?';
+
+  @override
+  String get actionSwitch => 'बदलें';
+
+  @override
+  String get switchBack => 'वापस बदलें';
+
+  @override
+  String get designSwitchFailed => 'डिज़ाइन नहीं बदला। दोबारा कोशिश करें।';
+
+  @override
+  String get phoneOptional => 'फ़ोन (वैकल्पिक)';
+
+  @override
+  String get saveProfile => 'प्रोफ़ाइल सहेजें';
+
+  @override
+  String get newPassword => 'नया पासवर्ड';
+
+  @override
+  String get confirmNewPassword => 'नया पासवर्ड दोबारा';
+
+  @override
+  String get updatePassword => 'पासवर्ड बदलें';
+
+  @override
+  String get done => 'हो गया';
+
+  @override
+  String get gymName => 'जिम का नाम';
+
+  @override
+  String get addressOptional => 'पता (वैकल्पिक)';
+
+  @override
+  String get websiteOptional => 'वेबसाइट यूआरएल (वैकल्पिक)';
+
+  @override
+  String get currency => 'मुद्रा';
+
+  @override
+  String get saveDetails => 'जानकारी सहेजें';
+
+  @override
+  String get payments => 'पेमेंट';
+
+  @override
+  String get keyId => 'की आईडी';
+
+  @override
+  String get keySecret => 'की सीक्रेट';
+
+  @override
+  String get enterToUpdate => 'बदलने के लिए भरें';
+
+  @override
+  String get updateKeys => 'की बदलें';
+
+  @override
+  String get connectRazorpay => 'Razorpay जोड़ें';
+
+  @override
+  String get viewPastTickets => 'पुराने टिकट देखें';
+
+  @override
+  String get supportTopic => 'यह किस बारे में है?';
+
+  @override
+  String get title => 'शीर्षक';
+
+  @override
+  String get shortIssueSummary => 'समस्या का छोटा सार';
+
+  @override
+  String get detailsOptional => 'विवरण (वैकल्पिक)';
+
+  @override
+  String get detailsHint => 'ऐसी कोई भी जानकारी जो समस्या समझने में मदद करे';
+
+  @override
+  String get submitTicket => 'टिकट भेजें';
+
+  @override
+  String get myTickets => 'मेरे टिकट';
+
+  @override
+  String get regenerateLinkTitle => 'लिंक दोबारा बनाएं?';
+
+  @override
+  String get regenerate => 'दोबारा बनाएं';
+
+  @override
+  String get selfRegistrationLink => 'खुद रजिस्ट्रेशन लिंक';
+
+  @override
+  String get shareLink => 'लिंक शेयर करें';
+
+  @override
+  String get regenerateLink => 'लिंक दोबारा बनाएं';
+
+  @override
+  String get biometricDevice => 'बायोमेट्रिक डिवाइस';
+
+  @override
+  String get pair => 'पेयर करें';
+
+  @override
+  String get viewSetupGuide => 'पूरी सेटअप गाइड देखें';
+
+  @override
+  String get contactWhatsapp => 'WhatsApp पर हमसे संपर्क करें';
+
+  @override
+  String get seeProPlans => 'Pro प्लान देखें';
+
+  @override
+  String get typeDeleteConfirm => 'पुष्टि के लिए DELETE लिखें';
+
+  @override
+  String galleryOpenFailed(Object error) {
+    return 'गैलरी नहीं खुली: $error';
+  }
+
+  @override
+  String get razorpayConnected => 'Razorpay जुड़ गया';
+
+  @override
+  String get razorpayDisconnected => 'Razorpay हटा दिया गया';
+
+  @override
+  String ticketsLoadFailed(Object error) {
+    return 'टिकट लोड नहीं हुए: $error';
+  }
+
+  @override
+  String copiedLabel(Object label) {
+    return '$label कॉपी हुआ';
+  }
+
+  @override
+  String amountRequiredWithCurrency(Object currency) {
+    return 'राशि ($currency) *';
+  }
+
+  @override
+  String get error => 'गलती';
+
+  @override
+  String get gymQr => 'जिम क्यूआर';
+
+  @override
+  String get checkIn => 'चेक-इन';
+
+  @override
+  String get callTooltip => 'फ़ोन करें';
+
+  @override
+  String get checkoutStartFailed => 'चेकआउट शुरू नहीं हुआ। दोबारा कोशिश करें।';
+
+  @override
+  String get packUnavailable => 'यह पैक अभी उपलब्ध नहीं है।';
+
+  @override
+  String get purchaseSuccessful => 'खरीद सफ़ल — क्रेडिट जल्द दिखेंगे।';
+
+  @override
+  String purchaseFailed(Object error) {
+    return 'खरीद विफल: $error';
+  }
+
+  @override
+  String sendFailed(Object error) {
+    return 'भेजना विफल: $error';
+  }
+
+  @override
+  String get className => 'बैच का नाम';
+
+  @override
+  String removeFailed(Object error) {
+    return 'हटाना विफल: $error';
+  }
+
+  @override
+  String get expiring => 'खत्म होने वाले';
+
+  @override
+  String get joined => 'नए जुड़े';
+
+  @override
+  String get expired => 'खत्म';
+
+  @override
+  String get active => 'चालू';
+
+  @override
+  String get onHold => 'रोके गए';
+
+  @override
+  String get statusNew => 'नया';
+
+  @override
+  String get statusContacted => 'संपर्क हुआ';
+
+  @override
+  String get statusTrial => 'ट्रायल';
+
+  @override
+  String get statusConverted => 'मेंबर बना';
+
+  @override
+  String get statusLost => 'छूट गया';
+
+  @override
+  String get sourceManual => 'हाथ से';
+
+  @override
+  String get sourceWebsite => 'वेबसाइट';
+
+  @override
+  String get sourceReferral => 'रेफ़रल';
+
+  @override
+  String get sourceWalkIn => 'जिम पर आया';
+
+  @override
+  String get sourceSocial => 'सोशल मीडिया';
+
+  @override
+  String get managerAccessHint => 'मेंबर, बैच, बिलिंग और संचार';
+
+  @override
+  String get trainerAccessHint => 'अपने बैच और समय, चेक-इन, अटेंडेंस';
+
+  @override
+  String get staffAccessHint => 'मेंबर और चेक-इन का बुनियादी एक्सेस';
+
+  @override
+  String daysLate(Object days) {
+    return '$days दिन देर';
+  }
+
+  @override
+  String inDays(Object days) {
+    return '$days दिन में';
+  }
+
+  @override
+  String get chooseLanguage => 'अपनी भाषा चुनें';
+
+  @override
+  String get chooseLanguageSubtitle =>
+      'GymCRM को किस भाषा में इस्तेमाल करना है, वह चुनें।';
+
+  @override
+  String get continueLabel => 'आगे बढ़ें';
+
+  @override
+  String get languageChangeLater => 'आप इसे बाद में सेटिंग्स से बदल सकते हैं।';
+
+  @override
+  String get welcomeGymcrm => 'GymCRM में आपका स्वागत है।';
+
+  @override
+  String get runAGym => 'मैं जिम चलाता हूं';
+
+  @override
+  String get gymMember => 'मैं जिम मेंबर हूं';
+
+  @override
+  String get needHelp => 'मदद चाहिए? ';
+
+  @override
+  String get contactUs => 'हमसे संपर्क करें';
+
+  @override
+  String get gymTeams => 'जिम टीम के लिए';
+
+  @override
+  String get runFloorHeadline => 'जिम चलाएं।\nहर दिन संभालें।';
+
+  @override
+  String get gymOwner => 'जिम मालिक';
+
+  @override
+  String get welcomeBack => 'फिर से स्वागत है';
+
+  @override
+  String get loginSubtitle => 'आज का जिम संभालने के लिए लॉगिन करें।';
+
+  @override
+  String get password => 'पासवर्ड';
+
+  @override
+  String get emailRequired => 'ईमेल जरूरी है';
+
+  @override
+  String get validEmail => 'सही ईमेल डालें';
+
+  @override
+  String get passwordRequired => 'पासवर्ड जरूरी है';
+
+  @override
+  String get forgotPassword => 'पासवर्ड भूल गए?';
+
+  @override
+  String get login => 'लॉगिन करें';
+
+  @override
+  String get loggingIn => 'लॉगिन हो रहा है…';
+
+  @override
+  String get or => 'या';
+
+  @override
+  String get newGym => 'नया जिम? ';
+
+  @override
+  String get createAccount => 'अकाउंट बनाएं';
+
+  @override
+  String get secureRecovery => 'सुरक्षित रिकवरी';
+
+  @override
+  String get recoveryHeadline => 'वापस आएं।\nबिना चिंता।';
+
+  @override
+  String get resetPasswordTitle => 'अपना पासवर्ड रीसेट करें';
+
+  @override
+  String get resetPasswordHelp =>
+      'जिस ईमेल से साइनअप किया था, वह डालें। हम रीसेट लिंक भेजेंगे।';
+
+  @override
+  String get sendResetLink => 'रीसेट लिंक भेजें';
+
+  @override
+  String get checkYourEmailLabel => 'अपना ईमेल देखें';
+
+  @override
+  String get resetHeadline => 'एक टैप में\nरीसेट।';
+
+  @override
+  String get linkSent => 'लिंक भेजा गया';
+
+  @override
+  String get checkEmailPrefix => 'यह ईमेल देखें: ';
+
+  @override
+  String get resetLinkExpiry =>
+      ' और रीसेट लिंक खोलें। यह एक घंटे में खत्म हो जाएगा।';
+
+  @override
+  String get checkSpam => 'इनबॉक्स में नहीं? स्पैम देखें';
+
+  @override
+  String sendAgainIn(Object seconds) {
+    return ', या $seconds सेकंड में दोबारा भेजें।';
+  }
+
+  @override
+  String get sendAgain => 'दोबारा भेजें';
+
+  @override
+  String get backToLogin => 'लॉगिन पर वापस जाएं';
+
+  @override
+  String get back => '← वापस';
+
+  @override
+  String get buildWithGymcrm => 'GymCRM के साथ बनाएं';
+
+  @override
+  String get gymOnePlace => 'आपका जिम।\nएक जगह।';
+
+  @override
+  String get createYourGym => 'अपना जिम बनाएं';
+
+  @override
+  String get oneMinute => 'लगभग एक मिनट लगेगा।';
+
+  @override
+  String get signupGoogle => 'Google से साइनअप करें';
+
+  @override
+  String get gymNameRequired => 'जिम का नाम जरूरी है';
+
+  @override
+  String get countryCurrency => 'देश और मुद्रा';
+
+  @override
+  String get yourName => 'आपका नाम';
+
+  @override
+  String get nameRequired => 'नाम जरूरी है';
+
+  @override
+  String get mobileOptional => 'मोबाइल नंबर (वैकल्पिक)';
+
+  @override
+  String get validMobile => 'सही मोबाइल नंबर डालें';
+
+  @override
+  String get tapFlagCountry => 'देश बदलने के लिए झंडे पर टैप करें';
+
+  @override
+  String get minEightCharacters => 'कम से कम 8 अक्षर';
+
+  @override
+  String get passwordEightCharacters =>
+      'पासवर्ड में कम से कम 8 अक्षर होने चाहिए';
+
+  @override
+  String get alreadyGymcrm => 'पहले से GymCRM पर हैं? ';
+
+  @override
+  String get changeEmail => '← ईमेल बदलें';
+
+  @override
+  String get verifyEmailLabel => 'ईमेल की पुष्टि करें';
+
+  @override
+  String get almostThere => 'बस थोड़ा और।';
+
+  @override
+  String get checkYourEmail => 'अपना ईमेल देखें';
+
+  @override
+  String get sentSixDigitCode => 'हमने 6 अंकों का कोड भेजा है:\n';
+
+  @override
+  String get verify => 'पुष्टि करें';
+
+  @override
+  String resendCodeIn(Object seconds) {
+    return '$seconds सेकंड में कोड दोबारा भेजें';
+  }
+
+  @override
+  String get resendCode => 'कोड दोबारा भेजें';
+
+  @override
+  String get codeResentEmail => 'कोड दोबारा भेजा गया — ईमेल देखें।';
+
+  @override
+  String get weak => 'कमजोर';
+
+  @override
+  String get fair => 'ठीक';
+
+  @override
+  String get strong => 'मजबूत';
+
+  @override
+  String get agreeTo => 'मैं सहमत हूं: ';
+
+  @override
+  String get and => ' और ';
+
+  @override
+  String get acceptTermsError =>
+      'आगे बढ़ने के लिए सेवा की शर्तें और प्राइवेसी पॉलिसी स्वीकार करें।';
+
+  @override
+  String get continueGoogle => 'Google से आगे बढ़ें';
+
+  @override
+  String get mobileAccess => 'मोबाइल से प्रवेश';
+
+  @override
+  String get mobileAccessHeadline => 'एक कोड।\nऔर आप अंदर।';
+
+  @override
+  String get loginWithMobile => 'मोबाइल से लॉगिन करें';
+
+  @override
+  String get mobileOtpHelp => 'हम आपको एक बार इस्तेमाल होने वाला कोड भेजेंगे।';
+
+  @override
+  String get sendCode => 'कोड भेजें';
+
+  @override
+  String get otpSendFailed => 'OTP नहीं भेजा जा सका। दोबारा कोशिश करें।';
+
+  @override
+  String get codeResentSms => 'कोड SMS से दोबारा भेजा गया।';
+
+  @override
+  String get resendFailed => 'कोड दोबारा नहीं भेजा जा सका। फिर कोशिश करें।';
+
+  @override
+  String get incorrectCode => 'कोड सही नहीं है। दोबारा कोशिश करें।';
+
+  @override
+  String get verificationFailed => 'पुष्टि नहीं हो सकी। दोबारा कोशिश करें।';
+
+  @override
+  String get verifyYourNumber => 'अपने नंबर की पुष्टि करें';
+
+  @override
+  String get checkMessages => 'अपने मैसेज देखें।';
+
+  @override
+  String get enterVerificationCode => 'पुष्टि कोड डालें';
+
+  @override
+  String get changeNumber => 'नंबर बदलें';
+
+  @override
+  String get setUpYourGym => 'अपना जिम सेट करें';
+
+  @override
+  String setupStep(int step) {
+    return '4 में से चरण $step';
+  }
+
+  @override
+  String get tellUsAboutGym => 'अपने जिम के बारे में बताएं';
+
+  @override
+  String get membersWillSee => 'मेंबर को यही जानकारी दिखाई देगी।';
+
+  @override
+  String get createGym => 'जिम बनाएं';
+
+  @override
+  String get freeTrialNoCard =>
+      '3 दिन का मुफ्त ट्रायल · क्रेडिट कार्ड जरूरी नहीं';
+
+  @override
+  String get optionalLabel => '— वैकल्पिक';
+
+  @override
+  String get monthlyMembership => 'मासिक मेंबरशिप';
+
+  @override
+  String get planNameRequired => 'प्लान का नाम जरूरी है।';
+
+  @override
+  String get planPriceRequired => 'इस प्लान की कीमत डालें।';
+
+  @override
+  String get planCreateFailed => 'प्लान नहीं बन सका। दोबारा कोशिश करें।';
+
+  @override
+  String get createFirstPlan => 'अपना पहला मेंबरशिप प्लान बनाएं';
+
+  @override
+  String get createFirstPlanHelp => 'वह प्लान सेट करें जिसे आपके मेंबर लेंगे।';
+
+  @override
+  String get billingCycle => 'बिलिंग अवधि';
+
+  @override
+  String get whatsIncluded => 'क्या शामिल है';
+
+  @override
+  String get createPlanContinue => 'प्लान बनाकर आगे बढ़ें';
+
+  @override
+  String get creatingPlan => 'प्लान बन रहा है…';
+
+  @override
+  String get firstNameRequired => 'पहला नाम जरूरी है।';
+
+  @override
+  String get memberAddFailed => 'यह मेंबर नहीं जुड़ सका। दोबारा कोशिश करें।';
+
+  @override
+  String get addFirstMember => 'अपना पहला मेंबर जोड़ें';
+
+  @override
+  String get addFirstMemberHelp => 'आप बाद में और मेंबर जोड़ सकते हैं।';
+
+  @override
+  String get plan => 'प्लान';
+
+  @override
+  String get moreMemberDetails => 'और जानकारी — मेंबर आईडी, भुगतान राशि, नोट्स';
+
+  @override
+  String get amountPaid => 'भुगतान राशि';
+
+  @override
+  String get notesHint => 'याद रखने योग्य कोई बात';
+
+  @override
+  String get addingMember => 'मेंबर जोड़ा जा रहा है…';
+
+  @override
+  String get skipForNow => 'अभी छोड़ें';
+
+  @override
+  String get yourGym => 'आपका जिम';
+
+  @override
+  String get gymReady => 'आपका जिम तैयार है';
+
+  @override
+  String get gymCreated => 'जिम बन गया';
+
+  @override
+  String get firstPlanCreated => 'पहला प्लान बन गया';
+
+  @override
+  String get firstMemberAdded => 'पहला मेंबर जुड़ गया';
+
+  @override
+  String get goToDashboard => 'डैशबोर्ड पर जाएं';
+
+  @override
+  String get setupReadyHelp =>
+      'आप डैशबोर्ड से और प्लान, मेंबर और स्टाफ जोड़ सकते हैं।';
+
+  @override
+  String get addMenuSubtitle => 'आप क्या जोड़ना चाहते हैं?';
+
+  @override
+  String get addMenuMember => 'मेंबर';
+
+  @override
+  String get addMenuMemberHint => 'नया एडमिशन, प्लान और पहला पेमेंट';
+
+  @override
+  String get addMenuInvoice => 'इनवॉइस';
+
+  @override
+  String get addMenuInvoiceHint => 'मेंबर को प्लान या सर्विस का बिल दें';
+
+  @override
+  String get addMenuPlan => 'प्लान';
+
+  @override
+  String get addMenuPlanHint => 'मंथली, क्वार्टरली या ईयरली मेंबरशिप';
+
+  @override
+  String get addMenuLead => 'लीड';
+
+  @override
+  String get addMenuLeadHint => 'वॉक-इन या पूछताछ, जिसका फ़ॉलो-अप करना है';
+
+  @override
+  String get addMenuBatch => 'बैच';
+
+  @override
+  String get addMenuBatchHint => 'सुबह, शाम या तय समय वाली क्लास';
+
+  @override
+  String get addMenuStaff => 'स्टाफ';
+
+  @override
+  String get addMenuStaffHint => 'ट्रेनर, मैनेजर या फ़्रंट डेस्क को जोड़ें';
+
+  @override
+  String get addMenuExpense => 'खर्चा';
+
+  @override
+  String get addMenuExpenseHint => 'किराया, सैलरी, मशीनें, बिजली-पानी';
 }

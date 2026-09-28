@@ -25,7 +25,7 @@ import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/app_locale.dart';
-import '../../../l10n/app_localizations.dart';
+import '../../../l10n/l10n.dart';
 
 /// Public base URL for member self-registration links (matches the web app).
 const _registrationBaseUrl = 'https://gymcrm.in';
@@ -64,10 +64,7 @@ class SettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Text(l.featSettings),
-        leading: const BackButton(),
-      ),
+      appBar: AppBar(title: Text(l.featSettings), leading: const BackButton()),
       body: ResponsiveContent(
         child: SingleChildScrollView(
           child: Column(
@@ -345,9 +342,9 @@ class SettingsScreen extends ConsumerWidget {
     final notifier = ref.read(authNotifierProvider.notifier);
     final ok = await showConfirmDialog(
       context,
-      title: 'Sign out?',
+      title: context.l10n.signOutTitle,
       body: 'You can sign back in anytime.',
-      confirmLabel: 'Sign out',
+      confirmLabel: context.l10n.signOutConfirm,
       icon: AppIcons.logout,
     );
     if (ok == true) notifier.signOut();
@@ -357,9 +354,7 @@ class SettingsScreen extends ConsumerWidget {
     final notifier = ref.read(authNotifierProvider.notifier);
     showDialog(
       context: context,
-      builder: (_) => _DeleteAccountDialog(
-        onDeleted: notifier.signOut,
-      ),
+      builder: (_) => _DeleteAccountDialog(onDeleted: notifier.signOut),
     );
   }
 }
@@ -471,8 +466,8 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
               controller: _ctrl,
               autofocus: true,
               textAlign: TextAlign.center,
-              decoration: const InputDecoration(
-                hintText: 'Type DELETE to confirm',
+              decoration: InputDecoration(
+                hintText: context.l10n.typeDeleteConfirm,
               ),
               onChanged: (_) {
                 if (_error != null) setState(() => _error = null);
@@ -627,7 +622,7 @@ Future<void> _pickLanguage(BuildContext context, WidgetRef ref) async {
   final picked = await showDialog<String>(
     context: context,
     builder: (ctx) => SimpleDialog(
-      title: const Text('Language / भाषा'),
+      title: Text(context.l10n.language),
       children: [
         for (final (code, label) in [
           ('en', l.languageEnglish),
@@ -664,7 +659,9 @@ Future<void> _toggleDesign(
 ) async {
   final ok = await showConfirmDialog(
     context,
-    title: toNew ? 'Try the new design?' : 'Switch back to classic?',
+    title: toNew
+        ? context.l10n.tryNewDesignTitle
+        : context.l10n.switchBackClassicTitle,
     body: toNew
         ? 'Home shows every feature as a card, and a new Dashboard shows '
               'collections, dues, expenses and profit. Money and Check-in '
@@ -672,7 +669,7 @@ Future<void> _toggleDesign(
               'branches. You can switch back anytime here.'
         : 'Your gym goes back to the classic layout for all your staff and '
               'branches. You can try the new design again anytime here.',
-    confirmLabel: toNew ? 'Switch' : 'Switch back',
+    confirmLabel: toNew ? context.l10n.actionSwitch : context.l10n.switchBack,
     icon: AppIcons.layers,
     danger: false,
   );
@@ -691,9 +688,9 @@ Future<void> _toggleDesign(
   } catch (e) {
     debugPrint('[GymCRM] design switch failed: $e');
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not switch design. Try again.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.designSwitchFailed)));
     }
   }
 }
@@ -882,7 +879,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
   @override
   Widget build(BuildContext context) {
     return _SheetScaffold(
-      title: 'Edit profile',
+      title: context.l10n.editProfile,
       child: Column(
         children: [
           if (_error != null) _ErrorBox(message: _error!),
@@ -892,7 +889,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FieldLabel('First name'),
+                    FieldLabel(context.l10n.firstName),
                     TextFormField(controller: _firstCtrl),
                   ],
                 ),
@@ -902,7 +899,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const FieldLabel('Last name'),
+                    FieldLabel(context.l10n.lastName),
                     TextFormField(controller: _lastCtrl),
                   ],
                 ),
@@ -910,7 +907,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
             ],
           ),
           const SizedBox(height: 14),
-          const FieldLabel('Phone (optional)'),
+          FieldLabel(context.l10n.phoneOptional),
           TextFormField(
             controller: _phoneCtrl,
             keyboardType: TextInputType.phone,
@@ -918,7 +915,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _loading ? null : _save,
-            child: _loading ? const _Spinner() : const Text('Save profile'),
+            child: _loading ? const _Spinner() : Text(context.l10n.saveProfile),
           ),
         ],
       ),
@@ -986,7 +983,7 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
   @override
   Widget build(BuildContext context) {
     return _SheetScaffold(
-      title: 'Change password',
+      title: context.l10n.changePassword,
       child: _done
           ? Column(
               children: [
@@ -1015,14 +1012,14 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
                 const SizedBox(height: 20),
                 OutlinedButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Done'),
+                  child: Text(context.l10n.done),
                 ),
               ],
             )
           : Column(
               children: [
                 if (_error != null) _ErrorBox(message: _error!),
-                const FieldLabel('New password'),
+                FieldLabel(context.l10n.newPassword),
                 TextFormField(
                   controller: _newCtrl,
                   obscureText: _obscureNew,
@@ -1039,7 +1036,7 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                const FieldLabel('Confirm new password'),
+                FieldLabel(context.l10n.confirmNewPassword),
                 TextFormField(
                   controller: _confirmCtrl,
                   obscureText: _obscureConfirm,
@@ -1060,7 +1057,7 @@ class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
                   onPressed: _loading ? null : _save,
                   child: _loading
                       ? const _Spinner()
-                      : const Text('Update password'),
+                      : Text(context.l10n.updatePassword),
                 ),
               ],
             ),
@@ -1165,7 +1162,9 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
     } on PlatformException catch (e) {
       if (mounted && e.code != 'already_active') {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open gallery: ${e.message}')),
+          SnackBar(
+            content: Text(context.l10n.galleryOpenFailed(e.message ?? e.code)),
+          ),
         );
       }
     } finally {
@@ -1249,7 +1248,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
-      title: 'Gym details',
+      title: context.l10n.gymDetails,
       child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const Text(
@@ -1257,7 +1256,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
           style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
         ),
         data: (gym) {
-          if (gym == null) return const Text('Gym not found');
+          if (gym == null) return Text(context.l10n.gymNotFound);
           if (!_initialized) _seed(gym);
           final hasLogo =
               _logoFile != null || (_logoUrl != null && _logoUrl!.isNotEmpty);
@@ -1316,29 +1315,29 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
                 ),
               ),
               const SizedBox(height: 20),
-              const FieldLabel('Gym name'),
+              FieldLabel(context.l10n.gymName),
               TextFormField(controller: _nameCtrl),
               const SizedBox(height: 14),
-              const FieldLabel('Address (optional)'),
+              FieldLabel(context.l10n.addressOptional),
               TextFormField(controller: _addressCtrl),
               const SizedBox(height: 14),
-              const FieldLabel('Phone (optional)'),
+              FieldLabel(context.l10n.phoneOptional),
               TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
               ),
               const SizedBox(height: 14),
-              const FieldLabel('Website URL (optional)'),
+              FieldLabel(context.l10n.websiteOptional),
               TextFormField(
                 controller: _websiteCtrl,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(hintText: 'https://'),
               ),
               const SizedBox(height: 14),
-              const FieldLabel('Description (optional)'),
+              FieldLabel(context.l10n.descriptionOptional),
               TextFormField(controller: _descCtrl, maxLines: 2),
               const SizedBox(height: 14),
-              const FieldLabel('Currency'),
+              FieldLabel(context.l10n.currency),
               DropdownButtonFormField<String>(
                 initialValue: _currencies.contains(_currencyCode)
                     ? _currencyCode
@@ -1381,7 +1380,9 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _loading ? null : () => _save(gym['id'] as String),
-                child: _loading ? const _Spinner() : const Text('Save details'),
+                child: _loading
+                    ? const _Spinner()
+                    : Text(context.l10n.saveDetails),
               ),
             ],
           );
@@ -1450,7 +1451,7 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
         Navigator.pop(context);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Razorpay connected')));
+        ).showSnackBar(SnackBar(content: Text(context.l10n.razorpayConnected)));
       }
     } catch (e) {
       debugPrint('[GymCRM] Razorpay connect error: $e');
@@ -1471,9 +1472,9 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
       );
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Razorpay disconnected')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.razorpayDisconnected)),
+        );
       }
     } catch (e) {
       debugPrint('[GymCRM] Razorpay disconnect error: $e');
@@ -1488,7 +1489,7 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
-      title: 'Payments',
+      title: context.l10n.payments,
       child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const Text(
@@ -1496,7 +1497,7 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
           style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
         ),
         data: (gym) {
-          if (gym == null) return const Text('Gym not found');
+          if (gym == null) return Text(context.l10n.gymNotFound);
           _seed(gym);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1547,18 +1548,18 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
                     ],
                   ),
                 ),
-              const FieldLabel('Key ID'),
+              FieldLabel(context.l10n.keyId),
               TextFormField(
                 controller: _keyIdCtrl,
                 decoration: const InputDecoration(hintText: 'rzp_live_…'),
               ),
               const SizedBox(height: 14),
-              const FieldLabel('Key secret'),
+              FieldLabel(context.l10n.keySecret),
               TextFormField(
                 controller: _keySecretCtrl,
                 obscureText: !_showSecret,
                 decoration: InputDecoration(
-                  hintText: _connected ? 'Enter to update' : null,
+                  hintText: _connected ? context.l10n.enterToUpdate : null,
                   suffixIcon: IconButton(
                     icon: Icon(
                       _showSecret
@@ -1574,7 +1575,11 @@ class _PaymentsSheetState extends ConsumerState<_PaymentsSheet> {
                 onPressed: _saving ? null : _connect,
                 child: _saving
                     ? const _Spinner()
-                    : Text(_connected ? 'Update keys' : 'Connect Razorpay'),
+                    : Text(
+                        _connected
+                            ? context.l10n.updateKeys
+                            : context.l10n.connectRazorpay,
+                      ),
               ),
               if (_connected) ...[
                 const SizedBox(height: 10),
@@ -1666,7 +1671,7 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
   @override
   Widget build(BuildContext context) {
     return _SheetScaffold(
-      title: 'Help & Support',
+      title: context.l10n.helpSupport,
       child: _submitted
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
@@ -1700,7 +1705,7 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
                     width: double.infinity,
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Done'),
+                      child: Text(context.l10n.done),
                     ),
                   ),
                 ],
@@ -1718,11 +1723,11 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
                       useSafeArea: true,
                       builder: (_) => const _MyTicketsSheet(),
                     ),
-                    child: const Text('View past tickets'),
+                    child: Text(context.l10n.viewPastTickets),
                   ),
                 ),
                 if (_error != null) _ErrorBox(message: _error!),
-                const FieldLabel('What\'s this about?'),
+                FieldLabel(context.l10n.supportTopic),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -1735,20 +1740,20 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
                   }).toList(),
                 ),
                 const SizedBox(height: 16),
-                const FieldLabel('Title'),
+                FieldLabel(context.l10n.title),
                 TextFormField(
                   controller: _titleCtrl,
-                  decoration: const InputDecoration(
-                    hintText: 'Short summary of the issue',
+                  decoration: InputDecoration(
+                    hintText: context.l10n.shortIssueSummary,
                   ),
                 ),
                 const SizedBox(height: 14),
-                const FieldLabel('Details (optional)'),
+                FieldLabel(context.l10n.detailsOptional),
                 TextFormField(
                   controller: _descCtrl,
                   maxLines: 4,
-                  decoration: const InputDecoration(
-                    hintText: 'Anything that helps us understand it',
+                  decoration: InputDecoration(
+                    hintText: context.l10n.detailsHint,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -1756,7 +1761,7 @@ class _SupportTicketSheetState extends ConsumerState<_SupportTicketSheet> {
                   onPressed: _loading ? null : _submit,
                   child: _loading
                       ? const _Spinner()
-                      : const Text('Submit ticket'),
+                      : Text(context.l10n.submitTicket),
                 ),
               ],
             ),
@@ -1795,13 +1800,13 @@ class _MyTicketsSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tickets = ref.watch(_myTicketsProvider);
     return _SheetScaffold(
-      title: 'My tickets',
+      title: context.l10n.myTickets,
       child: tickets.when(
         loading: () => const Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
           child: Center(child: CircularProgressIndicator()),
         ),
-        error: (e, _) => Text('Could not load tickets: $e'),
+        error: (e, _) => Text(context.l10n.ticketsLoadFailed('$e')),
         data: (rows) {
           if (rows.isEmpty) {
             return const Padding(
@@ -1938,9 +1943,9 @@ class _RegistrationLinkSheetState
     if (_gymId == null) return;
     final ok = await showConfirmDialog(
       context,
-      title: 'Regenerate link?',
+      title: context.l10n.regenerateLinkTitle,
       body: 'The old link will stop working immediately.',
-      confirmLabel: 'Regenerate',
+      confirmLabel: context.l10n.regenerate,
       icon: AppIcons.refresh,
       danger: false,
     );
@@ -1983,7 +1988,7 @@ class _RegistrationLinkSheetState
   Widget build(BuildContext context) {
     final gymAsync = ref.watch(_gymProvider);
     return _SheetScaffold(
-      title: 'Self-registration link',
+      title: context.l10n.selfRegistrationLink,
       child: gymAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const Text(
@@ -1991,7 +1996,7 @@ class _RegistrationLinkSheetState
           style: TextStyle(color: AppTheme.inkSoft, fontSize: 13),
         ),
         data: (gym) {
-          if (gym == null) return const Text('Gym not found');
+          if (gym == null) return Text(context.l10n.gymNotFound);
           _seed(gym);
 
           return Column(
@@ -2082,7 +2087,7 @@ class _RegistrationLinkSheetState
                           : null,
                     );
                   },
-                  child: const Text('Share link'),
+                  child: Text(context.l10n.shareLink),
                 ),
                 const SizedBox(height: 8),
                 Center(
@@ -2095,7 +2100,7 @@ class _RegistrationLinkSheetState
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(AppIcons.refresh, size: 16),
-                    label: const Text('Regenerate link'),
+                    label: Text(context.l10n.regenerateLink),
                   ),
                 ),
               ] else ...[
@@ -2232,14 +2237,14 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
     // discover the feature exists — but gets the upgrade prompt instead of the
     // device config.
     if (!allowsBiometric(ref.watch(planTierProvider))) {
-      return const _SheetScaffold(
-        title: 'Biometric Device',
-        child: _BiometricProUpsell(),
+      return _SheetScaffold(
+        title: context.l10n.biometricDevice,
+        child: const _BiometricProUpsell(),
       );
     }
 
     return _SheetScaffold(
-      title: 'Biometric Device',
+      title: context.l10n.biometricDevice,
       child: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -2298,11 +2303,7 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
                   child: const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        AppIcons.info,
-                        size: 16,
-                        color: AppTheme.inkHint,
-                      ),
+                      Icon(AppIcons.info, size: 16, color: AppTheme.inkHint),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -2406,7 +2407,7 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
                                 color: Colors.white,
                               ),
                             )
-                          : const Text('Pair'),
+                          : Text(context.l10n.pair),
                     ),
                   ],
                 ),
@@ -2514,11 +2515,7 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
                   child: const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        AppIcons.info,
-                        size: 16,
-                        color: AppTheme.inkHint,
-                      ),
+                      Icon(AppIcons.info, size: 16, color: AppTheme.inkHint),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -2545,7 +2542,7 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
                       'https://gymcrm.in/docs/biometric-attendance',
                     ),
                     icon: const Icon(AppIcons.info, size: 16),
-                    label: const Text('View full setup guide'),
+                    label: Text(context.l10n.viewSetupGuide),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -2556,7 +2553,7 @@ class BiometricDeviceSheetState extends ConsumerState<BiometricDeviceSheet> {
                       'https://wa.me/917541004076?text=${Uri.encodeComponent("Hi, I'm having trouble setting up my biometric device on GymCRM.")}',
                     ),
                     icon: const Icon(AppIcons.chat, size: 16),
-                    label: const Text('Contact us on WhatsApp'),
+                    label: Text(context.l10n.contactWhatsapp),
                   ),
                 ),
               ],
@@ -2647,7 +2644,7 @@ class _BiometricProUpsell extends StatelessWidget {
               Navigator.pop(context);
               context.push('/staff/subscription');
             },
-            child: const Text('See Pro plans'),
+            child: Text(context.l10n.seeProPlans),
           ),
         ),
       ],
@@ -2684,9 +2681,9 @@ class _CopyField extends StatelessWidget {
               GestureDetector(
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: value));
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(SnackBar(content: Text('$label copied')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(context.l10n.copiedLabel(label))),
+                  );
                 },
                 child: const Text(
                   'Copy',

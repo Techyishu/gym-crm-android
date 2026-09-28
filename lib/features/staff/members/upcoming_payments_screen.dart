@@ -8,7 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/theme/app_icons.dart';
-import '../../../l10n/app_localizations.dart';
+import '../../../l10n/l10n.dart';
 
 // The payments-due list lives in payments_due_screen.dart; this file now only
 // holds the Quick Collect sheet that several screens open.
@@ -348,7 +348,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                 decimal: true,
               ),
               decoration: InputDecoration(
-                labelText: 'Amount ($currencySymbol) *',
+                labelText: context.l10n.amountRequiredWithCurrency(
+                  currencySymbol,
+                ),
                 prefixText: '$currencySymbol ',
               ),
             ),
@@ -442,7 +444,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
             TextFormField(
               controller: _notesCtrl,
               maxLines: 2,
-              decoration: const InputDecoration(labelText: 'Notes (optional)'),
+              decoration: InputDecoration(
+                labelText: context.l10n.notesOptional,
+              ),
             ),
             const SizedBox(height: 20),
             ElevatedButton(

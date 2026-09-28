@@ -232,7 +232,10 @@ class _AddMenuSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SheetHeader(title: 'Add', subtitle: 'What do you want to add?'),
+          SheetHeader(
+            title: context.l10n.add,
+            subtitle: context.l10n.addMenuSubtitle,
+          ),
           const SizedBox(height: 12),
           Container(
             decoration: AppTheme.cardDecoration(radius: 14),
@@ -264,6 +267,17 @@ class _AddRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
+    final (label, hint) = switch (action.module) {
+      GymModule.members => (l.addMenuMember, l.addMenuMemberHint),
+      GymModule.payments => (l.addMenuInvoice, l.addMenuInvoiceHint),
+      GymModule.memberships => (l.addMenuPlan, l.addMenuPlanHint),
+      GymModule.leads => (l.addMenuLead, l.addMenuLeadHint),
+      GymModule.batches => (l.addMenuBatch, l.addMenuBatchHint),
+      GymModule.staff => (l.addMenuStaff, l.addMenuStaffHint),
+      GymModule.expenses => (l.addMenuExpense, l.addMenuExpenseHint),
+      _ => (action.label, action.hint),
+    };
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -286,7 +300,7 @@ class _AddRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    action.label,
+                    label,
                     style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -295,7 +309,7 @@ class _AddRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    action.hint,
+                    hint,
                     style: const TextStyle(
                       fontSize: 12.5,
                       color: AppTheme.inkSoft,

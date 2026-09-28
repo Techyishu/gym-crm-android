@@ -6,6 +6,7 @@ import '../../../core/utils/platform_info.dart';
 import '../../../core/widgets/auth_canvas_kit.dart';
 import '../../../core/widgets/auth_form_kit.dart' show AuthGoogleButton;
 import '../providers/auth_provider.dart';
+import '../../../l10n/l10n.dart';
 
 /// Canvas `oLogin` — owner-only. The member path split out to
 /// [MemberLoginScreen] (`/login/member`) once [WelcomeScreen] became the
@@ -93,18 +94,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     children: [
                       CanvasBack(onTap: () => context.go('/welcome')),
                       const SizedBox(height: 8),
-                      const OrbitBrandPanel(
-                        label: 'FOR GYM TEAMS',
-                        headline: 'Run the floor.\nOwn the day.',
+                      OrbitBrandPanel(
+                        label: context.l10n.gymTeams,
+                        headline: context.l10n.runFloorHeadline,
                       ),
                       const SizedBox(height: 12),
                       OrbitFormCard(
                         children: [
-                          const CanvasKicker('Gym owner'),
+                          CanvasKicker(context.l10n.gymOwner),
                           const SizedBox(height: 5),
-                          const CanvasHeading(
-                            title: 'Welcome back',
-                            subtitle: "Log in to run today's floor.",
+                          CanvasHeading(
+                            title: context.l10n.welcomeBack,
+                            subtitle: context.l10n.loginSubtitle,
                           ),
                           const SizedBox(height: 20),
                           if (_error != null) ...[
@@ -112,7 +113,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(height: 16),
                           ],
                           CanvasField(
-                            label: 'Email',
+                            label: context.l10n.email,
                             child: TextFormField(
                               controller: _emailCtrl,
                               keyboardType: TextInputType.emailAddress,
@@ -122,10 +123,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                               validator: (v) {
                                 if (v == null || v.trim().isEmpty) {
-                                  return 'Email is required';
+                                  return context.l10n.emailRequired;
                                 }
                                 if (!v.contains('@')) {
-                                  return 'Enter a valid email';
+                                  return context.l10n.validEmail;
                                 }
                                 return null;
                               },
@@ -133,7 +134,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           const SizedBox(height: 12),
                           CanvasField(
-                            label: 'Password',
+                            label: context.l10n.password,
                             child: TextFormField(
                               controller: _passwordCtrl,
                               obscureText: _obscure,
@@ -148,7 +149,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     ),
                                   ),
                               validator: (v) => (v == null || v.isEmpty)
-                                  ? 'Password is required'
+                                  ? context.l10n.passwordRequired
                                   : null,
                             ),
                           ),
@@ -156,9 +157,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             alignment: Alignment.centerRight,
                             child: TextButton(
                               onPressed: () => context.push('/forgot-password'),
-                              child: const Text(
-                                'Forgot password?',
-                                style: TextStyle(
+                              child: Text(
+                                context.l10n.forgotPassword,
+                                style: const TextStyle(
                                   fontSize: 13.5,
                                   fontWeight: FontWeight.w800,
                                   color: AppTheme.accent,
@@ -167,23 +168,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ),
                           CanvasButton(
-                            label: 'Log in',
-                            loadingLabel: 'Logging in…',
+                            label: context.l10n.login,
+                            loadingLabel: context.l10n.loggingIn,
                             loading: _loading,
                             onPressed: _submit,
                           ),
                           if (!isIOS) ...[
                             const SizedBox(height: 18),
-                            const Row(
+                            Row(
                               children: [
                                 Expanded(
-                                  child: Divider(color: AppTheme.border),
+                                  child: const Divider(color: AppTheme.border),
                                 ),
                                 Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 12),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
                                   child: Text(
-                                    'OR',
-                                    style: TextStyle(
+                                    context.l10n.or,
+                                    style: const TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w800,
                                       color: AppTheme.inkHint,
@@ -191,13 +194,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                 ),
                                 Expanded(
-                                  child: Divider(color: AppTheme.border),
+                                  child: const Divider(color: AppTheme.border),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 18),
                             AuthGoogleButton(
                               loading: _googleLoading,
+                              label: context.l10n.continueGoogle,
                               onPressed: (_loading || _googleLoading)
                                   ? null
                                   : _signInWithGoogle,
@@ -208,18 +212,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             child: Wrap(
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                const Text(
-                                  'New gym? ',
-                                  style: TextStyle(
+                                Text(
+                                  context.l10n.newGym,
+                                  style: const TextStyle(
                                     color: AppTheme.inkSoft,
                                     fontSize: 14,
                                   ),
                                 ),
                                 GestureDetector(
                                   onTap: () => context.go('/signup'),
-                                  child: const Text(
-                                    'Create an account',
-                                    style: TextStyle(
+                                  child: Text(
+                                    context.l10n.createAccount,
+                                    style: const TextStyle(
                                       color: AppTheme.accent,
                                       fontSize: 14,
                                       fontWeight: FontWeight.w800,

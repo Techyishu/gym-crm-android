@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/auth_canvas_kit.dart';
 import '../providers/auth_provider.dart';
+import '../../../l10n/l10n.dart';
 
 /// Canvas `forgot` / `forgotSent`. There's no `reset` (set-new-password)
 /// counterpart here — Supabase's reset-link email opens the web app, not
@@ -97,18 +98,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
         children: [
           CanvasBack(onTap: () => context.pop()),
           const SizedBox(height: 16),
-          const OrbitBrandPanel(
-            label: 'SECURE RECOVERY',
-            headline: 'Back in.\nNo stress.',
+          OrbitBrandPanel(
+            label: context.l10n.secureRecovery,
+            headline: context.l10n.recoveryHeadline,
           ),
           const SizedBox(height: 12),
           OrbitFormCard(
             children: [
-              const CanvasHeading(
-                title: 'Reset your password',
-                subtitle:
-                    'Enter the email you signed up with. We will send a reset '
-                    'link.',
+              CanvasHeading(
+                title: context.l10n.resetPasswordTitle,
+                subtitle: context.l10n.resetPasswordHelp,
               ),
               const SizedBox(height: 18),
               if (_error != null) ...[
@@ -116,19 +115,19 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                 const SizedBox(height: 16),
               ],
               CanvasField(
-                label: 'Email',
+                label: context.l10n.email,
                 child: TextFormField(
                   controller: _emailCtrl,
                   keyboardType: TextInputType.emailAddress,
                   decoration: canvasFieldDecoration(hint: 'rahul@ironhouse.in'),
                   validator: (v) => (v == null || !v.contains('@'))
-                      ? 'Enter a valid email'
+                      ? context.l10n.validEmail
                       : null,
                 ),
               ),
               const SizedBox(height: 18),
               CanvasButton(
-                label: 'Send reset link',
+                label: context.l10n.sendResetLink,
                 loading: _loading,
                 onPressed: _submit,
               ),
@@ -143,9 +142,9 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const OrbitBrandPanel(
-          label: 'CHECK YOUR EMAIL',
-          headline: 'One tap\nto reset.',
+        OrbitBrandPanel(
+          label: context.l10n.checkYourEmailLabel,
+          headline: context.l10n.resetHeadline,
         ),
         const SizedBox(height: 12),
         OrbitFormCard(
@@ -177,13 +176,13 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                   height: 1.2,
                   color: AppTheme.ink,
                 ),
-                text: 'Link sent',
+                text: context.l10n.linkSent,
               ),
             ),
             const SizedBox(height: 7),
             Text.rich(
               TextSpan(
-                text: 'Check ',
+                text: context.l10n.checkEmailPrefix,
                 style: const TextStyle(
                   fontSize: 14.5,
                   color: AppTheme.inkSoft,
@@ -197,9 +196,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const TextSpan(
-                    text: ' and open the reset link. It expires in one hour.',
-                  ),
+                  TextSpan(text: context.l10n.resetLinkExpiry),
                 ],
               ),
             ),
@@ -213,7 +210,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
               ),
               child: Text.rich(
                 TextSpan(
-                  text: 'Not in your inbox? Check spam',
+                  text: context.l10n.checkSpam,
                   style: const TextStyle(
                     fontSize: 13,
                     color: AppTheme.inkSoft,
@@ -222,7 +219,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                   children: [
                     TextSpan(
                       text: _resendCooldown > 0
-                          ? ', or send it again in ${_resendCooldown}s.'
+                          ? context.l10n.sendAgainIn(_resendCooldown)
                           : '.',
                     ),
                   ],
@@ -234,9 +231,9 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
               Center(
                 child: TextButton(
                   onPressed: _submit,
-                  child: const Text(
-                    'Send again',
-                    style: TextStyle(
+                  child: Text(
+                    context.l10n.sendAgain,
+                    style: const TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.accent,
@@ -247,7 +244,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             ],
             const SizedBox(height: 18),
             CanvasSecondaryButton(
-              label: 'Back to log in',
+              label: context.l10n.backToLogin,
               onPressed: () => context.go('/login'),
             ),
           ],

@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 class StaffPermissionsScreen extends ConsumerStatefulWidget {
   const StaffPermissionsScreen({super.key});
@@ -141,9 +142,9 @@ class _StaffPermissionsScreenState
       await _load();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(_permissionError(error))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_permissionError(context, error))),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving.remove(key));
@@ -166,9 +167,9 @@ class _StaffPermissionsScreenState
       await _load();
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(_permissionError(error))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_permissionError(context, error))),
+        );
       }
     }
   }
@@ -177,7 +178,7 @@ class _StaffPermissionsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(title: const Text('Staff permissions')),
+      appBar: AppBar(title: Text(context.l10n.staffPermissions)),
       body: ResponsiveContent(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -186,17 +187,22 @@ class _StaffPermissionsScreenState
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
                 children: [
-                  const StateMessage(
+                  StateMessage(
                     icon: AppIcons.lockPerson,
-                    title: 'Owners always keep full access',
-                    body:
-                        'Set defaults for a role, then override individual staff only where needed.',
+                    title: context.l10n.ownersKeepAccess,
+                    body: context.l10n.permissionSetupHint,
                   ),
                   const SizedBox(height: 8),
                   SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('Role defaults')),
-                      ButtonSegment(value: true, label: Text('Staff override')),
+                    segments: [
+                      ButtonSegment(
+                        value: false,
+                        label: Text(context.l10n.roleDefaults),
+                      ),
+                      ButtonSegment(
+                        value: true,
+                        label: Text(context.l10n.staffOverride),
+                      ),
                     ],
                     selected: {_staffMode},
                     onSelectionChanged: (value) =>
@@ -230,26 +236,26 @@ class _StaffPermissionsScreenState
 
   Widget _rolePicker() => DropdownButtonFormField<String>(
     value: _selectedRole,
-    decoration: const InputDecoration(labelText: 'Configure role'),
-    items: const [
-      DropdownMenuItem(value: 'manager', child: Text('Manager')),
-      DropdownMenuItem(value: 'trainer', child: Text('Trainer')),
-      DropdownMenuItem(value: 'staff', child: Text('Staff')),
+    decoration: InputDecoration(labelText: context.l10n.configureRole),
+    items: [
+      DropdownMenuItem(value: 'manager', child: Text(context.l10n.manager)),
+      DropdownMenuItem(value: 'trainer', child: Text(context.l10n.trainer)),
+      DropdownMenuItem(value: 'staff', child: Text(context.l10n.staff)),
     ],
     onChanged: (value) => setState(() => _selectedRole = value ?? 'staff'),
   );
 
   Widget _staffPicker() {
     if (_staffRows.isEmpty) {
-      return const StateMessage(
+      return StateMessage(
         icon: AppIcons.groupOff,
-        title: 'No staff to configure',
-        body: 'Invite a manager, trainer, or staff member first.',
+        title: context.l10n.noStaffToConfigure,
+        body: context.l10n.inviteStaffFirst,
       );
     }
     return DropdownButtonFormField<String>(
       value: _selectedStaffId,
-      decoration: const InputDecoration(labelText: 'Configure staff member'),
+      decoration: InputDecoration(labelText: context.l10n.configureStaffMember),
       items: _staffRows.map((staff) {
         final name = '${staff['first_name'] ?? ''} ${staff['last_name'] ?? ''}'
             .trim();
@@ -284,7 +290,7 @@ class _StaffPermissionsScreenState
               if (hasOverride)
                 TextButton(
                   onPressed: () => _clearOverride(module),
-                  child: const Text('Use role default'),
+                  child: Text(context.l10n.useRoleDefault),
                 ),
             ],
           ),
@@ -296,7 +302,7 @@ class _StaffPermissionsScreenState
               final key = '${module.name}:${action.name}';
               final selected = row['can_${action.name}'] == true;
               return FilterChip(
-                label: Text(_actionLabel(action)),
+                label: Text(_actionLabel(context, action)),
                 selected: selected,
                 // The theme's selectedColor is near-black, same as its
                 // labelStyle color — without this override, a selected
@@ -319,22 +325,22 @@ class _StaffPermissionsScreenState
   }
 }
 
-String _actionLabel(GymAction action) => switch (action) {
-  GymAction.view => 'View',
-  GymAction.add => 'Add',
-  GymAction.edit => 'Edit',
-  GymAction.delete => 'Delete',
-  GymAction.freeze => 'Freeze',
-  GymAction.export => 'Export',
+String _actionLabel(BuildContext context, GymAction action) => switch (action) {
+  GymAction.view => context.l10n.view,
+  GymAction.add => context.l10n.add,
+  GymAction.edit => context.l10n.edit,
+  GymAction.delete => context.l10n.delete,
+  GymAction.freeze => context.l10n.freeze,
+  GymAction.export => context.l10n.export,
 };
 
-String _permissionError(Object error) {
+String _permissionError(BuildContext context, Object error) {
   final text = '$error';
   if (text.contains('owner_permissions_are_locked')) {
-    return 'Owner permissions cannot be reduced.';
+    return context.l10n.ownerPermissionsLocked;
   }
   if (text.contains('permission_denied')) {
-    return "You don't have permission to change staff access.";
+    return context.l10n.permissionDeniedStaffAccess;
   }
-  return 'Could not save permissions. Please try again.';
+  return context.l10n.permissionsSaveFailed;
 }

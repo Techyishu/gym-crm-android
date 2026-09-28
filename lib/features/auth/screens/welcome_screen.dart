@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/app_locale.dart';
+import '../../../l10n/l10n.dart';
 
 /// Owner/member chooser shown after onboarding and consent.
-class WelcomeScreen extends StatelessWidget {
+class WelcomeScreen extends ConsumerWidget {
   const WelcomeScreen({super.key});
 
   static final _helpUri = Uri.parse(
@@ -26,12 +29,12 @@ class WelcomeScreen extends StatelessWidget {
     if (!opened && context.mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp.')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.whatsappOpenFailed)));
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       body: SafeArea(
@@ -54,11 +57,13 @@ class WelcomeScreen extends StatelessWidget {
                     children: [
                       _OrbitHero(height: compact ? 320 : 390),
                       SizedBox(height: compact ? _space20 : _space24),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: _space8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: _space8,
+                        ),
                         child: Text(
-                          'Welcome to GymCRM.',
-                          style: TextStyle(
+                          context.l10n.welcomeGymcrm,
+                          style: const TextStyle(
                             fontSize: 32,
                             height: 1.02,
                             fontWeight: FontWeight.w800,
@@ -71,13 +76,17 @@ class WelcomeScreen extends StatelessWidget {
                       ),
                       SizedBox(height: compact ? _space20 : _space24),
                       _PortalButton(
-                        label: 'I run a gym',
+                        label: context.l10n.runAGym,
                         primary: true,
-                        onTap: () => context.go('/login'),
+                        onTap: () async {
+                          final chosen = await hasChosenAppLocale();
+                          if (!context.mounted) return;
+                          context.go(chosen ? '/login' : '/language');
+                        },
                       ),
                       const SizedBox(height: _space12),
                       _PortalButton(
-                        label: "I'm a gym member",
+                        label: context.l10n.gymMember,
                         primary: false,
                         onTap: () => context.go('/login/member'),
                       ),
@@ -90,11 +99,11 @@ class WelcomeScreen extends StatelessWidget {
                             minimumSize: const Size(44, 44),
                           ),
                           child: Text.rich(
-                            const TextSpan(
-                              text: 'Need help? ',
+                            TextSpan(
+                              text: context.l10n.needHelp,
                               children: [
                                 TextSpan(
-                                  text: 'Contact us',
+                                  text: context.l10n.contactUs,
                                   style: TextStyle(
                                     color: AppTheme.ink,
                                     fontWeight: FontWeight.w800,
