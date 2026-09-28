@@ -35,6 +35,7 @@ import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/widgets/blood_group_field.dart';
 import '../classes/classes_screen.dart' show showClassFormSheet;
+import '../../../l10n/l10n.dart';
 
 final _membersProvider = FutureProvider<List<Member>>((ref) async {
   ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
@@ -457,11 +458,11 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
               child: SheetHeader(title: 'Filter by plan'),
             ),
             if (plans.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
+              Padding(
+                padding: const EdgeInsets.all(24),
                 child: Text(
-                  'No plans on any member yet.',
-                  style: TextStyle(color: AppTheme.inkSoft),
+                  context.l10n.noPlansOnMembers,
+                  style: const TextStyle(color: AppTheme.inkSoft),
                 ),
               ),
             for (final p in plans)
@@ -618,10 +619,10 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             Expanded(
               child: members.when(
                 loading: () => _MembersShimmer(),
-                error: (e, _) => const Center(
+                error: (e, _) => Center(
                   child: Text(
-                    'Could not load members. Pull to retry.',
-                    style: TextStyle(color: AppTheme.inkSoft),
+                    context.l10n.membersLoadFailed,
+                    style: const TextStyle(color: AppTheme.inkSoft),
                   ),
                 ),
                 data: (list) {
@@ -737,7 +738,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
           children: [
             ListTile(
               leading: const Icon(AppIcons.uploadFile, color: AppTheme.ink),
-              title: const Text('Import members'),
+              title: Text(context.l10n.importMembers),
               onTap: () {
                 Navigator.pop(ctx);
                 _openImportCsv(context);
@@ -754,7 +755,7 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
             ListTile(
               leading: const Icon(AppIcons.qrCode, color: AppTheme.ink),
               title: const Text('Member signup code'),
-              subtitle: const Text('Invite members to use the app'),
+              subtitle: Text(context.l10n.inviteMembersHint),
               onTap: () {
                 Navigator.pop(ctx);
                 showAdaptiveSheet(
@@ -1062,7 +1063,7 @@ class _MemberRow extends ConsumerWidget {
           children: [
             ListTile(
               leading: const Icon(AppIcons.person, color: AppTheme.ink),
-              title: const Text('Open profile'),
+              title: Text(context.l10n.openProfile),
               onTap: () {
                 Navigator.pop(ctx);
                 context
@@ -1073,7 +1074,7 @@ class _MemberRow extends ConsumerWidget {
             if (canPii && phone.isNotEmpty) ...[
               ListTile(
                 leading: const Icon(AppIcons.call, color: AppTheme.ink),
-                title: const Text('Call'),
+                title: Text(context.l10n.call),
                 onTap: () {
                   Navigator.pop(ctx);
                   launchUrl(Uri.parse('tel:${member.phone}'));
@@ -1306,12 +1307,10 @@ class _EmptyMembers extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const StateMessage(
+    return StateMessage(
       icon: AppIcons.people,
-      title: 'No members here',
-      body:
-          'Nobody matches this search or filter yet. Clear the filter, or add '
-          'your first member with the Add button.',
+      title: context.l10n.noMembersHere,
+      body: context.l10n.noMembersHereBody,
     );
   }
 }
@@ -1330,28 +1329,28 @@ class _NoPlansBox extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'No membership plans yet',
-              style: TextStyle(
+            Text(
+              context.l10n.noPlansYet,
+              style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.ink,
               ),
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Every member needs a plan — it is what generates their invoices.',
-              style: TextStyle(fontSize: 12, color: AppTheme.inkSoft),
+            Text(
+              context.l10n.noPlansYetBody,
+              style: const TextStyle(fontSize: 12, color: AppTheme.inkSoft),
             ),
             const SizedBox(height: 10),
             Row(
               mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(AppIcons.add, size: 18, color: AppTheme.accent),
-                SizedBox(width: 6),
+              children: [
+                const Icon(AppIcons.add, size: 18, color: AppTheme.accent),
+                const SizedBox(width: 6),
                 Text(
-                  'Create a plan',
-                  style: TextStyle(
+                  context.l10n.createPlan,
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.accent,
@@ -1447,22 +1446,25 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
           : raw as Map<String, dynamic>?;
       final sent = parsed?['sent'] == true;
       if (!mounted) return;
+      final l = context.l10n;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             sent
-                ? 'Welcome message sent'
-                : 'Could not send — ${parsed?['reason'] ?? parsed?['error'] ?? 'try again'}',
+                ? l.welcomeSent
+                : l.couldNotSendReason(
+                    '${parsed?['reason'] ?? parsed?['error'] ?? l.tryAgainLower}',
+                  ),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       setState(() => _sending = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not send welcome message')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.welcomeSendFailed)));
     }
   }
 
@@ -1512,7 +1514,7 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '$name added',
+                        context.l10n.memberAdded(name),
                         style: const TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
@@ -1537,7 +1539,9 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
             const SizedBox(height: 18),
             if (outstanding > 0)
               CardAction(
-                label: 'Collect remaining ${formatCurrency(outstanding)}',
+                label: context.l10n.collectRemaining(
+                  formatCurrency(outstanding),
+                ),
                 filled: true,
                 onTap: () {
                   Navigator.pop(context);
@@ -1557,8 +1561,8 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
               if (_contactReady == true) ...[
                 CardAction(
                   label: _sending == 'welcome_1'
-                      ? 'Sending…'
-                      : 'Send welcome message (English)',
+                      ? context.l10n.sending
+                      : context.l10n.sendWelcomeEnglish,
                   filled: false,
                   onTap: _sending != null
                       ? null
@@ -1567,8 +1571,8 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
                 const SizedBox(height: 10),
                 CardAction(
                   label: _sending == 'welcome_hin_1'
-                      ? 'Sending…'
-                      : 'Send welcome message (Hindi)',
+                      ? context.l10n.sending
+                      : context.l10n.sendWelcomeHindi,
                   filled: false,
                   onTap: _sending != null
                       ? null
@@ -1582,11 +1586,9 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
                     color: AppTheme.statusWarnBg,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Text(
-                    "Welcome messages need the gym owner's phone number, "
-                    'which isn\'t added yet. The owner can add it in '
-                    'Settings → Edit profile.',
-                    style: TextStyle(fontSize: 13, color: AppTheme.ink),
+                  child: Text(
+                    context.l10n.welcomeNeedsOwnerPhone,
+                    style: const TextStyle(fontSize: 13, color: AppTheme.ink),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -1606,9 +1608,12 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
                       mode: LaunchMode.externalApplication,
                     );
                   },
-                  child: const Text(
-                    'Or share manually instead',
-                    style: TextStyle(fontSize: 12.5, color: AppTheme.inkSoft),
+                  child: Text(
+                    context.l10n.shareManually,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.inkSoft,
+                    ),
                   ),
                 ),
               ),
@@ -1738,11 +1743,11 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: const Text('Choose from gallery'),
+              title: Text(context.l10n.chooseFromGallery),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
-              title: const Text('Take a photo'),
+              title: Text(context.l10n.takePhoto),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
           ],
@@ -1816,14 +1821,15 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   }
 
   Future<void> _save() async {
+    final l = context.l10n;
     if (!_formKey.currentState!.validate()) return;
     // With zero plans the dropdown isn't in the tree, so validate() can't catch
     // this one — the empty-state box is shown instead.
     if (_planId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Create a membership plan first — members need one to be invoiced',
+            l.createPlanFirst,
           ),
         ),
       );
@@ -1950,9 +1956,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           );
         } catch (undoError) {
           debugPrint('[GymCRM] AddMember rollback failed: $undoError');
-          throw const _AddMemberException(
-            'Member was saved but the plan could not be assigned. '
-            'Open the member and choose a plan.',
+          throw _AddMemberException(
+            l.planNotAssigned,
           );
         }
         rethrow;
@@ -1971,9 +1976,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           debugPrint('[GymCRM] AddMember batch enrolment failed: $e');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Member added, but the batch could not be set.'),
-              ),
+              SnackBar(content: Text(l.batchNotSet)),
             );
           }
         }
@@ -2063,10 +2066,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             SnackBar(
               duration: const Duration(seconds: 8),
               backgroundColor: AppTheme.statusDanger,
-              content: Text(
-                'Member added, but the ${formatCurrency(paidAmount)} payment '
-                'was NOT recorded. Open the member and tap Collect.',
-              ),
+              content: Text(l.paymentNotRecorded(formatCurrency(paidAmount))),
             ),
           );
         }
@@ -2087,10 +2087,10 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         final msg = e is _AddMemberException
             ? e.message
             : (e is PostgrestException && e.code == '23505')
-            ? 'Member ID "${_customIdCtrl.text.trim()}" is already in use. Please use a different one.'
+            ? l.memberIdInUse(_customIdCtrl.text.trim())
             : duplicatePhoneMessage(e) ??
                   planLimitMessage(e) ??
-                  'Failed to add member. Please try again.';
+                  l.addMemberFailed;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
@@ -2108,7 +2108,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const SheetTopBar(title: 'Add member'),
+        SheetTopBar(title: context.l10n.addMember),
         Flexible(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
@@ -2161,7 +2161,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Add member'),
+                  : Text(context.l10n.addMember),
             ),
           ),
         ),
@@ -2221,7 +2221,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                   counterText: '',
                 ),
                 validator: (v) =>
-                    (v?.trim().isEmpty ?? true) ? 'Required' : null,
+                    (v?.trim().isEmpty ?? true) ? context.l10n.required : null,
               ),
               const SizedBox(height: 10),
               TextFormField(
@@ -2288,7 +2288,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 );
                 return _PlanDropdown(
                   label: selected.isEmpty
-                      ? 'Choose a plan'
+                      ? context.l10n.choosePlan
                       : '${selected['name'] ?? 'Plan'} · ${_planPriceLabel(selected)}',
                   chosen: selected.isNotEmpty,
                   plans: list,
@@ -2398,16 +2398,19 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           controller: ctrl,
           autofocus: true,
           maxLength: 30,
-          decoration: const InputDecoration(
-            hintText: 'Leave empty to auto-assign',
+          decoration: InputDecoration(
+            hintText: context.l10n.autoAssignHint,
             counterText: '',
           ),
         ),
       ),
       actions: (ctx) => [
-        DialogButton(label: 'Cancel', onTap: () => Navigator.pop(ctx, false)),
         DialogButton(
-          label: 'Save',
+          label: context.l10n.cancel,
+          onTap: () => Navigator.pop(ctx, false),
+        ),
+        DialogButton(
+          label: context.l10n.save,
           filled: true,
           onTap: () => Navigator.pop(ctx, true),
         ),
@@ -2422,9 +2425,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
   Widget _paymentSection() {
     if (_planId == null) {
-      return const Text(
-        'Pick a membership plan first.',
-        style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+      return Text(
+        context.l10n.pickPlanFirst,
+        style: const TextStyle(fontSize: 13, color: AppTheme.inkSoft),
       );
     }
     // Two read-only totals and ONE input. Payable and Due are computed;
@@ -2450,9 +2453,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           },
         ),
         const SizedBox(height: 4),
-        const Text(
-          'Discount repeats on every auto-generated invoice.',
-          style: TextStyle(fontSize: 11, color: AppTheme.inkSoft),
+        Text(
+          context.l10n.discountRepeats,
+          style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
         ),
         const SizedBox(height: 12),
         _FieldPair(
@@ -2479,8 +2482,10 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             final text = v?.trim() ?? '';
             if (text.isEmpty) return null;
             final amount = double.tryParse(text);
-            if (amount == null || amount < 0) return 'Enter a valid amount';
-            if (amount > _planAmount) return 'More than the amount payable';
+            if (amount == null || amount < 0) {
+              return context.l10n.enterValidAmount;
+            }
+            if (amount > _planAmount) return context.l10n.moreThanPayable;
             return null;
           },
           onChanged: (_) => setState(() => _collectFull = false),
@@ -2492,7 +2497,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
               _collectFull = true;
               _paidAmountCtrl.text = _planAmount.toStringAsFixed(0);
             }),
-            child: const Text('Full amount'),
+            child: Text(context.l10n.fullAmount),
           ),
         ),
         // The method only matters once money is actually being collected.
@@ -2528,19 +2533,19 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         onTap: () => setState(() => _moreDetails = true),
         behavior: HitTestBehavior.opaque,
         child: Row(
-          children: const [
-            Icon(AppIcons.addCircle, size: 20, color: AppTheme.accent),
-            SizedBox(width: 8),
+          children: [
+            const Icon(AppIcons.addCircle, size: 20, color: AppTheme.accent),
+            const SizedBox(width: 8),
             Text(
-              'Add more details',
-              style: TextStyle(
+              context.l10n.addMoreDetails,
+              style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.accent,
               ),
             ),
-            SizedBox(width: 8),
-            Flexible(
+            const SizedBox(width: 8),
+            const Flexible(
               child: Text(
                 'Email, DOB, batch, emergency contact',
                 maxLines: 1,
@@ -2583,7 +2588,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             label: 'Next payment date',
             value: _nextPaymentDate != null
                 ? formatDateFromString(_nextPaymentDate)
-                : 'From the plan',
+                : context.l10n.fromThePlan,
             onTap: () => _pickDate(isJoined: false),
           ),
           _batchPicker(),

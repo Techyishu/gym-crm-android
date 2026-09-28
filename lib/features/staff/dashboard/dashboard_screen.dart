@@ -25,6 +25,7 @@ import '../members/members_screen.dart' show showAddMemberSheet;
 import '../notifications/notifications_screen.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/l10n.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -345,9 +346,9 @@ class _ErrorBody extends ConsumerWidget {
           children: [
             const Icon(AppIcons.cloudOff, size: 52, color: AppTheme.inkHint),
             const SizedBox(height: 16),
-            const Text(
-              'Failed to load dashboard',
-              style: TextStyle(fontSize: 14, color: AppTheme.inkHint),
+            Text(
+              context.l10n.dashboardLoadFailed,
+              style: const TextStyle(fontSize: 14, color: AppTheme.inkHint),
             ),
             const SizedBox(height: 6),
             Text(
@@ -364,7 +365,7 @@ class _ErrorBody extends ConsumerWidget {
                   ref.invalidate(gymIdProvider);
                 },
                 icon: const Icon(AppIcons.refresh, size: 16),
-                label: const Text('Retry'),
+                label: Text(context.l10n.retry),
               ),
             ),
           ],
@@ -518,24 +519,24 @@ class _SetupChecklist extends ConsumerWidget {
     // members list first — one less stop between intent and the first value.
     final steps = [
       (
-        label: 'Add 3 members — see your dashboard come alive',
+        label: context.l10n.checklistAddMembers,
         done: memberCount >= 3,
         onTap: () => showAddMemberSheet(
           context,
         ).then((_) => container.invalidate(_dashboardDataProvider)),
       ),
       (
-        label: 'Set your monthly fee',
+        label: context.l10n.checklistSetFee,
         done: planCount > 0,
         onTap: () => context.push('/staff/billing'),
       ),
       (
-        label: 'Try a check-in',
+        label: context.l10n.checklistTryCheckIn,
         done: allTimeCheckins > 0,
         onTap: () => context.push('/staff/check-in'),
       ),
       (
-        label: 'Turn on WhatsApp reminders',
+        label: context.l10n.checklistWhatsApp,
         done: whatsappOn,
         onTap: () => context.push('/staff/reminders'),
       ),
@@ -550,9 +551,9 @@ class _SetupChecklist extends ConsumerWidget {
         children: [
           Row(
             children: [
-              const Text(
-                'Getting started',
-                style: TextStyle(
+              Text(
+                context.l10n.gettingStarted,
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppTheme.ink,
@@ -652,7 +653,7 @@ class _QuickActions extends ConsumerWidget {
       // members list first — same shortcut the dashboard checklist uses.
       (
         icon: AppIcons.personAdd,
-        label: 'Add\nmember',
+        label: context.l10n.quickAddMember,
         accent: true,
         onTap: () => showAddMemberSheet(
           context,
@@ -661,7 +662,7 @@ class _QuickActions extends ConsumerWidget {
       if (canCollect)
         (
           icon: AppIcons.payments,
-          label: 'Collect\npayment',
+          label: context.l10n.quickCollectPayment,
           accent: false,
           onTap: () => context.push('/staff/billing'),
         ),
@@ -675,7 +676,7 @@ class _QuickActions extends ConsumerWidget {
       if (canLeads)
         (
           icon: AppIcons.personSearch,
-          label: 'Add\nlead',
+          label: context.l10n.quickAddLead,
           accent: false,
           onTap: () => context.push('/staff/leads'),
         ),
@@ -765,7 +766,7 @@ class _BirthdaysToday extends StatelessWidget {
     final phone = (m['phone'] as String?)?.replaceAll(RegExp(r'[^0-9]'), '');
     if (phone == null || phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No phone number saved for this member')),
+        SnackBar(content: Text(context.l10n.noPhoneSaved)),
       );
       return;
     }
@@ -776,7 +777,7 @@ class _BirthdaysToday extends StatelessWidget {
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open WhatsApp')),
+          SnackBar(content: Text(context.l10n.whatsappOpenFailed)),
         );
       }
     }
@@ -789,9 +790,9 @@ class _BirthdaysToday extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Text(
-              'Birthdays today',
-              style: TextStyle(
+            Text(
+              context.l10n.birthdaysToday,
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
                 color: AppTheme.ink,
@@ -850,9 +851,9 @@ class _BirthdaysToday extends StatelessWidget {
                             color: AppTheme.accentSoft,
                             borderRadius: BorderRadius.circular(9),
                           ),
-                          child: const Text(
-                            'Wish',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10n.wish,
+                            style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w800,
                               color: AppTheme.accent,
@@ -884,8 +885,8 @@ class _RecentPayments extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(
-          title: 'Recent payments',
-          actionLabel: 'See all',
+          title: context.l10n.recentPayments,
+          actionLabel: context.l10n.seeAll,
           onAction: () => context.push('/staff/billing'),
         ),
         const SizedBox(height: 10),
@@ -894,10 +895,10 @@ class _RecentPayments extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 20),
             decoration: AppTheme.cardDecoration(),
-            child: const Center(
+            child: Center(
               child: Text(
-                'No payments yet',
-                style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
+                context.l10n.noPaymentsYet,
+                style: const TextStyle(fontSize: 13, color: AppTheme.inkHint),
               ),
             ),
           )
@@ -998,7 +999,7 @@ class _Header extends ConsumerWidget {
   // just rendered as a compact pill under the gym name instead of a
   // separate card, so it stays visible every time the dashboard opens
   // without competing with the checklist for space.
-  static String _planLabel(Map<String, dynamic>? gym) {
+  static String _planLabel(Map<String, dynamic>? gym, AppLocalizations l) {
     final plan = gym?['plan'] as String?;
     final daysLeft = planExpiryDaysRemaining(gym);
     final isTrial =
@@ -1006,16 +1007,14 @@ class _Header extends ConsumerWidget {
 
     if (isTrial) {
       return daysLeft != null
-          ? (daysLeft <= 0
-                ? 'Trial ends today'
-                : 'Trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}')
-          : 'Trial active';
+          ? (daysLeft <= 0 ? l.trialEndsToday : l.trialEndsIn(daysLeft))
+          : l.trialActive;
     }
     final planName = plan != null && plan.isNotEmpty
         ? plan[0].toUpperCase() + plan.substring(1)
         : 'Free';
     return daysLeft != null
-        ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
+        ? l.planRenewsIn(planName, daysLeft)
         : '$planName plan';
   }
 
@@ -1080,7 +1079,7 @@ class _Header extends ConsumerWidget {
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
-                          _planLabel(gym),
+                          _planLabel(gym, context.l10n),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -1278,9 +1277,9 @@ class _CollectedHero extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'To collect',
-                        style: TextStyle(
+                      Text(
+                        context.l10n.toCollect,
+                        style: const TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                           color: AppTheme.onDarkSoft,
@@ -1313,19 +1312,19 @@ class _CollectedHero extends StatelessWidget {
                     color: AppTheme.darkCard2,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Collect',
-                        style: TextStyle(
+                        context.l10n.collect,
+                        style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
                           color: AppTheme.onDark,
                         ),
                       ),
-                      SizedBox(width: 2),
-                      Icon(
+                      const SizedBox(width: 2),
+                      const Icon(
                         AppIcons.chevronRight,
                         size: 16,
                         color: AppTheme.onDark,
@@ -1376,12 +1375,13 @@ class _NeedsAttention extends ConsumerWidget {
         ? (ref.watch(_pendingSyncProvider).valueOrNull ?? 0)
         : 0;
 
+    final l = context.l10n;
     final rows = <Widget>[
       if (canBilling && overdueCount > 0)
         AttentionTile.danger(
           icon: AppIcons.error,
-          title: '$overdueCount overdue payment${overdueCount == 1 ? '' : 's'}',
-          subtitle: '${formatCurrency(overdueAmount)} pending',
+          title: l.overduePayments(overdueCount),
+          subtitle: l.amountPending(formatCurrency(overdueAmount)),
           // Expiring soon opens on its Overdue tab — the per-member list with
           // Collect and WhatsApp on each row, not the Money ledger.
           onTap: () => context.push('/staff/upcoming-payments'),
@@ -1389,24 +1389,22 @@ class _NeedsAttention extends ConsumerWidget {
       if (renewals > 0)
         AttentionTile.warn(
           icon: AppIcons.schedule,
-          title:
-              '$renewals membership${renewals == 1 ? '' : 's'} due in 7 days',
-          subtitle: 'Renew before they lapse',
+          title: l.membershipsDueIn7Days(renewals),
+          subtitle: l.renewBeforeLapse,
           onTap: () => context.push('/staff/upcoming-payments?tab=expiring'),
         ),
       if (canLeads && leads > 0)
         AttentionTile.info(
           icon: AppIcons.personSearch,
-          title: '$leads lead${leads == 1 ? '' : 's'} need follow-up',
-          subtitle: 'Follow-up date has passed',
+          title: l.leadsNeedFollowUp(leads),
+          subtitle: l.followUpPassed,
           onTap: () => context.push('/staff/leads'),
         ),
       if (pendingSync > 0)
         AttentionTile.neutral(
           icon: AppIcons.cloudOff,
-          title:
-              '$pendingSync check-in${pendingSync == 1 ? '' : 's'} waiting to sync',
-          subtitle: 'Saved offline · syncs when back online',
+          title: l.checkInsWaitingSync(pendingSync),
+          subtitle: l.savedOfflineSync,
           onTap: () => context.push('/staff/check-in'),
         ),
     ];
@@ -1418,7 +1416,7 @@ class _NeedsAttention extends ConsumerWidget {
       children: [
         Row(
           children: [
-            const Text('Needs attention', style: AppTheme.sectionTitle),
+            Text(l.needsAttention, style: AppTheme.sectionTitle),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1487,16 +1485,16 @@ class _PaymentDueToday extends ConsumerWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionHeader(title: 'Payment due today'),
+          SectionHeader(title: context.l10n.paymentDueToday),
           const SizedBox(height: 10),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 22),
             decoration: AppTheme.cardDecoration(),
-            child: const Center(
+            child: Center(
               child: Text(
-                'No payments due today',
-                style: TextStyle(fontSize: 13, color: AppTheme.inkHint),
+                context.l10n.noPaymentsDueToday,
+                style: const TextStyle(fontSize: 13, color: AppTheme.inkHint),
               ),
             ),
           ),
@@ -1508,8 +1506,8 @@ class _PaymentDueToday extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(
-          title: 'Payment due today',
-          actionLabel: 'See all',
+          title: context.l10n.paymentDueToday,
+          actionLabel: context.l10n.seeAll,
           onAction: () => context.push('/staff/upcoming-payments'),
         ),
         const SizedBox(height: 10),
@@ -1535,7 +1533,7 @@ class _PaymentDueToday extends ConsumerWidget {
               subtitle: subtitle,
               subColor: AppTheme.statusDanger,
               canCollect: canCollect,
-              collectLabel: 'Collect',
+              collectLabel: context.l10n.collect,
               onCollect: () => _showCollect(context, ref, m),
             );
           }).toList(),
@@ -1774,24 +1772,26 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
   }
 
   Future<void> _collect() async {
+    final l = context.l10n;
     final amountText = _amountCtrl.text.trim();
     if (amountText.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Enter an amount')));
+      ).showSnackBar(SnackBar(content: Text(l.enterAmount)));
       return;
     }
     final amount = double.tryParse(amountText);
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      ).showSnackBar(SnackBar(content: Text(l.enterValidAmount)));
       return;
     }
     final dateError = paymentDatesError(
       _paidAt,
       _validTill,
       defaultTill: _defaultTill,
+      l: l,
     );
     if (dateError != null) {
       ScaffoldMessenger.of(
@@ -1815,12 +1815,12 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
       final name = '$firstName $lastName'.trim();
       await showInfoDialog(
         context,
-        title: 'Already collected today',
-        body:
-            '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
-            'from $name today at '
-            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}. '
-            'Refresh the member before collecting another renewal.',
+        title: l.alreadyCollectedTitle,
+        body: l.alreadyCollectedBody(
+          '$currencySymbol${prior.amount.toStringAsFixed(0)}',
+          name,
+          '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}',
+        ),
         icon: AppIcons.history,
       );
       return;
@@ -1835,11 +1835,9 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
     if (!early) return;
     if (_nextPaymentDate == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Renewal date is missing. Refresh and try again.'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l.renewalDateMissing)));
       }
       return;
     }
@@ -1875,8 +1873,8 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
         Navigator.pop(context);
         widget.onPaid();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Payment collected'),
+          SnackBar(
+            content: Text(l.paymentCollected),
             backgroundColor: AppTheme.statusActive,
           ),
         );
@@ -1914,7 +1912,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Collect Payment',
+                  context.l10n.collectPaymentTitle,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: AppTheme.ink,
@@ -1966,13 +1964,13 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
             if (_planHint != null) ...[
               const SizedBox(height: 4),
               Text(
-                'Auto-filled: $_planHint',
+                context.l10n.autoFilled(_planHint!),
                 style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
               ),
             ],
             const SizedBox(height: 4),
             Text(
-              partialPaymentHint,
+              context.l10n.partialPaymentHint,
               style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
             ),
             const SizedBox(height: 16),
@@ -2067,7 +2065,7 @@ class _CollectPaymentSheetState extends ConsumerState<_CollectPaymentSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Collect Payment'),
+                  : Text(context.l10n.collectPaymentTitle),
             ),
           ],
         ),

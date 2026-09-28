@@ -24,6 +24,8 @@ import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../core/app_locale.dart';
+import '../../../l10n/app_localizations.dart';
 
 /// Public base URL for member self-registration links (matches the web app).
 const _registrationBaseUrl = 'https://gymcrm.in';
@@ -58,11 +60,12 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(staffProfileProvider);
     final container = ProviderScope.containerOf(context, listen: false);
+    final l = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(l.featSettings),
         leading: const BackButton(),
       ),
       body: ResponsiveContent(
@@ -82,17 +85,17 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 20),
 
               // ── ACCOUNT section ──────────────────────────────────────────────
-              _SectionLabel(label: 'ACCOUNT'),
+              _SectionLabel(label: l.settingsAccount),
               _SettingsCard(
                 items: [
                   _SettingsRow(
                     icon: AppIcons.creditCard,
-                    label: 'Subscription',
+                    label: l.subscription,
                     onTap: () => context.push('/staff/subscription'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.person,
-                    label: 'Edit Profile',
+                    label: l.editProfile,
                     onTap: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -106,7 +109,7 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   _SettingsRow(
                     icon: AppIcons.lock,
-                    label: 'Change Password',
+                    label: l.changePassword,
                     onTap: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -120,7 +123,7 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 20),
 
               // ── GYM section ──────────────────────────────────────────────────
-              _SectionLabel(label: 'GYM'),
+              _SectionLabel(label: l.settingsGym),
               _SettingsCard(
                 items: [
                   // Per-gym design switch (gyms.new_home). Owner only: RLS
@@ -129,8 +132,8 @@ class SettingsScreen extends ConsumerWidget {
                     _SettingsRow(
                       icon: AppIcons.layers,
                       label: usesNewHome(_gymOf(profile.valueOrNull))
-                          ? 'Switch back to the classic design'
-                          : 'Try the new design',
+                          ? l.switchBackClassic
+                          : l.tryNewDesign,
                       onTap: () => _toggleDesign(
                         context,
                         container,
@@ -139,7 +142,7 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   _SettingsRow(
                     icon: AppIcons.business,
-                    label: 'Gym Details',
+                    label: l.gymDetails,
                     onTap: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -151,17 +154,17 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   _SettingsRow(
                     icon: AppIcons.people,
-                    label: 'Staff',
+                    label: l.staffRow,
                     onTap: () => context.push('/staff/staff'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.receipt,
-                    label: 'Invoice settings',
+                    label: l.invoiceSettings,
                     onTap: () => context.push('/staff/settings/invoices'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.link,
-                    label: 'Registration Link',
+                    label: l.registrationLink,
                     onTap: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -186,15 +189,21 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 20),
 
               // ── APP section ──────────────────────────────────────────────────
-              _SectionLabel(label: 'APP'),
+              _SectionLabel(label: l.settingsApp),
               _SettingsCard(
                 items: [
+                  // Always bilingual so it can be found in either language.
+                  _SettingsRow(
+                    icon: AppIcons.chat,
+                    label: 'Language / भाषा',
+                    onTap: () => _pickLanguage(context, ref),
+                  ),
                   if (!kIsWeb)
                     _SettingsRow(
                       icon: AppIcons.share,
                       label: platform_info.isIOS
-                          ? 'Rate us on the App Store'
-                          : 'Rate us on Play Store',
+                          ? l.rateUsAppStore
+                          : l.rateUsPlayStore,
                       onTap: () async {
                         final inAppReview = InAppReview.instance;
                         try {
@@ -218,12 +227,12 @@ class SettingsScreen extends ConsumerWidget {
                   // single notification bell the canvas shows.
                   _SettingsRow(
                     icon: AppIcons.campaign,
-                    label: "What's new",
+                    label: l.whatsNew,
                     onTap: () => showWhatsNewSheet(context),
                   ),
                   _SettingsRow(
                     icon: AppIcons.info,
-                    label: 'Help & Support',
+                    label: l.helpSupport,
                     onTap: () => showAdaptiveSheet(
                       context: context,
                       isScrollControlled: true,
@@ -233,32 +242,32 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   _SettingsRow(
                     icon: AppIcons.visibility,
-                    label: 'Privacy & data choices',
+                    label: l.privacyChoices,
                     onTap: () => context.push('/consent'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.download,
-                    label: 'Export gym data',
+                    label: l.exportGymData,
                     onTap: () => context.push('/staff/exports'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.history,
-                    label: 'Activity log',
+                    label: l.featActivity,
                     onTap: () => context.push('/staff/activity-log'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.lock,
-                    label: 'Privacy Policy',
+                    label: l.privacyPolicy,
                     onTap: () => context.push('/legal/privacy'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.info,
-                    label: 'Terms of Service',
+                    label: l.termsOfService,
                     onTap: () => context.push('/legal/terms'),
                   ),
                   _SettingsRow(
                     icon: AppIcons.info,
-                    label: 'About GymCRM',
+                    label: l.aboutGymCRM,
                     onTap: () => showAboutDialog(
                       context: context,
                       applicationName: 'GymCRM',
@@ -608,6 +617,37 @@ class _SettingsCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// English / हिन्दी for this phone only. Display-only: typed data isn't touched.
+Future<void> _pickLanguage(BuildContext context, WidgetRef ref) async {
+  final l = AppLocalizations.of(context);
+  final current = ref.read(appLocaleProvider).languageCode;
+  final picked = await showDialog<String>(
+    context: context,
+    builder: (ctx) => SimpleDialog(
+      title: const Text('Language / भाषा'),
+      children: [
+        for (final (code, label) in [
+          ('en', l.languageEnglish),
+          ('hi', l.languageHindi),
+        ])
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, code),
+            child: Row(
+              children: [
+                Expanded(child: Text(label)),
+                if (code == current)
+                  const Icon(AppIcons.check, size: 18, color: AppTheme.accent),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+  if (picked != null && picked != current) {
+    await setAppLocale(ref, Locale(picked));
   }
 }
 

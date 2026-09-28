@@ -3,6 +3,7 @@ import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatters.dart';
 import 'advance_payment_date.dart';
+import '../../l10n/app_localizations.dart';
 
 // Editable "Payment date" and "Valid till" on the collect sheets. Both are
 // pre-filled with what the server would do anyway, and are only sent to the
@@ -82,16 +83,22 @@ String? validTillParam(DateTime? validTill, DateTime? defaultTill) {
 /// An untouched valid-till (equal to [defaultTill]) is never sent to the
 /// server, so it isn't checked: for a member lapsed more than one cycle the
 /// default is itself in the past, and flagging it would block a normal collect.
+///
+/// Pass [l] for the user's language; without it the message is English.
 String? paymentDatesError(
   DateTime paidAt,
   DateTime? validTill, {
   DateTime? defaultTill,
+  AppLocalizations? l,
 }) {
-  if (paidAt.isAfter(today)) return 'Payment date cannot be in the future';
+  if (paidAt.isAfter(today)) {
+    return l?.paymentDateFuture ?? 'Payment date cannot be in the future';
+  }
   final untouched =
       validTill != null && defaultTill != null && sameDay(validTill, defaultTill);
   if (validTill != null && !untouched && !validTill.isAfter(paidAt)) {
-    return 'Valid till must be after the payment date';
+    return l?.validTillAfterPayment ??
+        'Valid till must be after the payment date';
   }
   return null;
 }
@@ -148,7 +155,13 @@ class PaymentDatesFields extends StatelessWidget {
     final till = validTill;
     final changed =
         till != null && defaultTill != null && !sameDay(till, defaultTill!);
-    final error = paymentDatesError(paidAt, till, defaultTill: defaultTill);
+    final l = AppLocalizations.of(context);
+    final error = paymentDatesError(
+      paidAt,
+      till,
+      defaultTill: defaultTill,
+      l: l,
+    );
     // A date already gone can't reactivate anyone: the server leaves the
     // member expired, so say so instead of showing a hopeful "valid till".
     final lapsed = error == null && till != null && till.isBefore(today);
@@ -186,10 +199,10 @@ class PaymentDatesFields extends StatelessWidget {
                 child: Text(
                   error ??
                       (lapsed
-                          ? 'This date has already passed, so the member will stay expired. Set Valid till to a future date.'
+                          ? l.validTillLapsed
                           : partial
-                          ? 'Membership will be valid till ${formatDate(till)}. The rest stays as a due.'
-                          : 'Membership will be valid till ${formatDate(till)}.'),
+                          ? l.validTillPartial(formatDate(till))
+                          : l.validTillFull(formatDate(till))),
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: error != null || lapsed ? FontWeight.w600 : null,

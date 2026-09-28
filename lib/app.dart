@@ -3,7 +3,9 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/app_locale.dart';
 import 'core/router.dart';
+import 'l10n/app_localizations.dart';
 import 'core/services/app_events.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/providers/auth_provider.dart';
@@ -82,6 +84,9 @@ class _GymCRMAppState extends ConsumerState<GymCRMApp> {
       title: 'GymCRM',
       theme: AppTheme.light,
       routerConfig: router,
+      locale: ref.watch(appLocaleProvider),
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
       debugShowCheckedModeBanner: false,
       // Replace Flutter's red crash screen in production with a graceful
       // error widget so one broken widget doesn't crash the whole app.

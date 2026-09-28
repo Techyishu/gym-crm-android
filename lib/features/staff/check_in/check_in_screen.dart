@@ -24,6 +24,7 @@ import '../../../core/utils/formatters.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/widgets/new_design_back_button.dart';
+import '../../../l10n/l10n.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -203,19 +204,18 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
         if (!online) {
           final gymId = await OfflineCheckInQueue.cachedGymId();
           if (gymId == null) {
-            return const _CheckResult(
+            return _CheckResult(
               success: false,
-              title: 'No connection',
-              subtitle:
-                  'Check-in needs internet on first use. Connect once to enable offline mode.',
+              title: context.l10n.noConnection,
+              subtitle: context.l10n.checkInNeedsInternet,
             );
           }
           final staffId = Supabase.instance.client.auth.currentUser?.id;
           if (staffId == null) {
-            return const _CheckResult(
+            return _CheckResult(
               success: false,
-              title: 'Session expired',
-              subtitle: 'Please sign in again to use offline check-in.',
+              title: context.l10n.sessionExpiredShort,
+              subtitle: context.l10n.signInForOffline,
             );
           }
           await OfflineCheckInQueue.enqueue(
@@ -225,11 +225,11 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
           );
           final pending = await OfflineCheckInQueue.pendingCount();
           if (mounted) setState(() => _pendingSync = pending);
-          return const _CheckResult(
+          return _CheckResult(
             success: false,
             queued: true,
-            title: 'Saved offline',
-            subtitle: 'Will sync automatically when connected.',
+            title: context.l10n.savedOffline,
+            subtitle: context.l10n.willSyncWhenConnected,
           );
         }
       }
@@ -285,13 +285,13 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       if (!mounted) return;
       setState(() {
         _success = true;
-        _message = '$memberName — Checked out successfully.';
+        _message = context.l10n.checkedOutSuccess(memberName);
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _success = false;
-        _message = 'Checkout failed: $e';
+        _message = context.l10n.checkoutFailed('$e');
       });
     } finally {
       if (mounted) setState(() => _processing = false);
@@ -313,10 +313,10 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     if (!_uuidPattern.hasMatch(trimmed)) {
       if (!mounted) return;
       setState(
-        () => _qrResult = const _CheckResult(
+        () => _qrResult = _CheckResult(
           success: false,
-          title: 'Invalid QR Code',
-          subtitle: 'This is not a GymCRM member QR code.',
+          title: context.l10n.invalidQr,
+          subtitle: context.l10n.notMemberQr,
         ),
       );
       return;
@@ -490,7 +490,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
               child: _CheckResultView(
                 result: _qrResult!,
                 onScanNext: _scanNext,
-                buttonLabel: 'Scan next',
+                buttonLabel: context.l10n.scanNext,
               ),
             )
           : Stack(
@@ -562,7 +562,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       style: const TextStyle(color: AppTheme.onDark, fontSize: 14),
       cursorColor: AppTheme.mintOnDark,
       decoration: InputDecoration(
-        hintText: 'Search name or enter member ID',
+        hintText: context.l10n.searchNameOrId,
         hintStyle: const TextStyle(color: AppTheme.onDarkSoft, fontSize: 14),
         filled: true,
         fillColor: AppTheme.darkCard2,
@@ -634,13 +634,13 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       ];
     }
     if (_searchCtrl.text.isNotEmpty && !_searching) {
-      return const [
+      return [
         Padding(
-          padding: EdgeInsets.only(bottom: 18),
+          padding: const EdgeInsets.only(bottom: 18),
           child: Center(
             child: Text(
-              'No members match that name',
-              style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+              context.l10n.noMembersMatchName,
+              style: const TextStyle(color: AppTheme.inkHint, fontSize: 13),
             ),
           ),
         ),
@@ -657,9 +657,9 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
       children: [
         Row(
           children: [
-            const Text(
-              'Today\'s check-ins',
-              style: TextStyle(
+            Text(
+              context.l10n.todaysCheckIns,
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
                 color: AppTheme.ink,
@@ -709,10 +709,13 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 decoration: AppTheme.cardDecoration(),
-                child: const Center(
+                child: Center(
                   child: Text(
-                    'No check-ins yet today',
-                    style: TextStyle(color: AppTheme.inkHint, fontSize: 13),
+                    context.l10n.noCheckInsToday,
+                    style: const TextStyle(
+                      color: AppTheme.inkHint,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               );
@@ -800,8 +803,10 @@ class _ScanTabSwitch extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: _segment(context, 0, 'Staff scans member')),
-          Expanded(child: _segment(context, 1, 'Members scan gym')),
+          Expanded(
+            child: _segment(context, 0, context.l10n.staffScansMember),
+          ),
+          Expanded(child: _segment(context, 1, context.l10n.membersScanGym)),
         ],
       ),
     );
@@ -860,7 +865,7 @@ class _GymQrTab extends ConsumerWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'Could not load gym QR: $e',
+            context.l10n.gymQrLoadFailed('$e'),
             style: const TextStyle(color: AppTheme.inkHint),
           ),
         ),
@@ -869,12 +874,12 @@ class _GymQrTab extends ConsumerWidget {
         final token = gym?['checkin_token']?.toString() ?? '';
         final gymName = gym?['name'] as String? ?? 'Your Gym';
         if (token.isEmpty) {
-          return const Center(
+          return Center(
             child: Padding(
-              padding: EdgeInsets.all(24),
+              padding: const EdgeInsets.all(24),
               child: Text(
-                'No check-in code for this gym yet.',
-                style: TextStyle(color: AppTheme.inkHint),
+                context.l10n.noCheckInCode,
+                style: const TextStyle(color: AppTheme.inkHint),
               ),
             ),
           );
@@ -885,10 +890,10 @@ class _GymQrTab extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
           child: Column(
             children: [
-              const Text(
-                'Members scan this to check themselves in',
+              Text(
+                context.l10n.membersScanThis,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.inkSoft,
@@ -937,15 +942,15 @@ class _GymQrTab extends ConsumerWidget {
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: url));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Check-in link copied'),
-                      duration: Duration(seconds: 2),
+                    SnackBar(
+                      content: Text(context.l10n.checkInLinkCopied),
+                      duration: const Duration(seconds: 2),
                     ),
                   );
                 },
-                child: const Text(
-                  'Tap to copy check-in link',
-                  style: TextStyle(
+                child: Text(
+                  context.l10n.tapToCopyLink,
+                  style: const TextStyle(
                     fontSize: 12,
                     color: AppTheme.inkHint,
                     decoration: TextDecoration.underline,
@@ -966,10 +971,10 @@ class _GymQrTab extends ConsumerWidget {
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: AppTheme.border),
                     ),
-                    child: const Text(
-                      'Full screen for front desk display',
+                    child: Text(
+                      context.l10n.fullScreenFrontDesk,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.ink,
@@ -1022,15 +1027,13 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Saved to gallery')));
+        ).showSnackBar(SnackBar(content: Text(context.l10n.savedToGallery)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not save the QR code. Please try again.'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.qrSaveFailed)));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1062,11 +1065,9 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not share the QR code. Please try again.'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.qrShareFailed)));
       }
     } finally {
       if (mounted) setState(() => _sharing = false);
@@ -1086,7 +1087,7 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              'Could not load gym QR: $e',
+              context.l10n.gymQrLoadFailed('$e'),
               style: const TextStyle(color: AppTheme.inkHint),
             ),
           ),
@@ -1095,12 +1096,12 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
           final token = gym?['checkin_token']?.toString() ?? '';
           final gymName = gym?['name'] as String? ?? 'Your Gym';
           if (token.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 child: Text(
-                  'No check-in code for this gym yet.',
-                  style: TextStyle(color: AppTheme.inkHint),
+                  context.l10n.noCheckInCode,
+                  style: const TextStyle(color: AppTheme.inkHint),
                 ),
               ),
             );
@@ -1151,10 +1152,10 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
-                            'Members scan this to check themselves in.\nPrint it and place it at the front desk.',
+                          Text(
+                            context.l10n.membersScanThisPrint,
                             textAlign: TextAlign.center,
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: AppTheme.textSecondary,
                               fontSize: 13,
                             ),
@@ -1178,7 +1179,11 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                               ),
                             )
                           : const Icon(AppIcons.download, size: 18),
-                      label: Text(_saving ? 'Saving…' : 'Save to gallery'),
+                      label: Text(
+                        _saving
+                            ? context.l10n.saving
+                            : context.l10n.saveToGallery,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1196,7 +1201,9 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                               ),
                             )
                           : const Icon(AppIcons.share, size: 18),
-                      label: Text(_sharing ? 'Preparing…' : 'Share / Print'),
+                      label: Text(
+                        _sharing ? context.l10n.preparing : 'Share / Print',
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -1204,9 +1211,9 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                     onTap: () {
                       Clipboard.setData(ClipboardData(text: url));
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Check-in link copied'),
-                          duration: Duration(seconds: 2),
+                        SnackBar(
+                          content: Text(context.l10n.checkInLinkCopied),
+                          duration: const Duration(seconds: 2),
                         ),
                       );
                     },
@@ -1248,9 +1255,9 @@ class _GymQrPageState extends ConsumerState<_GymQrPage> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
-                    'Tap to copy check-in link',
-                    style: TextStyle(
+                  Text(
+                    context.l10n.tapToCopyLink,
+                    style: const TextStyle(
                       fontSize: 11,
                       color: AppTheme.textSecondary,
                     ),
@@ -1285,7 +1292,7 @@ class _PendingSyncBanner extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '$count check-in${count == 1 ? '' : 's'} saved offline — tap to sync now',
+                context.l10n.checkInsSavedOffline(count),
                 style: const TextStyle(
                   color: AppTheme.statusWarn,
                   fontSize: 12,
@@ -1746,18 +1753,18 @@ class _RecentCheckInRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: isOpen
-                      ? const Row(
+                      ? Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            const Icon(
                               AppIcons.logout,
                               size: 12,
                               color: AppTheme.statusActive,
                             ),
-                            SizedBox(width: 4),
+                            const SizedBox(width: 4),
                             Text(
-                              'Check out',
-                              style: TextStyle(
+                              context.l10n.checkOut,
+                              style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
                                 color: AppTheme.statusActive,
@@ -2003,7 +2010,7 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                 controller: _searchCtrl,
                 onChanged: _onSearchChanged,
                 decoration: InputDecoration(
-                  hintText: 'Search member name...',
+                  hintText: context.l10n.searchMemberName,
                   prefixIcon: const Icon(
                     AppIcons.search,
                     color: AppTheme.inkHint,
@@ -2079,12 +2086,12 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
                 ? const Center(child: CircularProgressIndicator())
                 : _items.isEmpty
                 ? ListView(
-                    children: const [
-                      SizedBox(height: 120),
+                    children: [
+                      const SizedBox(height: 120),
                       Center(
                         child: Text(
-                          'No check-ins found',
-                          style: TextStyle(
+                          context.l10n.noCheckInsFound,
+                          style: const TextStyle(
                             color: AppTheme.inkHint,
                             fontSize: 13,
                           ),

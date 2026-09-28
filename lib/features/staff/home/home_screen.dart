@@ -12,6 +12,7 @@ import '../../../core/services/review_prompt.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/new_design_back_button.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -210,6 +211,45 @@ List<StaffFeature> visibleStaffFeatures(
   };
 }).toList();
 
+/// [item]'s name in the UI language — Home cards and the classic More sheet.
+/// The side nav keeps [StaffFeature.label] (English, like the bottom nav).
+String featureLabel(BuildContext context, StaffFeature item) {
+  final l = context.l10n;
+  return switch (item.route) {
+    '/staff/members' => l.featMembers,
+    '/staff/plans' => l.featPlans,
+    '/staff/expenses' => l.featExpenses,
+    '#biometric-device' => l.featBiometric,
+    '/staff/attendance-calendar' => l.featAttendance,
+    '/staff/staff' => l.featStaff,
+    '/staff/leads' => l.featLeads,
+    '/staff/reminders' => l.featReminders,
+    '#gym-code' => l.featSignupCode,
+    '/staff/classes' => l.featBatches,
+    '/staff/workout-plans' => l.featWorkout,
+    '/staff/diet-plans' => l.featDiet,
+    '/staff/reports' => l.featReports,
+    '/staff/exports' => l.featExport,
+    '/staff/activity-log' => l.featActivity,
+    '#gym-branches' => l.featBranches,
+    '/staff/settings' => l.featSettings,
+    _ => item.label,
+  };
+}
+
+/// A Home / More-sheet section heading in the UI language.
+String featureGroupLabel(BuildContext context, String group) {
+  final l = context.l10n;
+  return switch (group) {
+    'Run the gym' => l.groupRunGym,
+    'Grow' => l.groupGrow,
+    'Member programs' => l.groupPrograms,
+    'Insights' => l.groupInsights,
+    'Setup' => l.groupSetup,
+    _ => group,
+  };
+}
+
 /// Opens [item] the same way the old More sheet did: a sheet for `#` items,
 /// a pushed route otherwise. Members is a nav tab, so it switches to it.
 void openStaffFeature(BuildContext context, StaffFeature item) {
@@ -260,6 +300,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final profile = ref.watch(staffProfileProvider).valueOrNull;
     final gym = profile?['gyms'] as Map<String, dynamic>?;
     // Never blocks Home: sections below just appear once this loads.
@@ -328,8 +369,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       Expanded(
                         child: _BigCard(
                           icon: AppIcons.payments,
-                          label: 'Money',
-                          hint: 'Dues, payments, invoices',
+                          label: l.featMoney,
+                          hint: l.homeMoneyHint,
                           dark: true,
                           onTap: () => openWithReturn(context, '/staff/billing'),
                         ),
@@ -339,8 +380,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       Expanded(
                         child: _BigCard(
                           icon: AppIcons.qrScanner,
-                          label: 'Check-in',
-                          hint: 'Scan or mark attendance',
+                          label: l.featCheckIn,
+                          hint: l.homeCheckInHint,
                           onTap: () => openWithReturn(context, '/staff/check-in'),
                         ),
                       ),
@@ -355,7 +396,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       Expanded(
                         child: _ActionTile(
                           icon: AppIcons.personAdd,
-                          label: 'Add member',
+                          label: l.addMember,
                           accent: true,
                           onTap: () => showAddMemberSheet(context),
                         ),
@@ -365,7 +406,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       Expanded(
                         child: _ActionTile(
                           icon: AppIcons.payments,
-                          label: 'Collect payment',
+                          label: l.collectPayment,
                           onTap: () => openWithReturn(context, '/staff/billing'),
                         ),
                       ),
@@ -375,7 +416,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               for (final entry in groups.entries) ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(2, 22, 2, 8),
-                  child: Text(entry.key.toUpperCase(), style: AppTheme.kicker),
+                  child: Text(
+                    featureGroupLabel(context, entry.key).toUpperCase(),
+                    style: AppTheme.kicker,
+                  ),
                 ),
                 _FeatureGrid(items: entry.value),
               ],
@@ -396,7 +440,7 @@ class _HomeHeader extends ConsumerWidget {
 
   // Moved from the dashboard header: trial/plan status as a small tappable
   // line under the gym name, opening the subscription screen.
-  static String _planLabel(Map<String, dynamic>? gym) {
+  static String _planLabel(Map<String, dynamic>? gym, AppLocalizations l) {
     final plan = gym?['plan'] as String?;
     final daysLeft = planExpiryDaysRemaining(gym);
     final isTrial =
@@ -404,16 +448,14 @@ class _HomeHeader extends ConsumerWidget {
 
     if (isTrial) {
       return daysLeft != null
-          ? (daysLeft <= 0
-                ? 'Trial ends today'
-                : 'Trial ends in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}')
-          : 'Trial active';
+          ? (daysLeft <= 0 ? l.trialEndsToday : l.trialEndsIn(daysLeft))
+          : l.trialActive;
     }
     final planName = plan != null && plan.isNotEmpty
         ? plan[0].toUpperCase() + plan.substring(1)
         : 'Free';
     return daysLeft != null
-        ? '$planName plan · renews in $daysLeft ${daysLeft == 1 ? 'day' : 'days'}'
+        ? l.planRenewsIn(planName, daysLeft)
         : '$planName plan';
   }
 
@@ -527,7 +569,7 @@ class _HomeHeader extends ConsumerWidget {
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
-                          _planLabel(gym),
+                          _planLabel(gym, AppLocalizations.of(context)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -560,11 +602,12 @@ class _HomeHeader extends ConsumerWidget {
         squareButton(
           icon: AppIcons.logout,
           onTap: () async {
+            final l = AppLocalizations.of(context);
             final ok = await showConfirmDialog(
               context,
-              title: 'Sign out?',
-              body: 'You can sign back in anytime.',
-              confirmLabel: 'Sign out',
+              title: l.signOutTitle,
+              body: l.signOutBody,
+              confirmLabel: l.signOutConfirm,
               icon: AppIcons.logout,
             );
             if (ok == true) {
@@ -773,7 +816,7 @@ class _FeatureCard extends ConsumerWidget {
             ),
             const Spacer(),
             Text(
-              item.label,
+              featureLabel(context, item),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(

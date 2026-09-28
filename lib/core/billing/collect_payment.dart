@@ -7,7 +7,10 @@ import '../services/review_prompt.dart';
 import '../utils/formatters.dart';
 import '../../shared/widgets/redesign.dart';
 import '../theme/app_icons.dart';
+import '../../l10n/app_localizations.dart';
 
+// English-only copy for collect sheets not yet translated; translated sheets
+// use AppLocalizations.partialPaymentHint.
 const partialPaymentHint =
     'Partial payment available — you can collect less than the full amount due.';
 
@@ -46,13 +49,12 @@ Future<bool> confirmEarlyRenewalIfNeeded(
   final today = DateTime(now.year, now.month, now.day);
   final days = date.difference(today).inDays;
   final formatted = MaterialLocalizations.of(context).formatMediumDate(date);
+  final l = AppLocalizations.of(context);
   final proceed = await showConfirmDialog(
     context,
-    title: 'Collect renewal early?',
-    body:
-        'This renewal is due on $formatted (in $days day${days == 1 ? '' : 's'}). '
-        'Continue only if you have received an advance payment.',
-    confirmLabel: 'Collect advance',
+    title: l.collectEarlyTitle,
+    body: l.collectEarlyBody(formatted, days),
+    confirmLabel: l.collectAdvance,
     icon: AppIcons.schedule,
     danger: false,
   );
@@ -70,13 +72,15 @@ Future<bool> confirmPartialIfNeeded(
 }) async {
   if (enteredAmount >= dueAmount) return true;
   final remaining = dueAmount - enteredAmount;
+  final l = AppLocalizations.of(context);
   final proceed = await showConfirmDialog(
     context,
-    title: 'Partial payment',
-    body:
-        'Collecting $currencySymbol${enteredAmount.toStringAsFixed(0)} now. '
-        '$currencySymbol${remaining.toStringAsFixed(0)} will remain due.',
-    confirmLabel: 'OK, collect',
+    title: l.partialPaymentTitle,
+    body: l.partialPaymentBody(
+      '$currencySymbol${enteredAmount.toStringAsFixed(0)}',
+      '$currencySymbol${remaining.toStringAsFixed(0)}',
+    ),
+    confirmLabel: l.okCollect,
     icon: AppIcons.payments,
     danger: false,
   );

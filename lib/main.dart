@@ -16,6 +16,7 @@ import 'core/services/onesignal_service.dart';
 import 'core/services/update_prompt.dart';
 import 'firebase_options.dart';
 import 'core/services/revenue_cat_service.dart';
+import 'core/app_locale.dart';
 
 const _supabaseUrl = 'https://orlqjhqxeyukvfzsursl.supabase.co';
 const _supabaseAnonKey =
@@ -106,7 +107,15 @@ Future<void> main() async {
         unawaited(OneSignalService.loginUser(existingSession.user.id));
       }
 
-      runApp(const ProviderScope(child: GymCRMApp()));
+      final savedLocale = await loadSavedLocale();
+      runApp(
+        ProviderScope(
+          overrides: [
+            appLocaleProvider.overrideWith((ref) => savedLocale),
+          ],
+          child: const GymCRMApp(),
+        ),
+      );
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         // Play update check. Not awaited — it must never delay first paint.

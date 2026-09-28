@@ -21,6 +21,7 @@ import '../../shared/widgets/redesign.dart';
 import '../../shared/widgets/responsive_content.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../theme/app_icons.dart';
+import '../../l10n/app_localizations.dart';
 
 // Branch indices — must match the StatefulShellRoute order in router.dart.
 const _homeIndex = 0;
@@ -471,7 +472,7 @@ class _StaffBottomNavState extends ConsumerState<_StaffBottomNav> {
               Expanded(
                 child: Showcase(
                   key: _membersTourKey,
-                  description: 'See and manage all your gym members here.',
+                  description: AppLocalizations.of(context).tourMembers,
                   child: Row(
                     children: [
                       _tab(
@@ -667,11 +668,12 @@ class _OldBottomNavState extends ConsumerState<_OldBottomNav> {
   }
 
   Future<void> _confirmSignOut(BuildContext context) async {
+    final l = AppLocalizations.of(context);
     final ok = await showConfirmDialog(
       context,
-      title: 'Sign out?',
-      body: 'You can sign back in anytime.',
-      confirmLabel: 'Sign out',
+      title: l.signOutTitle,
+      body: l.signOutBody,
+      confirmLabel: l.signOutConfirm,
       icon: AppIcons.logout,
     );
     if (ok == true) widget.onSignOut();
@@ -720,7 +722,7 @@ class _OldBottomNavState extends ConsumerState<_OldBottomNav> {
     if (tab.index == _membersIndex) {
       tabWidget = Showcase(
         key: _membersTourKey,
-        description: 'See and manage all your gym members here.',
+        description: AppLocalizations.of(context).tourMembers,
         child: tabWidget,
       );
     }
@@ -754,7 +756,7 @@ class _OldBottomNavState extends ConsumerState<_OldBottomNav> {
               Expanded(
                 child: Showcase(
                   key: _checkInTourKey,
-                  description: 'Tap here to check in a member with QR scan.',
+                  description: AppLocalizations.of(context).tourCheckIn,
                   child: _CheckInButton(
                     active: checkInActive,
                     onTap: () => widget.shell.goBranch(
@@ -768,8 +770,7 @@ class _OldBottomNavState extends ConsumerState<_OldBottomNav> {
             if (_showMoney) _branchTab(context, _moneyTab, moreActive),
             Showcase(
               key: _moreTourKey,
-              description:
-                  'Find Leads, Classes, Staff, Reports and Settings here.',
+              description: AppLocalizations.of(context).tourMore,
               child: _NavTab(
                 icon: AppIcons.menu,
                 activeIcon: AppIcons.menu,
@@ -1002,7 +1003,7 @@ class _MoreSheet extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
                         child: Text(
-                          entry.key.toUpperCase(),
+                          featureGroupLabel(context, entry.key).toUpperCase(),
                           style: AppTheme.kicker,
                         ),
                       ),
@@ -1079,7 +1080,7 @@ class _MoreRow extends ConsumerWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      item.label,
+                      featureLabel(context, item),
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 15,

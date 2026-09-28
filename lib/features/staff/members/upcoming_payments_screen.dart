@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../l10n/app_localizations.dart';
 
 // The payments-due list lives in payments_due_screen.dart; this file now only
 // holds the Quick Collect sheet that several screens open.
@@ -170,24 +171,26 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
   }
 
   Future<void> _save() async {
+    final l = AppLocalizations.of(context);
     final amountText = _amountCtrl.text.trim();
     if (amountText.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Enter an amount')));
+      ).showSnackBar(SnackBar(content: Text(l.enterAmount)));
       return;
     }
     final amount = double.tryParse(amountText);
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      ).showSnackBar(SnackBar(content: Text(l.enterValidAmount)));
       return;
     }
     final dateError = paymentDatesError(
       _paidAt,
       _validTill,
       defaultTill: _defaultTill,
+      l: l,
     );
     if (dateError != null) {
       ScaffoldMessenger.of(
@@ -209,12 +212,12 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
     if (prior != null && mounted) {
       await showInfoDialog(
         context,
-        title: 'Already collected today',
-        body:
-            '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
-            'from ${widget.memberName} today at '
-            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}. '
-            'Refresh the member before collecting another renewal.',
+        title: l.alreadyCollectedTitle,
+        body: l.alreadyCollectedBody(
+          '$currencySymbol${prior.amount.toStringAsFixed(0)}',
+          widget.memberName,
+          '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}',
+        ),
         icon: AppIcons.history,
       );
       return;
@@ -229,11 +232,9 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
     if (!early) return;
     if (_nextPaymentDate == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Renewal date is missing. Refresh and try again.'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l.renewalDateMissing)));
       }
       return;
     }
@@ -267,8 +268,8 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
       if (mounted) {
         Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Payment collected'),
+          SnackBar(
+            content: Text(l.paymentCollected),
             backgroundColor: AppTheme.statusActive,
           ),
         );
@@ -285,6 +286,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -301,7 +303,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Collect Payment',
+                  l.collectPaymentTitle,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: AppTheme.ink,
@@ -353,13 +355,13 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
             if (_planHint != null) ...[
               const SizedBox(height: 4),
               Text(
-                'Auto-filled: $_planHint',
+                l.autoFilled(_planHint!),
                 style: const TextStyle(fontSize: 11, color: AppTheme.inkSoft),
               ),
             ],
             const SizedBox(height: 4),
             Text(
-              partialPaymentHint,
+              l.partialPaymentHint,
               style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
             ),
             const SizedBox(height: 16),
@@ -454,7 +456,7 @@ class QuickCollectSheetState extends ConsumerState<QuickCollectSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Collect Payment'),
+                  : Text(l.collectPaymentTitle),
             ),
           ],
         ),

@@ -34,6 +34,7 @@ import 'member_plan_viewer.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/widgets/blood_group_field.dart';
+import '../../../l10n/l10n.dart';
 
 // Active membership plans for the current gym (for assign/change actions).
 final _detailPlansProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -252,10 +253,10 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
         error: (_, _) => const ErrorState(what: 'this member'),
         data: (m) {
           if (m == null) {
-            return const StateMessage(
+            return StateMessage(
               icon: AppIcons.personOff,
-              title: 'Member not found',
-              body: 'This member may have been deleted from your gym.',
+              title: context.l10n.memberNotFound,
+              body: context.l10n.memberNotFoundBody,
             );
           }
           return RefreshIndicator(
@@ -352,10 +353,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
   ) async {
     final ok = await showConfirmDialog(
       context,
-      title: 'Delete member?',
-      body:
-          'Permanently delete ${m.fullName}? All their data (memberships, invoices, check-ins) will be removed. This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: context.l10n.deleteMemberTitle,
+      body: context.l10n.deleteMemberBody(m.fullName),
+      confirmLabel: context.l10n.delete,
       icon: AppIcons.delete,
     );
     if (ok != true || !context.mounted) return;
@@ -369,7 +369,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       debugPrint('[GymCRM] Delete member error: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to delete member')),
+          SnackBar(content: Text(context.l10n.deleteMemberFailed)),
         );
       }
     }
@@ -452,9 +452,11 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                               AppIcons.delete,
                               color: AppTheme.statusDanger,
                             ),
-                            title: const Text(
-                              'Delete member',
-                              style: TextStyle(color: AppTheme.statusDanger),
+                            title: Text(
+                              context.l10n.deleteMember,
+                              style: const TextStyle(
+                                color: AppTheme.statusDanger,
+                              ),
                             ),
                             onTap: () {
                               Navigator.pop(ctx);
@@ -615,7 +617,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
               Expanded(
                 child: _HeroAction(
                   icon: AppIcons.payments,
-                  label: 'Collect',
+                  label: context.l10n.collect,
                   filled: true,
                   onTap: canEdit ? () => _collect(context, ref, m) : null,
                 ),
@@ -629,7 +631,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 Expanded(
                   child: _HeroAction(
                     icon: AppIcons.autorenew,
-                    label: 'Renew',
+                    label: context.l10n.renew,
                     onTap: canEdit ? () => _renew(context, ref, m) : null,
                   ),
                 ),
@@ -732,9 +734,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     final npd = m.nextPaymentDate;
     if (npd == null || npd.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Renewal date is missing. Refresh and try again.'),
-        ),
+        SnackBar(content: Text(context.l10n.renewalDateMissing)),
       );
       return;
     }
@@ -774,18 +774,16 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
 
     final confirmed = await showConfirmDialog(
       context,
-      title: 'Renew plan?',
-      body:
-          'This marks ${formatCurrency(amount)} as collected from '
-          '${m.fullName} and extends their plan by one cycle. Confirm the '
-          'payment was received before continuing.',
-      confirmLabel: 'Renew',
+      title: context.l10n.renewPlanTitle,
+      body: context.l10n.renewPlanBody(formatCurrency(amount), m.fullName),
+      confirmLabel: context.l10n.renew,
       icon: AppIcons.autorenew,
       danger: false,
     );
     if (confirmed != true || !context.mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
+    final planRenewed = context.l10n.planRenewed;
     try {
       await collectMembershipRenewal(
         memberId: m.id,
@@ -799,8 +797,8 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       container.invalidate(_memberInvoicesProvider(memberId));
       if (!mounted) return;
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Plan renewed'),
+        SnackBar(
+          content: Text(planRenewed),
           backgroundColor: AppTheme.statusActive,
         ),
       );
@@ -887,12 +885,12 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     final canDiet = RoleAccess.canManageDietPlans(role);
 
     String workoutSummary() {
-      if (workoutPlans.isEmpty) return canWorkout ? 'Add plan' : '—';
+      if (workoutPlans.isEmpty) return canWorkout ? context.l10n.addPlan : '—';
       return workoutPlans.first['name'] as String? ?? 'View';
     }
 
     String dietSummary() {
-      if (dietPlans.isEmpty) return canDiet ? 'Add plan' : '—';
+      if (dietPlans.isEmpty) return canDiet ? context.l10n.addPlan : '—';
       final kcal = dietPlans.first['calories'] as int?;
       return kcal != null
           ? '$kcal kcal'
@@ -1005,7 +1003,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
     final isPass = ms?.isDayPass ?? false;
     final planTitle = ms?.plan != null
         ? '${ms!.plan!.name} · ${formatCurrency(ms.plan!.price)}'
-        : 'No active plan';
+        : context.l10n.noActivePlan;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1214,16 +1212,19 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
           autofocus: true,
           maxLength: 20,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'e.g. 001',
-            helperText: 'Employee number enrolled on fingerprint machine',
+            helperText: context.l10n.fingerprintHelper,
           ),
         ),
       ),
       actions: (ctx) => [
-        DialogButton(label: 'Cancel', onTap: () => Navigator.pop(ctx, false)),
         DialogButton(
-          label: 'Save',
+          label: context.l10n.cancel,
+          onTap: () => Navigator.pop(ctx, false),
+        ),
+        DialogButton(
+          label: context.l10n.save,
           filled: true,
           onTap: () => Navigator.pop(ctx, true),
         ),
@@ -1242,7 +1243,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+        ).showSnackBar(
+          SnackBar(content: Text(context.l10n.couldNotSaveError('$e'))),
+        );
       }
     }
   }
@@ -1264,9 +1267,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => const SizedBox.shrink(),
                 data: (list) => list.isEmpty
-                    ? const Text(
-                        'Not enrolled in any batch.',
-                        style: TextStyle(color: AppTheme.inkHint),
+                    ? Text(
+                        context.l10n.notEnrolledInBatch,
+                        style: const TextStyle(color: AppTheme.inkHint),
                       )
                     : ListView.separated(
                         shrinkWrap: true,
@@ -1345,9 +1348,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => const SizedBox.shrink(),
                 data: (list) => list.isEmpty
-                    ? const Text(
-                        'No check-ins yet',
-                        style: TextStyle(color: AppTheme.inkHint),
+                    ? Text(
+                        context.l10n.noCheckInsYet,
+                        style: const TextStyle(color: AppTheme.inkHint),
                       )
                     : ListView.separated(
                         shrinkWrap: true,
@@ -1465,9 +1468,9 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
                 final data = ClipboardData(text: m.id);
                 Clipboard.setData(data);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Member ID copied'),
-                    duration: Duration(seconds: 2),
+                  SnackBar(
+                    content: Text(context.l10n.memberIdCopied),
+                    duration: const Duration(seconds: 2),
                   ),
                 );
               },
@@ -1624,7 +1627,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      'Send WhatsApp',
+                      context.l10n.sendWhatsApp,
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 17,
@@ -1655,8 +1658,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                   initialValue: msg,
                   maxLines: 4,
                   onChanged: (v) => msg = v,
-                  decoration: const InputDecoration(
-                    hintText: 'Type a message…',
+                  decoration: InputDecoration(
+                    hintText: context.l10n.typeMessage,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -1672,11 +1675,11 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                       uri,
                       mode: LaunchMode.externalApplication,
                     )) {
-                      _toast('Could not open WhatsApp');
+                      _toast(context.l10n.whatsappOpenFailed);
                     }
                   },
                   icon: const Icon(AppIcons.send, size: 16),
-                  label: const Text('Send on WhatsApp'),
+                  label: Text(context.l10n.sendOnWhatsApp),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF25D366),
                     foregroundColor: Colors.white,
@@ -1701,10 +1704,14 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           .eq('id', m.id);
       container.invalidate(_memberDetailProvider(m.id));
       if (!mounted) return;
-      _toast(newStatus == 'frozen' ? 'Membership put on hold' : 'Hold removed');
+      _toast(
+        newStatus == 'frozen'
+            ? context.l10n.membershipOnHold
+            : context.l10n.holdRemoved,
+      );
     } catch (e) {
       debugPrint('[GymCRM] Toggle hold error: $e');
-      _toast('Failed to update status');
+      _toast(context.l10n.statusUpdateFailed);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1719,7 +1726,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       if (!mounted) return;
       final token = session?.accessToken;
       if (token == null) {
-        _toast('Session expired. Please sign in again.');
+        _toast(context.l10n.sessionExpired);
         return;
       }
       final res = await http.post(
@@ -1731,10 +1738,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       );
       if (!mounted) return;
       if (res.statusCode == 200) {
-        _toast('Portal invite sent to ${m.email}');
+        _toast(context.l10n.portalInviteSent(m.email));
       } else {
         final body = jsonDecode(res.body) as Map;
-        _toast(body['error']?.toString() ?? 'Failed to send invite');
+        _toast(body['error']?.toString() ?? context.l10n.inviteSendFailed);
       }
     } catch (e) {
       if (mounted) _toast('Error: $e');
@@ -1749,11 +1756,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     if (ms == null || ms.status != 'active') return;
     final ok = await showConfirmDialog(
       context,
-      title: 'Cancel membership?',
-      body:
-          "${m.firstName}'s current plan will be cancelled. This can't be undone.",
-      cancelLabel: 'Keep plan',
-      confirmLabel: 'Cancel it',
+      title: context.l10n.cancelMembershipTitle,
+      body: context.l10n.cancelMembershipBody(m.firstName),
+      cancelLabel: context.l10n.keepPlan,
+      confirmLabel: context.l10n.cancelIt,
     );
     if (!mounted) return;
     if (ok != true) return;
@@ -1768,10 +1774,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           .eq('id', ms.id);
       container.invalidate(_memberDetailProvider(m.id));
       if (!mounted) return;
-      _toast('Membership cancelled');
+      _toast(context.l10n.membershipCancelled);
     } catch (e) {
       debugPrint('[GymCRM] Cancel plan error: $e');
-      _toast('Failed to cancel membership');
+      _toast(context.l10n.cancelMembershipFailed);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1791,8 +1797,8 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
     if (plans.isEmpty) {
       _toast(
         convert
-            ? 'No monthly or yearly plans. Create one in Billing first.'
-            : 'No active plans. Create one in Billing first.',
+            ? context.l10n.noFullPlans
+            : context.l10n.noActivePlans,
       );
       return;
     }
@@ -1818,7 +1824,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SheetHeader(
-                  title: convert ? 'Convert to a full plan' : 'Change plan',
+                  title: convert
+                      ? context.l10n.convertToFullPlanTitle
+                      : context.l10n.changePlan,
                 ),
                 const SizedBox(height: 16),
                 ...plans.map((p) {
@@ -1876,7 +1884,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                   onPressed: picked == null
                       ? null
                       : () => Navigator.pop(ctx, picked),
-                  child: Text(convert ? 'Convert' : 'Switch plan'),
+                  child: Text(
+                    convert ? context.l10n.convert : context.l10n.switchPlan,
+                  ),
                 ),
               ],
             ),
@@ -1894,11 +1904,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
         title: 'Recurring Discount',
-        helperText:
-            'Fixed amount deducted from every auto-generated invoice for this member.',
+        helperText: context.l10n.recurringDiscountBody,
         controller: discountCtrl,
-        confirmLabel: 'Confirm',
-        skipLabel: 'No Discount',
+        confirmLabel: context.l10n.confirm,
+        skipLabel: context.l10n.noDiscount,
         onSkip: () => Navigator.pop(ctx, 0.0),
         onConfirm: () {
           final v = double.tryParse(discountCtrl.text.trim()) ?? 0.0;
@@ -1997,10 +2006,12 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       notifyGymDataChanged();
       container.invalidate(_memberDetailProvider(m.id));
       if (!mounted) return;
-      _toast(convert ? 'Converted to a full plan' : 'Plan assigned');
+      _toast(
+        convert ? context.l10n.convertedToFullPlan : context.l10n.planAssigned,
+      );
     } catch (e) {
       debugPrint('[GymCRM] Assign plan error: $e');
-      _toast('Failed to assign plan');
+      _toast(context.l10n.assignPlanFailed);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -2019,11 +2030,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
       isScrollControlled: true,
       builder: (ctx) => _DiscountSheet(
         title: 'Edit Recurring Discount',
-        helperText:
-            'Fixed amount deducted from every auto-generated invoice. Set to 0 to remove.',
+        helperText: context.l10n.editDiscountBody,
         controller: discountCtrl,
-        confirmLabel: 'Save',
-        skipLabel: 'Cancel',
+        confirmLabel: context.l10n.save,
+        skipLabel: context.l10n.cancel,
         onSkip: () => Navigator.pop(ctx),
         onConfirm: () {
           final v = double.tryParse(discountCtrl.text.trim()) ?? 0.0;
@@ -2043,10 +2053,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           .eq('id', ms.id);
       container.invalidate(_memberDetailProvider(m.id));
       if (!mounted) return;
-      _toast('Discount updated');
+      _toast(context.l10n.discountUpdated);
     } catch (e) {
       debugPrint('[GymCRM] Edit discount error: $e');
-      _toast('Failed to update discount');
+      _toast(context.l10n.discountUpdateFailed);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -2093,7 +2103,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           icon: m.status == 'frozen' ? AppIcons.play : AppIcons.pause,
           iconBg: AppTheme.surface2,
           iconColor: AppTheme.inkSoft,
-          label: m.status == 'frozen' ? 'Remove hold' : 'Hold membership',
+          label: m.status == 'frozen'
+              ? context.l10n.removeHold
+              : context.l10n.holdMembership,
           onTap: _busy ? null : _toggleHold,
         ),
       if (canEditMembership && m.currentMembership?.isDayPass == true)
@@ -2101,7 +2113,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           icon: AppIcons.creditCardActive,
           iconBg: AppTheme.accentSoft,
           iconColor: AppTheme.accent,
-          label: 'Convert to full plan',
+          label: context.l10n.convertToFullPlan,
           onTap: _busy ? null : () => _managePlan(convert: true),
         ),
       if (canEditMembership)
@@ -2109,7 +2121,9 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           icon: AppIcons.creditCardActive,
           iconBg: AppTheme.accentSoft,
           iconColor: AppTheme.accent,
-          label: hasActivePlan ? 'Change plan' : 'Assign plan',
+          label: hasActivePlan
+              ? context.l10n.changePlan
+              : context.l10n.assignPlan,
           onTap: _busy ? null : _managePlan,
         ),
       if (canEditMembership && hasActivePlan)
@@ -2118,8 +2132,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           iconBg: AppTheme.surface2,
           iconColor: AppTheme.inkSoft,
           label: m.currentMembership?.hasDiscount == true
-              ? 'Edit recurring discount (${formatCurrency(m.currentMembership!.discountAmount)} off)'
-              : 'Add recurring discount',
+              ? context.l10n.editRecurringDiscount(
+                  formatCurrency(m.currentMembership!.discountAmount),
+                )
+              : context.l10n.addRecurringDiscount,
           onTap: _busy ? null : _editDiscount,
         ),
       if (showInvite)
@@ -2127,7 +2143,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           icon: AppIcons.mail,
           iconBg: AppTheme.surface2,
           iconColor: AppTheme.inkSoft,
-          label: 'Send portal invite',
+          label: context.l10n.sendPortalInvite,
           onTap: _busy ? null : _sendInvite,
         ),
       if (canDeleteMembership && hasActivePlan)
@@ -2135,7 +2151,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
           icon: AppIcons.delete,
           iconBg: AppTheme.statusDangerBg,
           iconColor: AppTheme.statusDanger,
-          label: 'Cancel plan',
+          label: context.l10n.cancelPlan,
           labelColor: AppTheme.statusDanger,
           onTap: _busy ? null : _cancelPlan,
         ),
@@ -2233,27 +2249,28 @@ class _PlanStartChoiceSheetState extends State<_PlanStartChoiceSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SheetHeader(
-            title: 'Start new plan from?',
-            subtitle:
-                'Their current plan is active till ${formatDateFromString(widget.currentNpd)}.',
+            title: context.l10n.startNewPlanFrom,
+            subtitle: context.l10n.currentPlanActiveTill(
+              formatDateFromString(widget.currentNpd),
+            ),
           ),
           const SizedBox(height: 16),
           _option(
             value: 'today',
-            title: 'Today (${formatDateFromString(widget.todayStr)})',
-            subtitle:
-                'New plan starts now. Remaining days on the old plan are dropped.',
+            title: context.l10n.todayWithDate(
+              formatDateFromString(widget.todayStr),
+            ),
+            subtitle: context.l10n.newPlanStartsNow,
           ),
           _option(
             value: 'end',
             title: formatDateFromString(widget.currentNpd),
-            subtitle:
-                'New plan starts after the old one ends. Nothing dropped, no gap.',
+            subtitle: context.l10n.newPlanStartsAfter,
           ),
           const SizedBox(height: 8),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, _picked),
-            child: const Text('Confirm'),
+            child: Text(context.l10n.confirm),
           ),
         ],
       ),
@@ -2321,9 +2338,12 @@ class _DiscountSheet extends StatelessWidget {
                   decoration: AppTheme.cardDecoration(),
                   child: Row(
                     children: [
-                      const Text(
-                        'Discount applied',
-                        style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+                      Text(
+                        context.l10n.discountApplied,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.inkSoft,
+                        ),
                       ),
                       const Spacer(),
                       Text(
@@ -2668,11 +2688,11 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: const Text('Choose from gallery'),
+              title: Text(context.l10n.chooseFromGallery),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
-              title: const Text('Take a photo'),
+              title: Text(context.l10n.takePhoto),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
           ],
@@ -2731,13 +2751,13 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     final phone = _phoneCtrl.text.trim();
     if (email.isNotEmpty && !isValidEmail(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid email address')),
+        SnackBar(content: Text(context.l10n.enterValidEmail)),
       );
       return;
     }
     if (phone.isNotEmpty && !isValidIndianMobile(phone)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid 10-digit mobile number')),
+        SnackBar(content: Text(context.l10n.enterValidMobile)),
       );
       return;
     }
@@ -2793,7 +2813,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
       if (mounted) {
         final msg = e.code == '23505'
             ? 'A member with this ID already exists.'
-            : duplicatePhoneMessage(e) ?? 'Failed to save. Please try again.';
+            : duplicatePhoneMessage(e) ?? context.l10n.saveFailed;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
@@ -2802,7 +2822,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save. Please try again.')),
+          SnackBar(content: Text(context.l10n.saveFailed)),
         );
         setState(() => _loading = false);
       }
@@ -2814,7 +2834,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const SheetTopBar(title: 'Edit member'),
+        SheetTopBar(title: context.l10n.editMember),
         Flexible(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
@@ -2859,7 +2879,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Save changes'),
+                  : Text(context.l10n.saveChanges),
             ),
           ),
         ),
@@ -3019,19 +3039,19 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
         onTap: () => setState(() => _moreDetails = true),
         behavior: HitTestBehavior.opaque,
         child: Row(
-          children: const [
-            Icon(AppIcons.addCircle, size: 20, color: AppTheme.accent),
-            SizedBox(width: 8),
+          children: [
+            const Icon(AppIcons.addCircle, size: 20, color: AppTheme.accent),
+            const SizedBox(width: 8),
             Text(
-              'More details',
-              style: TextStyle(
+              context.l10n.moreDetails,
+              style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
                 color: AppTheme.accent,
               ),
             ),
-            SizedBox(width: 8),
-            Flexible(
+            const SizedBox(width: 8),
+            const Flexible(
               child: Text(
                 'Email, date of birth, emergency contact, notes',
                 maxLines: 1,
@@ -3075,11 +3095,11 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
             controller: _biometricIdCtrl,
             maxLength: 20,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Biometric device ID',
               hintText: 'e.g. 001',
               counterText: '',
-              helperText: 'Employee number enrolled on fingerprint machine',
+              helperText: context.l10n.fingerprintHelper,
             ),
           ),
           const SizedBox(height: 12),
@@ -3292,10 +3312,10 @@ class _MemberActivityBody extends ConsumerWidget {
       error: (_, _) => const ErrorState(what: 'this member\'s activity'),
       data: (list) {
         if (list.isEmpty) {
-          return const StateMessage(
+          return StateMessage(
             icon: AppIcons.historyToggleOff,
-            title: 'No activity yet',
-            body: 'Changes made to this member will show up here.',
+            title: context.l10n.noActivityYet,
+            body: context.l10n.noActivityYetBody,
           );
         }
         return ListView.separated(
@@ -3358,10 +3378,10 @@ class _PaymentHistoryBody extends ConsumerWidget {
       error: (_, _) => const ErrorState(what: 'payment history'),
       data: (list) {
         if (list.isEmpty) {
-          return const StateMessage(
+          return StateMessage(
             icon: AppIcons.receipt,
-            title: 'No payments yet',
-            body: 'Payments you collect from this member will be listed here.',
+            title: context.l10n.noPaymentsYet,
+            body: context.l10n.noMemberPaymentsBody,
           );
         }
         return ListView(

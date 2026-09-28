@@ -26,6 +26,7 @@ import '../../../core/theme/app_icons.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/review_prompt.dart';
 import '../../../core/widgets/new_design_back_button.dart';
+import '../../../l10n/l10n.dart';
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
@@ -479,7 +480,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             start: today.subtract(const Duration(days: 6)),
             end: today,
           ),
-      helpText: 'Select collection dates',
+      helpText: context.l10n.selectCollectionDates,
     );
     if (picked == null || !mounted) return;
     setState(() {
@@ -529,9 +530,12 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                                   onChanged: (v) => setState(
                                     () => _query = v.trim().toLowerCase(),
                                   ),
-                                  decoration: const InputDecoration(
-                                    hintText: 'Search by member name',
-                                    prefixIcon: Icon(AppIcons.search, size: 18),
+                                  decoration: InputDecoration(
+                                    hintText: context.l10n.searchByMemberName,
+                                    prefixIcon: const Icon(
+                                      AppIcons.search,
+                                      size: 18,
+                                    ),
                                     isDense: true,
                                   ),
                                 )
@@ -612,10 +616,9 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                                 icon: AppIcons.cloudOff,
                                 tint: AppTheme.statusDanger,
                                 tintBg: AppTheme.statusDangerBg,
-                                title: 'Could not load payments',
-                                body:
-                                    'Check your connection, then pull down to retry.',
-                                actionLabel: 'Retry',
+                                title: context.l10n.paymentsLoadFailed,
+                                body: context.l10n.checkConnectionRetry,
+                                actionLabel: context.l10n.retry,
                                 onAction: () =>
                                     ref.invalidate(_billingFeedProvider),
                               ),
@@ -723,8 +726,8 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         if (rows.isEmpty && _query.isNotEmpty)
           StateMessage(
             icon: AppIcons.search,
-            title: 'No matches',
-            body: 'No dues for "${_searchCtrl.text.trim()}" in this view.',
+            title: context.l10n.noMatches,
+            body: context.l10n.noDuesForQuery(_searchCtrl.text.trim()),
           )
         else if (rows.isEmpty && _bucket == 'overdue' && stuckOld.isNotEmpty)
           // Nothing recent is overdue, but don't let that read as "all
@@ -734,11 +737,9 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             icon: AppIcons.history,
             tint: AppTheme.statusWarn,
             tintBg: AppTheme.statusWarnBg,
-            title: 'Nothing overdue in the last $collectWindowDays days',
-            body:
-                '${stuckOld.length} older ${stuckOld.length == 1 ? 'due' : 'dues'} '
-                "haven't been collected or written off yet.",
-            actionLabel: 'View all dues',
+            title: context.l10n.nothingOverdueInDays(collectWindowDays),
+            body: context.l10n.olderDuesPending(stuckOld.length),
+            actionLabel: context.l10n.viewAllDues,
             onAction: () => setState(() => _bucket = 'all'),
           )
         else if (rows.isEmpty)
@@ -746,11 +747,9 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             icon: AppIcons.checkCircle,
             tint: AppTheme.statusActive,
             tintBg: AppTheme.statusActiveBg,
-            title: 'Everyone has paid',
-            body:
-                'No outstanding dues today. Renewals due this week will show '
-                'up here.',
-            actionLabel: 'See upcoming renewals',
+            title: context.l10n.everyonePaid,
+            body: context.l10n.everyonePaidBody,
+            actionLabel: context.l10n.seeUpcomingRenewals,
             onAction: () => context.push('/staff/upcoming-payments'),
           )
         else
@@ -782,7 +781,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         children: [
           _CustomRangeBar(
             label: _rangeLabel(customRange),
-            summary: custom.hasError ? null : 'Loading…',
+            summary: custom.hasError ? null : context.l10n.loadingEllipsis,
             onChange: _pickCustomRange,
             onClear: _clearCustomRange,
           ),
@@ -792,9 +791,9 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
               icon: AppIcons.cloudOff,
               tint: AppTheme.statusDanger,
               tintBg: AppTheme.statusDangerBg,
-              title: 'Could not load payments',
-              body: 'Check your connection, then pull down to retry.',
-              actionLabel: 'Retry',
+              title: context.l10n.paymentsLoadFailed,
+              body: context.l10n.checkConnectionRetry,
+              actionLabel: context.l10n.retry,
               onAction: () =>
                   ref.invalidate(_customPaymentsProvider(customRange)),
             )
@@ -849,12 +848,12 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
             child: DottedBorderBox(
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(AppIcons.add, size: 18, color: AppTheme.accent),
-                  SizedBox(width: 6),
+                children: [
+                  const Icon(AppIcons.add, size: 18, color: AppTheme.accent),
+                  const SizedBox(width: 6),
                   Text(
-                    'New invoice',
-                    style: TextStyle(
+                    context.l10n.newInvoice,
+                    style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.accent,
@@ -869,22 +868,22 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
         if (items.isEmpty && _query.isNotEmpty)
           StateMessage(
             icon: AppIcons.search,
-            title: 'No matches',
-            body: 'Nothing for "${_searchCtrl.text.trim()}" in this tab.',
+            title: context.l10n.noMatches,
+            body: context.l10n.nothingForQuery(_searchCtrl.text.trim()),
           )
         else if (items.isEmpty && showCustom)
-          const StateMessage(
+          StateMessage(
             icon: AppIcons.receipt,
-            title: 'No payments in these dates',
-            body: 'Try a wider date range.',
+            title: context.l10n.noPaymentsInDates,
+            body: context.l10n.tryWiderRange,
           )
         else if (items.isEmpty)
           StateMessage(
             icon: AppIcons.receipt,
-            title: 'Nothing here yet',
+            title: context.l10n.nothingHereYet,
             body: _tab == 1
-                ? 'Payments appear here as soon as you record the first one.'
-                : 'Invoices you raise appear here.',
+                ? context.l10n.paymentsAppearHere
+                : context.l10n.invoicesAppearHere,
           )
         else
           for (final item in items)
@@ -909,10 +908,9 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     final container = ProviderScope.containerOf(context, listen: false);
     final ok = await showConfirmDialog(
       context,
-      title: 'Delete invoice?',
-      body:
-          'This invoice and its payment records will be permanently deleted. This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: context.l10n.deleteInvoiceTitle,
+      body: context.l10n.deleteInvoiceBody,
+      confirmLabel: context.l10n.delete,
       icon: AppIcons.delete,
     );
     if (!mounted) return;
@@ -1226,7 +1224,7 @@ class _CustomRangeBar extends StatelessWidget {
               ),
             ),
           ),
-          TextButton(onPressed: onChange, child: const Text('Change')),
+          TextButton(onPressed: onChange, child: Text(context.l10n.change)),
           IconButton(
             tooltip: 'Clear dates',
             onPressed: onClear,
@@ -1379,7 +1377,9 @@ class _TxnCard extends StatelessWidget {
             if (item.isDue && onCollect != null) ...[
               const SizedBox(height: 12),
               WideActionButton(
-                label: item.isUpcoming ? 'Collect early' : 'Collect',
+                label: item.isUpcoming
+                    ? context.l10n.collectEarly
+                    : context.l10n.collect,
                 onTap: onCollect,
               ),
             ],
@@ -1507,9 +1507,12 @@ class _DueCollectPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = early ? (roomy ? 'Collect early' : 'Early') : 'Collect';
+    final l = context.l10n;
+    final label = early
+        ? (roomy ? l.collectEarly : l.earlyShort)
+        : l.collect;
     return Tooltip(
-      message: early ? 'Collect early' : 'Collect payment',
+      message: early ? l.collectEarly : l.collectPayment,
       child: Material(
         color: early ? AppTheme.surface2 : AppTheme.accent,
         borderRadius: BorderRadius.circular(99),
@@ -1699,13 +1702,14 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.enterValidAmount)));
       return;
     }
     final dateError = paymentDatesError(
       _paidAt,
       _validTill,
       defaultTill: _defaultTill,
+      l: context.l10n,
     );
     if (dateError != null) {
       ScaffoldMessenger.of(
@@ -1732,13 +1736,13 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
     if (prior != null && mounted) {
       final proceed = await showConfirmDialog(
         context,
-        title: 'Already collected today',
-        body:
-            '$currencySymbol${prior.amount.toStringAsFixed(0)} was already collected '
-            'from this member today at '
-            '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}.\n\n'
-            'Record $currencySymbol${amount.toStringAsFixed(0)} again?',
-        confirmLabel: 'Record anyway',
+        title: context.l10n.alreadyCollectedTitle,
+        body: context.l10n.alreadyCollectedRecordAgain(
+          '$currencySymbol${prior.amount.toStringAsFixed(0)}',
+          '${prior.at.hour.toString().padLeft(2, '0')}:${prior.at.minute.toString().padLeft(2, '0')}',
+          '$currencySymbol${amount.toStringAsFixed(0)}',
+        ),
+        confirmLabel: context.l10n.recordAnyway,
         icon: AppIcons.history,
         danger: false,
       );
@@ -1763,9 +1767,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       if (userId == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Session expired. Please sign in again.'),
-            ),
+            SnackBar(content: Text(context.l10n.sessionExpired)),
           );
           setState(() => _loading = false);
         }
@@ -1819,10 +1821,11 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
       if (!backdated) await LocalPaymentGuard.record(inv.memberId, amount);
 
       if (mounted) {
+        final recorded = context.l10n.paymentRecorded;
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Payment recorded'),
+          SnackBar(
+            content: Text(recorded),
             backgroundColor: AppTheme.statusActive,
           ),
         );
@@ -1856,7 +1859,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SheetHeader(
-              title: 'Record payment',
+              title: context.l10n.recordPayment,
               subtitle:
                   '${widget.invoice.member?.fullName ?? 'Member'}'
                   '${widget.invoice.description != null ? ' · ${widget.invoice.description}' : ''}',
@@ -1873,7 +1876,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
             ),
             const SizedBox(height: 4),
             Text(
-              partialPaymentHint,
+              context.l10n.partialPaymentHint,
               style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
             ),
             const SizedBox(height: 16),
@@ -1922,7 +1925,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Record payment'),
+                  : Text(context.l10n.recordPayment),
             ),
           ],
         ),
@@ -2023,7 +2026,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
     if (_selectedMemberId == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Select a member first')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.selectMemberFirst)));
       return;
     }
     if (_amountCtrl.text.trim().isEmpty) return;
@@ -2094,7 +2097,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SheetHeader(title: 'Create invoice'),
+            SheetHeader(title: context.l10n.createInvoice),
             const SizedBox(height: 18),
             const FieldLabel('Member'),
             members.when(
@@ -2103,7 +2106,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
               data: (list) => DropdownButtonFormField<String>(
                 value: _selectedMemberId,
                 isExpanded: true,
-                hint: const Text('Select member'),
+                hint: Text(context.l10n.selectMember),
                 items: list.map((m) {
                   final name =
                       '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
@@ -2131,7 +2134,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
             if (_planHint != null) ...[
               const SizedBox(height: 4),
               Text(
-                'Auto-filled from active plan: $_planHint',
+                context.l10n.autoFilledFromPlan(_planHint!),
                 style: const TextStyle(fontSize: 11.5, color: AppTheme.inkSoft),
               ),
             ],
@@ -2271,7 +2274,9 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                       : const Icon(AppIcons.calendarToday, size: 16),
                 ),
                 child: Text(
-                  _dueAt != null ? formatDateFromString(_dueAt) : 'Select date',
+                  _dueAt != null
+                      ? formatDateFromString(_dueAt)
+                      : context.l10n.selectDate,
                   style: TextStyle(
                     color: _dueAt != null ? AppTheme.ink : AppTheme.inkHint,
                   ),
@@ -2290,7 +2295,7 @@ class _CreateInvoiceSheetState extends ConsumerState<_CreateInvoiceSheet> {
                         strokeWidth: 2,
                       ),
                     )
-                  : const Text('Create & send invoice'),
+                  : Text(context.l10n.createSendInvoice),
             ),
           ],
         ),
@@ -2316,11 +2321,7 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
     final phone = widget.invoice.member?.phone ?? '';
     if (phone.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No phone number saved for this member. Add it in their profile first.',
-          ),
-        ),
+        SnackBar(content: Text(context.l10n.noPhoneAddInProfile)),
       );
       return;
     }
@@ -2380,16 +2381,14 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open WhatsApp')),
+            SnackBar(content: Text(context.l10n.whatsappOpenFailed)),
           );
         }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not generate or upload invoice PDF'),
-          ),
+          SnackBar(content: Text(context.l10n.invoicePdfFailed)),
         );
       }
     } finally {

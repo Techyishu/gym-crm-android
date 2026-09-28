@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../access/gym_permissions.dart';
 import '../../features/auth/providers/auth_provider.dart';
+import '../../l10n/l10n.dart';
 import '../services/data_refresh.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
@@ -150,11 +151,16 @@ class AddFab extends ConsumerWidget {
     if (available.length == 1) {
       final only = available.single;
       return _Fab(
-        label: only.module == GymModule.members ? 'Add member' : 'Add',
+        label: only.module == GymModule.members
+            ? context.l10n.addMember
+            : context.l10n.add,
         onTap: () => _run(context, only),
       );
     }
-    return _Fab(label: 'Add', onTap: () => _openMenu(context, available));
+    return _Fab(
+      label: context.l10n.add,
+      onTap: () => _openMenu(context, available),
+    );
   }
 
   Future<void> _run(BuildContext context, AddAction action) async {
