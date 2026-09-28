@@ -123,6 +123,20 @@ class SettingsScreen extends ConsumerWidget {
               _SectionLabel(label: 'GYM'),
               _SettingsCard(
                 items: [
+                  // Per-gym design switch (gyms.new_home). Owner only: RLS
+                  // lets only the owner update the gym row.
+                  if (profile.valueOrNull?['role'] == 'owner')
+                    _SettingsRow(
+                      icon: AppIcons.layers,
+                      label: usesNewHome(_gymOf(profile.valueOrNull))
+                          ? 'Switch back to the classic design'
+                          : 'Try the new design',
+                      onTap: () => _toggleDesign(
+                        context,
+                        container,
+                        !usesNewHome(_gymOf(profile.valueOrNull)),
+                      ),
+                    ),
                   _SettingsRow(
                     icon: AppIcons.business,
                     label: 'Gym Details',
@@ -594,6 +608,53 @@ class _SettingsCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+Map<String, dynamic>? _gymOf(Map<String, dynamic>? profile) =>
+    profile?['gyms'] as Map<String, dynamic>?;
+
+/// Flips the new/classic design for every gym (branch) this owner has, so all
+/// staff phones and branches match. StaffShell then moves everyone to the
+/// chosen design's Home.
+Future<void> _toggleDesign(
+  BuildContext context,
+  ProviderContainer container,
+  bool toNew,
+) async {
+  final ok = await showConfirmDialog(
+    context,
+    title: toNew ? 'Try the new design?' : 'Switch back to classic?',
+    body: toNew
+        ? 'Home shows every feature as a card, and a new Dashboard shows '
+              'collections, dues, expenses and profit. Money and Check-in '
+              'move onto Home. This changes the app for all your staff and '
+              'branches. You can switch back anytime here.'
+        : 'Your gym goes back to the classic layout for all your staff and '
+              'branches. You can try the new design again anytime here.',
+    confirmLabel: toNew ? 'Switch' : 'Switch back',
+    icon: AppIcons.layers,
+    danger: false,
+  );
+  if (ok != true) return;
+
+  final client = Supabase.instance.client;
+  try {
+    await client
+        .from('gyms')
+        .update({'new_home': toNew})
+        .eq('owner_id', client.auth.currentUser!.id);
+    container.invalidate(staffProfileProvider);
+    // Land on the chosen design's Home (StaffShell also does this when it is
+    // mounted underneath, but Settings can be opened on its own, e.g. web).
+    if (context.mounted) context.go(toNew ? '/staff/home' : '/staff/dashboard');
+  } catch (e) {
+    debugPrint('[GymCRM] design switch failed: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not switch design. Try again.')),
+      );
+    }
   }
 }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../../core/access/gym_permissions.dart';
 import 'add_fab.dart';
@@ -16,7 +17,9 @@ import '../../features/auth/providers/auth_provider.dart';
 import '../../features/staff/home/home_screen.dart';
 import '../../features/staff/notifications/notifications_screen.dart';
 import '../../features/staff/paywall/paywall_screen.dart';
+import '../../shared/widgets/redesign.dart';
 import '../../shared/widgets/responsive_content.dart';
+import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../theme/app_icons.dart';
 
 // Branch indices — must match the StatefulShellRoute order in router.dart.
@@ -71,6 +74,37 @@ class _StaffShellState extends ConsumerState<StaffShell>
     }
   }
 
+  bool? _lastNewHome;
+
+  /// Keeps navigation on the gym's design (`gyms.new_home`): caches the right
+  /// cold-start landing, moves a new-design gym from the router's default
+  /// landing to Home once, moves everyone to their design's Home when an owner
+  /// flips the switch, and never leaves an old-design gym on `/staff/home`.
+  void _syncDesign(bool newHome) {
+    final first = _lastNewHome == null;
+    final flipped = !first && _lastNewHome != newHome;
+    if (first || flipped) {
+      _lastNewHome = newHome;
+      SharedPreferences.getInstance().then(
+        (p) => p.setString(
+          'home_route',
+          newHome ? '/staff/home' : '/staff/dashboard',
+        ),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final router = GoRouter.of(context);
+      final loc = router.routerDelegate.currentConfiguration.uri.path;
+      final home = newHome ? '/staff/home' : '/staff/dashboard';
+      if (flipped ||
+          (first && newHome && loc == '/staff/dashboard') ||
+          (!newHome && loc == '/staff/home')) {
+        if (loc != home) router.go(home);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final shell = widget.shell;
@@ -102,6 +136,9 @@ class _StaffShellState extends ConsumerState<StaffShell>
       if (!hasAccess) return const PaywallScreen();
     }
 
+    final newHome = usesNewHome(gym);
+    if (profileAsync.hasValue) _syncDesign(newHome);
+
     final authNotifier = ref.read(authNotifierProvider.notifier);
     void onSignOut() => authNotifier.signOut();
 
@@ -129,6 +166,7 @@ class _StaffShellState extends ConsumerState<StaffShell>
                       profile: profile,
                       permissions: permissions,
                       onSignOut: onSignOut,
+                      newHome: newHome,
                     ),
                     Expanded(child: content),
                   ],
@@ -136,7 +174,14 @@ class _StaffShellState extends ConsumerState<StaffShell>
               : content,
           bottomNavigationBar: isWide
               ? null
-              : _StaffBottomNav(shell: shell, permissions: permissions),
+              : newHome
+              ? _StaffBottomNav(shell: shell, permissions: permissions)
+              : _OldBottomNav(
+                  shell: shell,
+                  profile: profile,
+                  permissions: permissions,
+                  onSignOut: onSignOut,
+                ),
         );
       },
     );
@@ -150,11 +195,13 @@ class _StaffSideNav extends StatelessWidget {
   final Map<String, dynamic>? profile;
   final GymPermissions permissions;
   final VoidCallback onSignOut;
+  final bool newHome;
   const _StaffSideNav({
     required this.shell,
     required this.profile,
     required this.permissions,
     required this.onSignOut,
+    required this.newHome,
   });
 
   String? get role => profile?['role'] as String?;
@@ -168,10 +215,12 @@ class _StaffSideNav extends StatelessWidget {
     final gym = profile?['gyms'] as Map<String, dynamic>?;
     final gymName = (gym?['name'] as String?) ?? 'Gym';
     // Members already has its own nav row above.
-    final moreItems = visibleStaffFeatures(
-      permissions,
-      role,
-    ).where((f) => f.route != '/staff/members').toList();
+    final moreItems = newHome
+        ? visibleStaffFeatures(
+            permissions,
+            role,
+          ).where((f) => f.route != '/staff/members').toList()
+        : _oldMoreItems(permissions, role);
     final moreActive = moreItems.any(
       (m) => GoRouterState.of(context).matchedLocation.startsWith(m.route),
     );
@@ -216,18 +265,20 @@ class _StaffSideNav extends StatelessWidget {
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
+                  // Old design: the dashboard *is* Home.
                   branchItem(
-                    _homeIndex,
+                    newHome ? _homeIndex : _dashboardIndex,
                     AppIcons.home,
                     AppIcons.homeActive,
                     'Home',
                   ),
-                  branchItem(
-                    _dashboardIndex,
-                    AppIcons.showChart,
-                    AppIcons.showChart,
-                    'Dashboard',
-                  ),
+                  if (newHome)
+                    branchItem(
+                      _dashboardIndex,
+                      AppIcons.showChart,
+                      AppIcons.showChart,
+                      'Dashboard',
+                    ),
                   if (_showMembers)
                     branchItem(
                       _membersIndex,
@@ -481,6 +532,608 @@ class _NavTab extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ══ Old design (gyms.new_home = false) ═══════════════════════════════════════
+// Home · Members · [Check-in] · Money · More — exactly as before the redesign.
+// ponytail: delete this section once every gym is on the new design.
+
+// The old More sheet's 15 items, in its original order (no Members, no Plans).
+const _oldMoreOrder = [
+  '/staff/leads',
+  '/staff/classes',
+  '/staff/workout-plans',
+  '/staff/diet-plans',
+  '/staff/reminders',
+  '/staff/staff',
+  '#gym-branches',
+  '#biometric-device',
+  '#gym-code',
+  '/staff/reports',
+  '/staff/attendance-calendar',
+  '/staff/exports',
+  '/staff/activity-log',
+  '/staff/expenses',
+  '/staff/settings',
+];
+
+List<StaffFeature> _oldMoreItems(GymPermissions permissions, String? role) =>
+    visibleStaffFeatures(permissions, role)
+        .where((f) => _oldMoreOrder.contains(f.route))
+        .toList()
+      ..sort(
+        (a, b) => _oldMoreOrder
+            .indexOf(a.route)
+            .compareTo(_oldMoreOrder.indexOf(b.route)),
+      );
+
+class _OldBottomNav extends ConsumerStatefulWidget {
+  final StatefulNavigationShell shell;
+  final Map<String, dynamic>? profile;
+  final GymPermissions permissions;
+  final VoidCallback onSignOut;
+  const _OldBottomNav({
+    required this.shell,
+    required this.profile,
+    required this.permissions,
+    required this.onSignOut,
+  });
+
+  String? get role => profile?['role'] as String?;
+
+  @override
+  ConsumerState<_OldBottomNav> createState() => _OldBottomNavState();
+}
+
+class _OldBottomNavState extends ConsumerState<_OldBottomNav> {
+  final _membersTourKey = GlobalKey();
+  final _checkInTourKey = GlobalKey();
+  final _moreTourKey = GlobalKey();
+  bool _tourTriggered = false;
+
+  // Visual order: Home · Members · [Check-in center button] · Money · More.
+  // In this design the Dashboard branch is Home.
+  static const _leftTabs = [
+    _Tab(
+      icon: AppIcons.home,
+      activeIcon: AppIcons.homeActive,
+      label: 'Home',
+      index: _dashboardIndex,
+    ),
+    _Tab(
+      icon: AppIcons.people,
+      activeIcon: AppIcons.peopleActive,
+      label: 'Members',
+      index: _membersIndex,
+    ),
+  ];
+  static const _moneyTab = _Tab(
+    icon: AppIcons.payments,
+    activeIcon: AppIcons.paymentsActive,
+    label: 'Money',
+    index: _billingIndex,
+  );
+
+  bool get _showMembers =>
+      widget.permissions.can(GymModule.members, GymAction.view);
+  bool get _showMoney =>
+      widget.permissions.can(GymModule.payments, GymAction.view);
+  bool get _showCheckIn =>
+      widget.permissions.can(GymModule.attendance, GymAction.view);
+
+  List<StaffFeature> get _visibleMoreItems =>
+      _oldMoreItems(widget.permissions, widget.role);
+
+  // Shows the 3-step spotlight tour once per user, the first time this nav
+  // bar builds after the coach-mark data has loaded. Marks steps as seen
+  // right away so a killed app mid-tour won't re-show it.
+  void _maybeStartTour(CoachmarkService service) {
+    if (_tourTriggered) return;
+    _tourTriggered = true;
+
+    try {
+      const stepOrder = [
+        'staff_nav_members',
+        'staff_nav_checkin',
+        'staff_nav_more',
+      ];
+      final keys = <GlobalKey>[];
+      for (final key in stepOrder) {
+        if (key == 'staff_nav_members' && !_showMembers) continue;
+        if (key == 'staff_nav_checkin' && !_showCheckIn) continue;
+        if (!service.shouldShow(key)) continue;
+        if (key == 'staff_nav_members') keys.add(_membersTourKey);
+        if (key == 'staff_nav_checkin') keys.add(_checkInTourKey);
+        if (key == 'staff_nav_more') keys.add(_moreTourKey);
+        service.markSeen(key);
+      }
+      if (keys.isEmpty) return;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        try {
+          ShowCaseWidget.of(context).startShowCase(keys);
+        } catch (_) {
+          // Never let the tour break the dashboard.
+        }
+      });
+    } catch (_) {
+      // Never let the tour break the dashboard.
+    }
+  }
+
+  Future<void> _confirmSignOut(BuildContext context) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Sign out?',
+      body: 'You can sign back in anytime.',
+      confirmLabel: 'Sign out',
+      icon: AppIcons.logout,
+    );
+    if (ok == true) widget.onSignOut();
+  }
+
+  bool _moreActive(BuildContext context) {
+    final loc = GoRouterState.of(context).matchedLocation;
+    return _visibleMoreItems.any((m) => loc.startsWith(m.route));
+  }
+
+  void _openMoreSheet(BuildContext context) {
+    final currentRoute = GoRouterState.of(context).matchedLocation;
+    final items = _visibleMoreItems;
+    showAdaptiveSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _MoreSheet(
+        items: items,
+        currentRoute: currentRoute,
+        profile: widget.profile,
+        onTap: (item) {
+          Navigator.of(context).pop();
+          openStaffFeature(context, item);
+        },
+        onSignOut: () {
+          Navigator.of(context).pop();
+          _confirmSignOut(context);
+        },
+      ),
+    );
+  }
+
+  Widget _branchTab(BuildContext context, _Tab tab, bool moreActive) {
+    final active = widget.shell.currentIndex == tab.index && !moreActive;
+    Widget tabWidget = _NavTab(
+      icon: tab.icon,
+      activeIcon: tab.activeIcon,
+      label: tab.label,
+      active: active,
+      onTap: () => widget.shell.goBranch(
+        tab.index,
+        initialLocation: tab.index == widget.shell.currentIndex,
+      ),
+    );
+    if (tab.index == _membersIndex) {
+      tabWidget = Showcase(
+        key: _membersTourKey,
+        description: 'See and manage all your gym members here.',
+        child: tabWidget,
+      );
+    }
+    return tabWidget;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final coachmarkAsync = ref.watch(coachmarkServiceProvider);
+    coachmarkAsync.whenData(_maybeStartTour);
+
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final moreActive = _moreActive(context);
+    final checkInActive =
+        widget.shell.currentIndex == _checkInIndex && !moreActive;
+
+    return Container(
+      height: 66 + bottomPadding,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomPadding),
+        child: Row(
+          children: [
+            ..._leftTabs
+                .where((tab) => tab.index != _membersIndex || _showMembers)
+                .map((tab) => _branchTab(context, tab, moreActive)),
+            if (_showCheckIn)
+              Expanded(
+                child: Showcase(
+                  key: _checkInTourKey,
+                  description: 'Tap here to check in a member with QR scan.',
+                  child: _CheckInButton(
+                    active: checkInActive,
+                    onTap: () => widget.shell.goBranch(
+                      _checkInIndex,
+                      initialLocation:
+                          _checkInIndex == widget.shell.currentIndex,
+                    ),
+                  ),
+                ),
+              ),
+            if (_showMoney) _branchTab(context, _moneyTab, moreActive),
+            Showcase(
+              key: _moreTourKey,
+              description:
+                  'Find Leads, Classes, Staff, Reports and Settings here.',
+              child: _NavTab(
+                icon: AppIcons.menu,
+                activeIcon: AppIcons.menu,
+                label: 'More',
+                active: moreActive,
+                onTap: () => _openMoreSheet(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Center raised check-in button ─────────────────────────────────────────────
+
+class _CheckInButton extends StatelessWidget {
+  final bool active;
+  final VoidCallback onTap;
+  const _CheckInButton({required this.active, required this.onTap});
+
+  /// It used to be a 54px disc raised out of the bar via an OverflowBox. That
+  /// looked like a bump sitting on the content behind it, and worse: Flutter
+  /// doesn't hit-test outside a parent's bounds, so the protruding top half was
+  /// dead to taps — on the most-used button in the app. It now sits inside the
+  /// bar and shares the row's width like every other tab.
+  // No Expanded here — the call site already wraps this in one (via Showcase),
+  // and a second would not be a direct child of a Flex.
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 38,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? AppTheme.accentDark : AppTheme.accent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              AppIcons.qrScanner,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(height: 3),
+          // The tile stays teal because check-in is a standing action, but
+          // the label follows the same active/inactive rule as every other
+          // tab — otherwise two tabs read as selected at once.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              'Check-in',
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+                color: active ? AppTheme.accent : AppTheme.inkHint,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── More bottom sheet ─────────────────────────────────────────────────────────
+
+class _MoreSheet extends StatelessWidget {
+  final List<StaffFeature> items;
+  final String currentRoute;
+  final Map<String, dynamic>? profile;
+  final void Function(StaffFeature item) onTap;
+  final VoidCallback onSignOut;
+
+  const _MoreSheet({
+    required this.items,
+    required this.currentRoute,
+    required this.profile,
+    required this.onTap,
+    required this.onSignOut,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final gym = profile?['gyms'] as Map<String, dynamic>?;
+    final gymName = (gym?['name'] as String?) ?? 'Gym';
+    final firstName = (profile?['first_name'] as String?) ?? '';
+    final lastName = (profile?['last_name'] as String?) ?? '';
+    final fullName = '$firstName $lastName'.trim();
+    final role = (profile?['role'] as String?) ?? '';
+    final roleLabel = role.isEmpty
+        ? ''
+        : role[0].toUpperCase() + role.substring(1);
+    final initials = _initials(fullName.isEmpty ? gymName : fullName);
+    // Grouped by what the owner is trying to do, in the order they think
+    // about it — bring people in, run the day, program members, set up, look
+    // back — instead of one flat list of every feature.
+    final groups = <String, List<StaffFeature>>{
+      'Grow': [],
+      'Run the gym': [],
+      'Member programs': [],
+      'Setup': [],
+      'Insights': [],
+    };
+    for (final item in items) {
+      final group = switch (item.route) {
+        '/staff/leads' || '/staff/reminders' => 'Grow',
+        '/staff/classes' ||
+        '/staff/staff' ||
+        '/staff/expenses' ||
+        '/staff/attendance-calendar' => 'Run the gym',
+        '/staff/workout-plans' || '/staff/diet-plans' => 'Member programs',
+        '/staff/reports' ||
+        '/staff/exports' ||
+        '/staff/activity-log' => 'Insights',
+        _ => 'Setup',
+      };
+      groups[group]!.add(item);
+    }
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle bar
+          Container(
+            margin: const EdgeInsets.only(top: 10, bottom: 4),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppTheme.border,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // Header row: avatar, gym name + owner/role, sign-out
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkCard,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    initials,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.mintOnDark,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        gymName,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.ink,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          fullName,
+                          roleLabel,
+                        ].where((s) => s.isNotEmpty).join(' · '),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.inkSoft,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onSignOut,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface2,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      AppIcons.logout,
+                      size: 18,
+                      color: AppTheme.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Group management tools by the owner's intent instead of making one
+          // long, equally weighted list.
+          if (items.isNotEmpty)
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.only(bottom: 8 + bottomPadding),
+                children: [
+                  for (final entry in groups.entries)
+                    if (entry.value.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+                        child: Text(
+                          entry.key.toUpperCase(),
+                          style: AppTheme.kicker,
+                        ),
+                      ),
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: AppTheme.cardDecoration(radius: 14),
+                        child: Column(
+                          children: [
+                            for (
+                              var index = 0;
+                              index < entry.value.length;
+                              index++
+                            ) ...[
+                              if (index > 0)
+                                const Divider(
+                                  height: 1,
+                                  indent: 16,
+                                  endIndent: 16,
+                                  color: AppTheme.border,
+                                ),
+                              _MoreRow(
+                                item: entry.value[index],
+                                onTap: () => onTap(entry.value[index]),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static String _initials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) return parts[0].substring(0, 1).toUpperCase();
+    return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
+  }
+}
+
+class _MoreRow extends ConsumerWidget {
+  final StaffFeature item;
+  final VoidCallback onTap;
+  const _MoreRow({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final key = item.newBadgeKey;
+    final coachmark = ref.watch(coachmarkServiceProvider).valueOrNull;
+    final showBadge = key != null && (coachmark?.shouldShow(key) ?? false);
+
+    return InkWell(
+      onTap: () {
+        if (key != null) coachmark?.markSeen(key);
+        onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(item.icon, size: 22, color: AppTheme.ink),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      item.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                  ),
+                  if (showBadge) ...[
+                    const SizedBox(width: 8),
+                    const _NewBadge(),
+                  ],
+                ],
+              ),
+            ),
+            const Icon(AppIcons.chevronRight, size: 20, color: AppTheme.inkHint),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Tab {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final int index;
+  const _Tab({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.index,
+  });
+}
+
+class _NewBadge extends StatelessWidget {
+  const _NewBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.accent,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'NEW',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.4,
+          color: Colors.white,
         ),
       ),
     );

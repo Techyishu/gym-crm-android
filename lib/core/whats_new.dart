@@ -19,6 +19,17 @@ class WhatsNewEntry {
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
     version: '1.0.7+1',
+    date: '27 Sep 2026',
+    title: 'Try the new design',
+    bullets: [
+      'Gym owners can now try a simpler layout: Settings → Try the new design. It changes the app for all your staff and branches, and you can switch back anytime from the same place.',
+      'In the new design, Home shows every feature as a big card — Money, Check-in, Plans, Expenses, Biometric device and more — so nothing is hidden in a menu.',
+      'Plans get their own page in the new design: tap Plans on Home to add or edit a plan or a day pass. Money keeps Dues, Payments and Invoices.',
+      'A new Dashboard tab keeps all the money in one place: collected this month and today, overdue, due in 7 days, profit & loss, collections by payment mode and expenses by category.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.7+1',
     date: '26 Sep 2026',
     title: 'Pick the payment date and valid till',
     bullets: [

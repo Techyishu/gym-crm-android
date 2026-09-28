@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../access/gym_permissions.dart';
+import '../../features/auth/providers/auth_provider.dart';
 import '../services/data_refresh.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
@@ -126,7 +127,20 @@ class AddFab extends ConsumerWidget {
     final owned = location == '/staff/dashboard' || location == '/staff/home'
         ? _actions
         : addActionsForRoute(location);
-    final available = owned.where(allowed).toList();
+    // New design: plans live on their own Plans page, so Money adds invoices only.
+    final newHome = usesNewHome(
+      ref.watch(staffProfileProvider).valueOrNull?['gyms']
+          as Map<String, dynamic>?,
+    );
+    final available = owned
+        .where(allowed)
+        .where(
+          (a) =>
+              !(newHome &&
+                  location == '/staff/billing' &&
+                  a.module == GymModule.memberships),
+        )
+        .toList();
     if (available.isEmpty) return const SizedBox.shrink();
 
     // One add — open its form straight away. Members is the only screen that

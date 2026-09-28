@@ -25,6 +25,7 @@ import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/review_prompt.dart';
+import '../../../core/widgets/new_design_back_button.dart';
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
@@ -425,9 +426,7 @@ class _TxnItem {
 }
 
 class BillingScreen extends ConsumerStatefulWidget {
-  /// `?tab=plans` from Home's Plans card; null opens Dues as before.
-  final String? initialTab;
-  const BillingScreen({super.key, this.initialTab});
+  const BillingScreen({super.key});
 
   @override
   ConsumerState<BillingScreen> createState() => _BillingScreenState();
@@ -436,7 +435,7 @@ class BillingScreen extends ConsumerStatefulWidget {
 class _BillingScreenState extends ConsumerState<BillingScreen> {
   // Dues · Payments · Invoices · Plans
   static const _tabs = ['Dues', 'Payments', 'Invoices', 'Plans'];
-  late int _tab = widget.initialTab == 'plans' ? 3 : 0;
+  int _tab = 0;
 
   // Sub-filter inside the Dues tab: 'overdue' | 'week' | 'all'.
   String _bucket = 'overdue';
@@ -498,6 +497,13 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     final custom = customRange == null
         ? null
         : ref.watch(_customPaymentsProvider(customRange));
+    // New design: Plans has its own page (Home → Plans), so Money shows only
+    // Dues · Payments · Invoices.
+    final newHome = usesNewHome(
+      ref.watch(staffProfileProvider).valueOrNull?['gyms']
+          as Map<String, dynamic>?,
+    );
+    final tab = newHome && _tab == 3 ? 0 : _tab;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -513,6 +519,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                   children: [
                     Row(
                       children: [
+                        const NewDesignBackButton(route: '/staff/billing'),
                         Expanded(
                           child: _searching
                               ? TextField(
@@ -580,16 +587,16 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                     ),
                     const SizedBox(height: 14),
                     UnderlineTabs(
-                      tabs: _tabs,
-                      selectedIndex: _tab,
+                      tabs: newHome ? _tabs.sublist(0, 3) : _tabs,
+                      selectedIndex: tab,
                       onChanged: (i) => setState(() => _tab = i),
                     ),
                   ],
                 ),
               ),
               Expanded(
-                child: _tab == 3
-                    ? const _PlansBody()
+                child: tab == 3
+                    ? const PlansBody()
                     : RefreshIndicator(
                         color: AppTheme.accent,
                         onRefresh: () async {
@@ -614,7 +621,7 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
                               ),
                             ],
                           ),
-                          data: (data) => _tab == 0
+                          data: (data) => tab == 0
                               ? _duesTab(context, data)
                               : _ledgerTab(context, data, custom),
                         ),
@@ -2421,8 +2428,10 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
 
 // ── Plans Tab ─────────────────────────────────────────────────────────────────
 
-class _PlansBody extends ConsumerWidget {
-  const _PlansBody();
+/// The plans list with its Add plan / Add day pass buttons. Money's Plans tab
+/// in the old design, and the whole of the Plans page in the new one.
+class PlansBody extends ConsumerWidget {
+  const PlansBody({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

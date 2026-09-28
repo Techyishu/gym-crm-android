@@ -11,10 +11,11 @@ import '../../../core/services/data_refresh.dart';
 import '../../../core/services/review_prompt.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/new_design_back_button.dart';
 import '../../../shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
-import '../dashboard/dashboard_screen.dart'
+import '../dashboard/money_dashboard_screen.dart'
     show dashboardDataProvider, SetupChecklist, BirthdaysToday;
 import '../members/members_screen.dart' show showAddMemberSheet;
 import '../notifications/notifications_screen.dart';
@@ -58,9 +59,6 @@ class StaffFeature {
   });
 }
 
-// Plans lives as a tab of the Money screen; the query opens it there.
-const kPlansRoute = '/staff/billing?tab=plans';
-
 // Badge keys track whats_new.dart: a feature announced there gets one here,
 // and the previous release's keys get `enabled = false` in coachmark_config
 // at the same time. Retiring a badge is a SQL flip, never an app update —
@@ -75,7 +73,7 @@ const kStaffFeatures = [
   StaffFeature(
     icon: AppIcons.cardMembership,
     label: 'Plans',
-    route: kPlansRoute,
+    route: '/staff/plans',
     group: 'Run the gym',
   ),
   StaffFeature(
@@ -191,7 +189,7 @@ List<StaffFeature> visibleStaffFeatures(
 
   return switch (item.route) {
     '/staff/members' => can(GymModule.members),
-    kPlansRoute => can(GymModule.memberships),
+    '/staff/plans' => can(GymModule.memberships),
     '/staff/classes' => can(GymModule.batches),
     '/staff/leads' => can(GymModule.leads),
     '/staff/workout-plans' => can(GymModule.pt),
@@ -333,7 +331,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           label: 'Money',
                           hint: 'Dues, payments, invoices',
                           dark: true,
-                          onTap: () => context.push('/staff/billing'),
+                          onTap: () => openWithReturn(context, '/staff/billing'),
                         ),
                       ),
                     if (canMoney && canCheckIn) const SizedBox(width: 10),
@@ -343,7 +341,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           icon: AppIcons.qrScanner,
                           label: 'Check-in',
                           hint: 'Scan or mark attendance',
-                          onTap: () => context.push('/staff/check-in'),
+                          onTap: () => openWithReturn(context, '/staff/check-in'),
                         ),
                       ),
                   ],
@@ -368,7 +366,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         child: _ActionTile(
                           icon: AppIcons.payments,
                           label: 'Collect payment',
-                          onTap: () => context.push('/staff/billing'),
+                          onTap: () => openWithReturn(context, '/staff/billing'),
                         ),
                       ),
                   ],

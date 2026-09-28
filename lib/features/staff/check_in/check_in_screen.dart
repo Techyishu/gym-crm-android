@@ -23,6 +23,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
+import '../../../core/widgets/new_design_back_button.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -443,6 +444,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
     final fg = onDark ? AppTheme.onDark : AppTheme.ink;
     return Row(
       children: [
+        NewDesignBackButton(route: '/staff/check-in', onDark: onDark),
         Text(
           'Check-in',
           style: TextStyle(

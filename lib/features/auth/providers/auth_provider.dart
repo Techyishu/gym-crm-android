@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -105,10 +107,41 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
       .eq('id', activeGymId)
       .maybeSingle();
 
+  // The design switch is read on its own so it can never break the gym load
+  // above. The last value read is kept on the phone per gym: when this read
+  // fails (patchy front-desk Wi-Fi) the gym keeps its current design instead
+  // of bouncing to the old one and back. Never read yet (or the migration
+  // isn't live) = old design.
+  if (gym != null) {
+    final cacheKey = 'new_home_$activeGymId';
+    try {
+      final row = await client
+          .from('gyms')
+          .select('new_home')
+          .eq('id', activeGymId)
+          .maybeSingle();
+      final newHome = row?['new_home'] == true;
+      gym['new_home'] = newHome;
+      unawaited(
+        SharedPreferences.getInstance().then(
+          (p) => p.setBool(cacheKey, newHome),
+        ),
+      );
+    } catch (e) {
+      final prefs = await SharedPreferences.getInstance();
+      gym['new_home'] = prefs.getBool(cacheKey) ?? false;
+      debugPrint('[GymCRM] new_home read failed, using cached value: $e');
+    }
+  }
+
   final settings = gym?['settings'];
   setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
   return {...profile, 'gyms': gym};
 });
+
+/// Whether this gym uses the new staff design (3-tab nav, card Home, money
+/// Dashboard) — the per-gym `gyms.new_home` switch. Missing/unknown = old.
+bool usesNewHome(Map<String, dynamic>? gym) => gym?['new_home'] == true;
 
 // Convenience provider: just the role string for the current staff user.
 final staffRoleProvider = FutureProvider<String?>((ref) async {

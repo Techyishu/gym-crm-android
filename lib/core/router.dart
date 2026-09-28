@@ -21,11 +21,14 @@ import '../features/auth/screens/forgot_password_screen.dart';
 import '../features/staff/gym_setup/gym_setup_screen.dart';
 import '../features/staff/onboarding/first_setup_screen.dart';
 import '../features/staff/dashboard/dashboard_screen.dart';
+import '../features/staff/dashboard/money_dashboard_screen.dart'
+    show MoneyDashboardScreen;
 import '../features/staff/home/home_screen.dart';
 import '../features/staff/members/members_screen.dart';
 import '../features/staff/members/member_detail_screen.dart';
 import '../features/staff/members/payments_due_screen.dart';
 import '../features/staff/billing/billing_screen.dart';
+import '../features/staff/billing/plans_screen.dart';
 import '../features/staff/paywall/paywall_screen.dart';
 import '../features/staff/classes/classes_screen.dart';
 import '../features/staff/check_in/check_in_screen.dart';
@@ -116,11 +119,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (signupHandshakeInProgress.value) return null;
 
       final prefs = _sharedPrefs ??= await SharedPreferences.getInstance();
-      // Staff landing moved from the dashboard to the new Home; upgrade the
-      // cached value from older installs once.
-      if (prefs.getString('home_route') == '/staff/dashboard') {
-        await prefs.setString('home_route', '/staff/home');
-      }
 
       // External deep links (gymcrm://payment-success, io.supabase.gymcrm://
       // login-callback) get forwarded here by the Android engine as a raw
@@ -246,12 +244,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
 
         if (results[0] != null) {
-          await prefs.setString('home_route', '/staff/home');
+          // The old design's landing. StaffShell moves new-design gyms to
+          // /staff/home once the gym row (and its new_home flag) has loaded,
+          // and caches the right landing for the next cold start.
+          await prefs.setString('home_route', '/staff/dashboard');
           // Navigation is a convenience layer, not the security boundary (RLS
           // remains authoritative), but never render a portal or hidden screen
           // merely because someone guessed its URL.
           if (isMemberRoute || loc == '/gym-setup' || isAuthRoute) {
-            return '/staff/home';
+            return '/staff/dashboard';
           }
           // Per-staff permissions are branch-specific and load through
           // Riverpod. Route builders below render a meaningful denied state;
@@ -318,14 +319,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/gym-setup', builder: (_, __) => const GymSetupScreen()),
 
       // Staff shell — 5 branches: Home, Dashboard, Members, Billing, Check-in.
-      // Only the first three are bottom-nav tabs; Billing and Check-in open
-      // from Home cards.
+      // Both designs share them (gyms.new_home picks the nav in StaffShell):
+      // old design = Dashboard is Home, plus Members/Money/Check-in tabs;
+      // new design = Home · Dashboard · Members tabs, Money and Check-in
+      // open from Home cards.
       StatefulShellRoute.indexedStack(
         builder: (_, __, shell) => StaffShell(shell: shell),
         branches: [
-          // 0 — Home (feature cards)
+          // 0 — Home (feature cards, new design only)
           StatefulShellBranch(
-            navigatorKey: _staffNavigatorKey,
             routes: [
               GoRoute(
                 path: '/staff/home',
@@ -333,12 +335,14 @@ final routerProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
-          // 1 — Dashboard (the previous home screen, unchanged)
+          // 1 — Dashboard: the old design's Home, or the new design's
+          // money-only Dashboard tab.
           StatefulShellBranch(
+            navigatorKey: _staffNavigatorKey,
             routes: [
               GoRoute(
                 path: '/staff/dashboard',
-                builder: (_, __) => const DashboardScreen(),
+                builder: (_, __) => const _StaffDashboard(),
               ),
             ],
           ),
@@ -372,11 +376,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/staff/billing',
-                builder: (_, state) => PermissionGate(
+                builder: (_, __) => const PermissionGate(
                   module: GymModule.payments,
-                  child: BillingScreen(
-                    initialTab: state.uri.queryParameters['tab'],
-                  ),
+                  child: BillingScreen(),
                 ),
               ),
             ],
@@ -416,6 +418,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/subscription',
         builder: (_, __) => const SubscriptionScreen(),
+      ),
+      // New design's Plans page (Home → Plans); old design keeps Money's tab.
+      GoRoute(
+        parentNavigatorKey: rootNavigatorKey,
+        path: '/staff/plans',
+        builder: (_, __) => const PermissionGate(
+          module: GymModule.memberships,
+          child: PlansScreen(),
+        ),
       ),
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
@@ -637,3 +648,19 @@ final routerProvider = Provider<GoRouter>((ref) {
 
   return router;
 });
+
+/// `/staff/dashboard` for the gym's design: the old Home (unchanged) or the
+/// new money-only Dashboard. See `usesNewHome`.
+class _StaffDashboard extends ConsumerWidget {
+  const _StaffDashboard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final gym =
+        ref.watch(staffProfileProvider).valueOrNull?['gyms']
+            as Map<String, dynamic>?;
+    return usesNewHome(gym)
+        ? const MoneyDashboardScreen()
+        : const DashboardScreen();
+  }
+}
