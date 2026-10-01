@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1677,7 +1677,10 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   double _planPrice = 0;
   double _planDiscountAmount = 0;
   String _paymentMethod = 'cash';
-  File? _avatarFile;
+  // XFile bytes, not dart:io File — File(path) throws on Flutter web, where
+  // picked.path is a blob URL, so adding a member with a photo failed there.
+  XFile? _avatarFile;
+  Uint8List? _avatarBytes;
   bool _loading = false;
 
   /// Email / next payment date / notes stay folded away until asked for.
@@ -1770,23 +1773,30 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
       maxWidth: 800,
       imageQuality: 85,
     );
-    if (picked != null && mounted)
-      setState(() => _avatarFile = File(picked.path));
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (mounted) {
+      setState(() {
+        _avatarFile = picked;
+        _avatarBytes = bytes;
+      });
+    }
   }
 
   Future<String?> _uploadAvatar(String gymId) async {
-    if (_avatarFile == null) return null;
-    final ext = _avatarFile!.path.split('.').last.toLowerCase();
+    if (_avatarFile == null || _avatarBytes == null) return null;
+    final ext = _avatarFile!.name.contains('.')
+        ? _avatarFile!.name.split('.').last.toLowerCase()
+        : 'jpg';
     final mime = ext == 'png'
         ? 'image/png'
         : ext == 'webp'
         ? 'image/webp'
         : 'image/jpeg';
     final filename = '$gymId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    final bytes = await _avatarFile!.readAsBytes();
     await MemberPhotoService.upload(
       path: filename,
-      bytes: bytes,
+      bytes: _avatarBytes!,
       contentType: mime,
     );
     // Stored value is the bare path; display resolves it via the photo Worker.
@@ -2189,8 +2199,8 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
               borderRadius: BorderRadius.circular(16),
             ),
             clipBehavior: Clip.antiAlias,
-            child: _avatarFile != null
-                ? Image.file(_avatarFile!, fit: BoxFit.cover)
+            child: _avatarBytes != null
+                ? Image.memory(_avatarBytes!, fit: BoxFit.cover)
                 : const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

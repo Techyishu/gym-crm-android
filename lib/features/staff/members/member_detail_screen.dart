@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -2618,7 +2619,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
   String? _bloodGroup;
   late final TextEditingController _emergencyNameCtrl;
   late final TextEditingController _emergencyPhoneCtrl;
-  File? _avatarFile;
+  XFile? _avatarFile;
+  Uint8List? _avatarBytes;
   bool _loading = false;
   bool _moreDetails = false;
 
@@ -2699,14 +2701,22 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
       maxWidth: 800,
       imageQuality: 85,
     );
-    if (picked != null && mounted)
-      setState(() => _avatarFile = File(picked.path));
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (mounted) {
+      setState(() {
+        _avatarFile = picked;
+        _avatarBytes = bytes;
+      });
+    }
   }
 
   Future<String?> _uploadAvatar() async {
-    if (_avatarFile == null) return null;
+    if (_avatarFile == null || _avatarBytes == null) return null;
     final gymId = widget.member.gymId;
-    final ext = _avatarFile!.path.split('.').last.toLowerCase();
+    final ext = _avatarFile!.name.contains('.')
+        ? _avatarFile!.name.split('.').last.toLowerCase()
+        : 'jpg';
     final mime = ext == 'png'
         ? 'image/png'
         : ext == 'webp'
@@ -2715,10 +2725,9 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
     // Stable per-member path: re-uploads overwrite the same object instead of
     // accumulating a new orphaned file (and egress cost) on every edit.
     final filename = '$gymId/${widget.member.id}.$ext';
-    final bytes = await _avatarFile!.readAsBytes();
     await MemberPhotoService.upload(
       path: filename,
-      bytes: bytes,
+      bytes: _avatarBytes!,
       contentType: mime,
     );
     // Stored value is the bare path; display resolves it via the photo Worker.
@@ -2897,8 +2906,8 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: _avatarFile != null
-                    ? Image.file(_avatarFile!, fit: BoxFit.cover)
+                child: _avatarBytes != null
+                    ? Image.memory(_avatarBytes!, fit: BoxFit.cover)
                     : MemberPhoto(
                         stored: widget.member.avatarUrl,
                         fallback: Center(
