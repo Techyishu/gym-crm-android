@@ -66,9 +66,20 @@ class _StaffShellState extends ConsumerState<StaffShell>
     super.dispose();
   }
 
+  DateTime? _lastResumeRefresh;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // At most once a minute: "resumed" also fires on every window focus
+      // change (web, split screen, pulling down the notification shade), and
+      // each one re-ran the whole profile + gym + notifications load.
+      final now = DateTime.now();
+      if (_lastResumeRefresh != null &&
+          now.difference(_lastResumeRefresh!) < const Duration(minutes: 1)) {
+        return;
+      }
+      _lastResumeRefresh = now;
       ref.invalidate(unreadNotificationCountProvider);
       ref.invalidate(staffNotificationsProvider);
       // Re-read the gym row so an expiry that happened while the app sat in

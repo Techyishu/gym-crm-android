@@ -4613,6 +4613,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Rent, salary, equipment, utilities'**
   String get addMenuExpenseHint;
+
+  /// No description provided for @saveAndAddNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Save & add next'**
+  String get saveAndAddNext;
+
+  /// No description provided for @discardMemberTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard this member?'**
+  String get discardMemberTitle;
+
+  /// No description provided for @discardMemberBody.
+  ///
+  /// In en, this message translates to:
+  /// **'What you typed for this member will be lost.'**
+  String get discardMemberBody;
+
+  /// No description provided for @discard.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get discard;
+
+  /// No description provided for @keepEditing.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep editing'**
+  String get keepEditing;
 }
 
 class _AppLocalizationsDelegate

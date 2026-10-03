@@ -18,6 +18,17 @@ class WhatsNewEntry {
 
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
+    version: '1.0.3+61',
+    date: '3 Oct 2026',
+    title: 'Add many members quickly',
+    bullets: [
+      'Add member now opens as a full page, with more room and the buttons always at the bottom.',
+      'New Save & add next button: saves the member and gives you an empty form for the next one — handy when you are entering your whole register.',
+      'Pressed back by mistake? The app now asks before throwing away what you typed.',
+      'The Due amount on the Members list now updates right after you add a member or collect a payment.',
+    ],
+  ),
+  WhatsNewEntry(
     version: '1.0.3+60',
     date: '28 Sep 2026',
     title: 'Use the app in Hindi',

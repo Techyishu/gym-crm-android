@@ -55,6 +55,9 @@ final _membersProvider = FutureProvider<List<Member>>((ref) async {
 // Outstanding due per member, gym-wide, fetched in one batched query so the
 // list can show a "Due" badge without an N+1 query per row.
 final _membersDueProvider = FutureProvider<Map<String, double>>((ref) async {
+  // Same refetch trigger as the list: without it a new member's due, or a
+  // just-collected payment, didn't show until a manual refresh.
+  ref.watch(gymDataVersionProvider);
   final gymId = await ref.watch(gymIdProvider.future);
   final invoices = await Supabase.instance.client
       .from('invoices')
@@ -1383,14 +1386,12 @@ class _NoPlansBox extends StatelessWidget {
 /// sheet closes for any reason (saved or dismissed); callers invalidate
 /// whatever provider they own.
 Future<void> showAddMemberSheet(BuildContext context) async {
-  final added = await showAdaptiveSheet<Map<String, dynamic>>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    maxWidth: 820,
-    maxHeight: 760,
-    builder: (_) => const AddMemberSheet(),
-  );
+  // A full page (both designs) with "Save & add next" for adding members back
+  // to back, and a discard check instead of a swipe that loses typed data.
+  final added = await Navigator.of(context, rootNavigator: true)
+      .push<Map<String, dynamic>>(
+        MaterialPageRoute(builder: (_) => const _AddMemberPage()),
+      );
   if (added == null || !context.mounted) return;
   await showAdaptiveSheet(
     context: context,
@@ -1643,8 +1644,42 @@ class _AddMemberException implements Exception {
   const _AddMemberException(this.message);
 }
 
+/// New design's Add member page. Each "Save & add next" swaps in a fresh form
+/// (new key), so every field starts empty like the first time.
+class _AddMemberPage extends StatefulWidget {
+  const _AddMemberPage();
+
+  @override
+  State<_AddMemberPage> createState() => _AddMemberPageState();
+}
+
+class _AddMemberPageState extends State<_AddMemberPage> {
+  int _round = 0;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: AppTheme.background,
+    appBar: AppBar(
+      title: Text(context.l10n.addMember),
+      leading: const BackButton(),
+    ),
+    body: SafeArea(
+      top: false,
+      child: ResponsiveContent(
+        child: AddMemberSheet(
+          key: ValueKey(_round),
+          onAddedNext: () => setState(() => _round++),
+        ),
+      ),
+    ),
+  );
+}
+
 class AddMemberSheet extends ConsumerStatefulWidget {
-  const AddMemberSheet({super.key});
+  /// Set only on the new design's page: shows "Save & add next", which calls
+  /// this after a save instead of closing.
+  final VoidCallback? onAddedNext;
+  const AddMemberSheet({super.key, this.onAddedNext});
 
   @override
   ConsumerState<AddMemberSheet> createState() => _AddMemberSheetState();
@@ -1685,6 +1720,40 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
 
   /// Email / next payment date / notes stay folded away until asked for.
   bool _moreDetails = false;
+
+  bool get _asPage => widget.onAddedNext != null;
+
+  /// Nothing typed yet — leaving the page needs no "discard?" check.
+  bool get _isBlank =>
+      _avatarBytes == null &&
+      [
+        _nameCtrl,
+        _phoneCtrl,
+        _emailCtrl,
+        _customIdCtrl,
+        _notesCtrl,
+        _paidAmountCtrl,
+        _emergencyNameCtrl,
+        _emergencyPhoneCtrl,
+      ].every((c) => c.text.trim().isEmpty);
+
+  Future<void> _confirmLeave() async {
+    if (_loading) return;
+    final nav = Navigator.of(context);
+    if (_isBlank) {
+      nav.pop();
+      return;
+    }
+    final l = context.l10n;
+    final discard = await showConfirmDialog(
+      context,
+      title: l.discardMemberTitle,
+      body: l.discardMemberBody,
+      cancelLabel: l.keepEditing,
+      confirmLabel: l.discard,
+    );
+    if (discard == true && mounted) nav.pop();
+  }
 
   double get _planAmount =>
       (_planPrice - _planDiscountAmount).clamp(0, _planPrice);
@@ -1840,7 +1909,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     }
   }
 
-  Future<void> _save() async {
+  Future<void> _save({bool addNext = false}) async {
     final l = context.l10n;
     if (!_formKey.currentState!.validate()) return;
     // With zero plans the dropdown isn't in the tree, so validate() can't catch
@@ -2084,6 +2153,15 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             ),
           );
         }
+        if (addNext) {
+          if (!paymentNotRecorded) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(l.memberAdded(_nameCtrl.text.trim()))),
+            );
+          }
+          widget.onAddedNext!();
+          return;
+        }
         Navigator.pop(context, <String, dynamic>{
           'id': inserted['id'] as String,
           'name': _nameCtrl.text.trim(),
@@ -2119,11 +2197,13 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     // left them shorter than the tap-to-open boxes beside them (joining date,
     // member ID, blood group, plan), and a form of mismatched box heights
     // reads worse than a slightly taller one.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    final form = Column(
+      mainAxisSize: _asPage ? MainAxisSize.max : MainAxisSize.min,
       children: [
-        SheetTopBar(title: context.l10n.addMember),
+        if (!_asPage) SheetTopBar(title: context.l10n.addMember),
         Flexible(
+          // Page: fill the screen so the buttons sit at the bottom.
+          fit: _asPage ? FlexFit.tight : FlexFit.loose,
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
             child: Form(
@@ -2155,31 +2235,62 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
             16,
             12,
             16,
-            MediaQuery.of(context).viewInsets.bottom + 16,
+            // The page's Scaffold already lifts the body above the keyboard.
+            (_asPage ? 0 : MediaQuery.of(context).viewInsets.bottom) + 16,
           ),
           decoration: const BoxDecoration(
             color: AppTheme.surface,
             border: Border(top: BorderSide(color: AppTheme.border)),
           ),
-          child: SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton(
-              onPressed: _loading ? null : _save,
-              child: _loading
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : Text(context.l10n.addMember),
-            ),
+          child: Row(
+            children: [
+              if (_asPage) ...[
+                Expanded(
+                  child: OutlinedButton(
+                    // Local minimumSize: the theme's full-width default would
+                    // squeeze the sibling button in this Row.
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 52),
+                    ),
+                    onPressed: _loading ? null : () => _save(addNext: true),
+                    child: Text(
+                      context.l10n.saveAndAddNext,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _save,
+                    child: _loading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(context.l10n.addMember),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
+    );
+    if (!_asPage) return form;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmLeave();
+      },
+      child: form,
     );
   }
 

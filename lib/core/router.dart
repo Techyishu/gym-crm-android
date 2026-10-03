@@ -80,6 +80,15 @@ String? _gymSetupResolvedFor;
 /// Cleared on sign-out, same as the guard above.
 String? _consentCheckedFor;
 
+/// The staff/member role lookup, shared per user for the session. Redirect
+/// runs several times on a cold start (initial route, auth event, the shell's
+/// own navigation) and each run used to repeat the same two queries — about
+/// 1.3s of startup. Concurrent runs await the same Future. Only a found role
+/// is kept: "neither yet" (mid-signup, unlinked member) must be re-checked.
+/// Cleared on sign-out.
+String? _roleLookupFor;
+Future<List<dynamic>>? _roleLookup;
+
 /// Set by setupGym(), cleared when the owner leaves the first-setup wizard.
 /// A plain `context.go('/staff/first-setup')` can't survive the trip: the DPDP
 /// consent gate below outranks it on a first signup, and the consent screen
@@ -161,6 +170,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         // "Logging in…" — the session had actually already been created.
         _gymSetupResolvedFor = null;
         _consentCheckedFor = null;
+        _roleLookupFor = null;
+        _roleLookup = null;
         _sharedPrefs =
             null; // Force re-init next time so the cleared key is visible
         // /welcome (canvas "Who is signing in?") is the real landing page —
@@ -226,8 +237,9 @@ final routerProvider = Provider<GoRouter>((ref) {
 
         final client = Supabase.instance.client;
         List<dynamic> results;
-        try {
-          results = await Future.wait([
+        if (_roleLookupFor != user.id || _roleLookup == null) {
+          _roleLookupFor = user.id;
+          _roleLookup = Future.wait([
             client
                 .from('profiles')
                 .select('id, role')
@@ -239,7 +251,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                 .eq('user_id', user.id)
                 .maybeSingle(),
           ]);
+        }
+        try {
+          results = await _roleLookup!;
+          if (results[0] == null && results[1] == null) _roleLookup = null;
         } catch (e) {
+          _roleLookup = null;
           debugPrint('[GymCRM] router redirect lookup failed: $e');
           // Network/DB hiccup — stay put; redirect re-runs on the next auth/nav event.
           return null;
