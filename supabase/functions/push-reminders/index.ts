@@ -1,12 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendPush } from '../_shared/fcm.ts'
 
 // Runs daily via pg_cron -> net.http_post. For every gym with push reminders
 // enabled, finds members whose next_payment_date lands exactly on one of the
-// gym's configured day-offsets and sends a OneSignal push to their device
-// (targeted by external_id == members.user_id, set via OneSignal.login in the app).
+// gym's configured day-offsets and sends an FCM push to their devices
+// (device_tokens rows for members.user_id, written by the app after sign-in).
 
-const ONESIGNAL_APP_ID = Deno.env.get('ONESIGNAL_APP_ID')!
-const ONESIGNAL_REST_API_KEY = Deno.env.get('ONESIGNAL_REST_API_KEY')!
 const CRON_SECRET = Deno.env.get('CRON_SECRET')!
 
 function dateStr(d: Date) {
@@ -61,33 +60,12 @@ Deno.serve(async (req) => {
       }
       if (!members?.length) continue
 
-      const externalIds = members.map(m => m.user_id as string)
-      const body = {
-        app_id: ONESIGNAL_APP_ID,
-        include_aliases: { external_id: externalIds },
-        target_channel: 'push',
-        headings: { en: 'Membership renewal' },
-        contents: {
-          en: `Your gym membership expires in ${daysBefore} day${daysBefore === 1 ? '' : 's'}. Renew to keep your access!`,
-        },
+      const { ok, error } = await sendPush(supabase, members.map(m => m.user_id as string), {
+        title: 'Membership renewal',
+        body: `Your gym membership expires in ${daysBefore} day${daysBefore === 1 ? '' : 's'}. Renew to keep your access!`,
         data: { type: 'renewal_reminder', gym_id: gym.id, days_before: daysBefore },
-      }
-
-      let ok = false
-      try {
-        const res = await fetch('https://api.onesignal.com/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
-          },
-          body: JSON.stringify(body),
-        })
-        ok = res.ok
-        if (!ok) console.error(`[push-reminders] OneSignal error (gym ${gym.id}):`, await res.text())
-      } catch (e) {
-        console.error(`[push-reminders] fetch error (gym ${gym.id}):`, (e as Error).message)
-      }
+      })
+      if (!ok) console.error(`[push-reminders] FCM error (gym ${gym.id}):`, error)
 
       const logRows = members.map(m => ({
         gym_id: gym.id,

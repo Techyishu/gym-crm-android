@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendPush } from '../_shared/fcm.ts'
 
 // Runs daily via pg_cron -> public.trigger_whatsapp_credit_push(). Pushes the
 // gym OWNER (external_id == profiles.id, role='owner') when their WhatsApp
@@ -8,8 +9,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // Mirrors billing-expiry-push's notifications_log dedupe so a gym gets at
 // most one push per state (low / exhausted) per day, not one every cron tick.
 
-const ONESIGNAL_APP_ID = Deno.env.get('ONESIGNAL_APP_ID')!
-const ONESIGNAL_REST_API_KEY = Deno.env.get('ONESIGNAL_REST_API_KEY')!
 const CRON_SECRET = Deno.env.get('CRON_SECRET')!
 
 const LOW_THRESHOLD = 10
@@ -94,28 +93,11 @@ Deno.serve(async (req) => {
 
     const url = '/staff/reminders'
 
-    let ok = false
-    let errorText = ''
-    try {
-      const res = await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Key ${ONESIGNAL_REST_API_KEY}` },
-        body: JSON.stringify({
-          app_id: ONESIGNAL_APP_ID,
-          include_aliases: { external_id: [owner.id] },
-          target_channel: 'push',
-          headings: { en: title },
-          contents: { en: body },
-          // Not using top-level "url" — OneSignal's native SDK auto-opens it
-          // externally, bypassing our own in-app click handling.
-          data: { type, gym_id: gym.id, remaining, deep_link: url },
-        }),
-      })
-      ok = res.ok
-      if (!ok) errorText = await res.text()
-    } catch (e) {
-      errorText = (e as Error).message
-    }
+    const { ok, error: errorText } = await sendPush(supabase, [owner.id], {
+      title,
+      body,
+      data: { type, gym_id: gym.id, remaining, deep_link: url },
+    })
 
     await supabase.from('notifications_log').insert({
       gym_id: gym.id,
@@ -130,7 +112,7 @@ Deno.serve(async (req) => {
       await supabase.from('staff_notifications').insert({ user_id: owner.id, gym_id: gym.id, title, body, url })
       sent++
     } else {
-      console.error(`[whatsapp-credit-push] OneSignal error (gym ${gym.id}):`, errorText)
+      console.error(`[whatsapp-credit-push] FCM error (gym ${gym.id}):`, errorText)
       failed++
     }
   }

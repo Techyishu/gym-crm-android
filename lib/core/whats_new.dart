@@ -18,6 +18,16 @@ class WhatsNewEntry {
 
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
+    version: '1.0.3+60',
+    date: '28 Sep 2026',
+    title: 'Use the app in Hindi',
+    bullets: [
+      'The app now speaks Hindi. Go to Settings → Language / भाषा and pick हिन्दी. It changes only this phone — your staff can each pick their own language.',
+      'Your member names, plans and amounts stay exactly as you typed them. Invoices and WhatsApp messages to members stay in English.',
+      'Some screens are still in English and will switch to Hindi in the next updates.',
+    ],
+  ),
+  WhatsNewEntry(
     version: '1.0.7+1',
     date: '27 Sep 2026',
     title: 'Try the new design',

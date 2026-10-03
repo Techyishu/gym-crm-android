@@ -1824,7 +1824,13 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                       : context.l10n.changePlan,
                 ),
                 const SizedBox(height: 16),
-                ...plans.map((p) {
+                // Plan list scrolls; the Switch button below stays pinned so
+                // it's reachable however many plans the gym has.
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: plans.map((p) {
                   final id = p['id'] as String;
                   final selected = picked == id;
                   return Padding(
@@ -1869,7 +1875,10 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                       ),
                     ),
                   );
-                }),
+                      }).toList(),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 ElevatedButton(
                   // Pops with the sheet's own context, not the screen's. The

@@ -48,7 +48,7 @@
       "name": "flutter-web-static",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
-        "/private/tmp/claude-501/-Users-wiredtechie-Desktop-gym-crm-android/2ce3ba55-9992-4c8e-ab98-ee298fcac1fb/scratchpad/spa_server.py"
+        "/private/tmp/claude-501/-Users-wiredtechie-Desktop-gym-crm-android/179891cd-5769-4d48-9435-fb2207213f8d/scratchpad/spa_server.py"
       ],
       "port": 8080
     }

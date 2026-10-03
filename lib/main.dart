@@ -12,7 +12,7 @@ import 'app.dart';
 import 'features/legal/consent_screen.dart'
     show applyStoredConsent, analyticsConsentGranted;
 import 'core/services/activity_log_service.dart';
-import 'core/services/onesignal_service.dart';
+import 'core/services/push_service.dart';
 import 'core/services/update_prompt.dart';
 import 'firebase_options.dart';
 import 'core/services/revenue_cat_service.dart';
@@ -78,11 +78,17 @@ Future<void> main() async {
         );
       };
 
-      // firebase_options.dart is Android-only for now; skip on iOS and web.
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
+      // firebase_options.dart is Android-only; iOS reads GoogleService-Info.plist
+      // natively (analytics is off there until consent — IS_ANALYTICS_ENABLED
+      // is false in the plist). Skipped on web.
+      if (!kIsWeb) {
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+        } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+          await Firebase.initializeApp();
+        }
       }
       // Runs on every platform, and after Firebase init so it can configure it:
       // Sentry's gate reads the flag this sets. DPDP — analytics, ad
@@ -96,15 +102,15 @@ Future<void> main() async {
       // Initialize RevenueCat before runApp so the customerInfoStream is ready.
       await RevenueCatService.initialize();
 
-      await OneSignalService.initialize();
+      await PushService.initialize();
 
       // If a session already exists at cold-start, log the user into RC /
-      // OneSignal. Not awaited — these are network calls and must not block
+      // push. Not awaited — these are network calls and must not block
       // first frame; the RC customer-info stream updates when login lands.
       final existingSession = Supabase.instance.client.auth.currentSession;
       if (existingSession != null) {
         unawaited(RevenueCatService.loginUser(existingSession.user.id));
-        unawaited(OneSignalService.loginUser(existingSession.user.id));
+        unawaited(PushService.loginUser(existingSession.user.id));
       }
 
       final savedLocale = await loadSavedLocale();
@@ -120,6 +126,7 @@ Future<void> main() async {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         // Play update check. Not awaited — it must never delay first paint.
         unawaited(UpdatePrompt.check());
+        unawaited(PushService.handleInitialMessage());
 
         Supabase.instance.client.auth.onAuthStateChange.listen(
           (data) async {
@@ -127,12 +134,12 @@ Future<void> main() async {
                 data.event == AuthChangeEvent.signedIn) {
               if (data.session != null) {
                 await RevenueCatService.loginUser(data.session!.user.id);
-                await OneSignalService.loginUser(data.session!.user.id);
+                await PushService.loginUser(data.session!.user.id);
               }
             }
             if (data.event == AuthChangeEvent.signedOut) {
               await RevenueCatService.logoutUser();
-              await OneSignalService.logoutUser();
+              await PushService.logoutUser();
             }
           },
           onError: (error, stack) async {

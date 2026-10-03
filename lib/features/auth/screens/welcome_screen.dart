@@ -70,8 +70,6 @@ class WelcomeScreen extends ConsumerWidget {
                             letterSpacing: -1.2,
                             color: AppTheme.ink,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
                         ),
                       ),
                       SizedBox(height: compact ? _space20 : _space24),

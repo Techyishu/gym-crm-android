@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sendPush } from '../_shared/fcm.ts'
 
 // Runs daily via pg_cron -> public.trigger_owner_daily_summary(), ~8pm IST.
 // Pushes the gym OWNER (external_id == profiles.id, role='owner') a one-line
@@ -12,8 +13,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // channel. Dedupes via notifications_log, one push per gym per IST day,
 // same pattern as whatsapp-credit-push.
 
-const ONESIGNAL_APP_ID = Deno.env.get('ONESIGNAL_APP_ID')!
-const ONESIGNAL_REST_API_KEY = Deno.env.get('ONESIGNAL_REST_API_KEY')!
 const CRON_SECRET = Deno.env.get('CRON_SECRET')!
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
@@ -120,28 +119,11 @@ Deno.serve(async (req) => {
     const title = "Today's summary"
     const url = '/staff/dashboard'
 
-    let ok = false
-    let errorText = ''
-    try {
-      const res = await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Key ${ONESIGNAL_REST_API_KEY}` },
-        body: JSON.stringify({
-          app_id: ONESIGNAL_APP_ID,
-          include_aliases: { external_id: [owner.id] },
-          target_channel: 'push',
-          headings: { en: title },
-          contents: { en: body },
-          // Not using top-level "url" — OneSignal's native SDK auto-opens it
-          // externally, bypassing our own in-app click handling.
-          data: { type: 'owner_daily_summary', gym_id: gym.id, deep_link: url },
-        }),
-      })
-      ok = res.ok
-      if (!ok) errorText = await res.text()
-    } catch (e) {
-      errorText = (e as Error).message
-    }
+    const { ok, error: errorText } = await sendPush(supabase, [owner.id], {
+      title,
+      body,
+      data: { type: 'owner_daily_summary', gym_id: gym.id, deep_link: url },
+    })
 
     await supabase.from('notifications_log').insert({
       gym_id: gym.id,
@@ -156,7 +138,7 @@ Deno.serve(async (req) => {
       await supabase.from('staff_notifications').insert({ user_id: owner.id, gym_id: gym.id, title, body, url })
       sent++
     } else {
-      console.error(`[owner-daily-summary] OneSignal error (gym ${gym.id}):`, errorText)
+      console.error(`[owner-daily-summary] FCM error (gym ${gym.id}):`, errorText)
       failed++
     }
   }

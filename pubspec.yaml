@@ -1,7 +1,7 @@
 name: gym_crm
 description: GymCRM - Gym Management App
 publish_to: 'none'
-version: 1.0.3+59
+version: 1.0.3+60
 
 environment:
   sdk: ^3.10.7
@@ -74,7 +74,7 @@ dependencies:
   purchases_ui_flutter: ^9.10.7
 
   # Push notifications
-  onesignal_flutter: ^5.3.3
+  firebase_messaging: ^16.0.0
   firebase_core: ^4.12.1
   firebase_analytics: ^12.4.5
   # phosphor_flutter (last published 2 years ago) extends IconData, which

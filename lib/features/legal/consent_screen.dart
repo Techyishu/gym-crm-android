@@ -79,12 +79,10 @@ Future<void> applyStoredConsent(SharedPreferences prefs) async {
   final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
   if (!isAndroid && !isIOS) return;
 
-  // Firebase is initialised on Android only (see main.dart).
-  if (isAndroid) {
-    await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
-      prefs.getBool(kConsentAnalytics) ?? false,
-    );
-  }
+  // Firebase is initialised on Android and iOS (see main.dart).
+  await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
+    prefs.getBool(kConsentAnalytics) ?? false,
+  );
 
   // Meta reads the ads consent, not analytics or marketing — its events carry
   // the advertising ID and feed ad attribution, which is its own purpose. The
@@ -318,9 +316,9 @@ class _ConsentScreenState extends State<ConsentScreen> {
                           title: 'Product updates',
                           body: _isMember
                               ? 'Push notifications about your gym — renewals, '
-                                    'dues and announcements — sent through OneSignal.'
+                                    'dues and announcements — sent through Google Firebase.'
                               : 'Push notifications about new features, offers and tips, '
-                                    'sent through OneSignal.',
+                                    'sent through Google Firebase.',
                           value: _marketing,
                           onChanged: _saving
                               ? null

@@ -1,7 +1,9 @@
+import 'dart:async';
+
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
 import '../../core/access/gym_permissions.dart';
@@ -9,7 +11,7 @@ import 'add_fab.dart';
 import '../../core/billing/billing_access.dart';
 import '../../core/providers/revenue_cat_provider.dart';
 import '../../core/services/coachmark_service.dart';
-import '../../core/services/onesignal_service.dart';
+import '../../core/services/push_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/platform_info.dart';
 import '../../core/widgets/plan_expiry_banner.dart';
@@ -49,15 +51,17 @@ class _StaffShellState extends ConsumerState<StaffShell>
     // bell badge/list are cached FutureProviders — nothing tells them to
     // refetch. Foreground push arrival and app resume are the two moments a
     // new row is most likely to exist, so refresh on both.
-    OneSignal.Notifications.addForegroundWillDisplayListener((event) {
-      event.notification.display();
+    _pushSub = PushService.onForeground.listen((_) {
       ref.invalidate(unreadNotificationCountProvider);
       ref.invalidate(staffNotificationsProvider);
     });
   }
 
+  StreamSubscription<RemoteMessage>? _pushSub;
+
   @override
   void dispose() {
+    _pushSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -110,11 +114,6 @@ class _StaffShellState extends ConsumerState<StaffShell>
   Widget build(BuildContext context) {
     final shell = widget.shell;
     final profileAsync = ref.watch(staffProfileProvider);
-
-    ref.listen(staffProfileProvider, (previous, next) {
-      final gym = next.valueOrNull?['gyms'] as Map<String, dynamic>?;
-      if (gym != null) OneSignalService.syncGymTags(gym);
-    });
 
     // First-time load: show a blank screen for the brief moment before data arrives.
     if (profileAsync.isLoading && !profileAsync.hasValue) {
