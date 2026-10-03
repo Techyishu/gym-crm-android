@@ -2525,4 +2525,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get addMenuExpenseHint => 'Rent, salary, equipment, utilities';
+
+  @override
+  String get saveAndAddNext => 'Save & add next';
+
+  @override
+  String get discardMemberTitle => 'Discard this member?';
+
+  @override
+  String get discardMemberBody =>
+      'What you typed for this member will be lost.';
+
+  @override
+  String get discard => 'Discard';
+
+  @override
+  String get keepEditing => 'Keep editing';
 }

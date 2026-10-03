@@ -88,49 +88,66 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
   final user = client.auth.currentUser;
   if (user == null) return null;
 
-  final activeGymId = await ref.watch(gymIdProvider.future);
-
-  final profile = await client
+  // The profile doesn't depend on the active gym, so it loads while gymId
+  // resolves; then the gym and its design switch load together. These used to
+  // run one after another and added ~1s to every cold start.
+  final profileF = client
       .from('profiles')
       .select('id, role, gym_id, first_name, last_name, phone')
       .eq('id', user.id)
       .maybeSingle();
+  // Mark the error handled while gymId is awaited; it's rethrown below.
+  unawaited(profileF.then<void>((_) {}, onError: (_) {}));
+
+  final activeGymId = await ref.watch(gymIdProvider.future);
+
+  // The design switch is read on its own so it can never break the gym load.
+  // The last value read is kept on the phone per gym: when this read fails
+  // (patchy front-desk Wi-Fi) the gym keeps its current design instead of
+  // bouncing to the old one and back. Never read yet (or the migration isn't
+  // live) = old design. null here = the read failed.
+  final newHomeF = client
+      .from('gyms')
+      .select('new_home')
+      .eq('id', activeGymId)
+      .maybeSingle()
+      .then<bool?>(
+        (row) => row?['new_home'] == true,
+        onError: (Object e) {
+          debugPrint('[GymCRM] new_home read failed, using cached value: $e');
+          return null;
+        },
+      );
+
+  final results = await Future.wait([
+    profileF,
+    client
+        .from('gyms')
+        .select(
+          'id, name, slug, member_code, plan, settings, razorpay_key_id, '
+          'registration_enabled, registration_token, whatsapp_reminder_enabled, '
+          'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing, created_at',
+        )
+        .eq('id', activeGymId)
+        .maybeSingle(),
+  ]);
+  final profile = results[0];
+  final gym = results[1];
   if (profile == null) return null;
 
-  final gym = await client
-      .from('gyms')
-      .select(
-        'id, name, slug, member_code, plan, settings, razorpay_key_id, '
-        'registration_enabled, registration_token, whatsapp_reminder_enabled, '
-        'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing, created_at',
-      )
-      .eq('id', activeGymId)
-      .maybeSingle();
-
-  // The design switch is read on its own so it can never break the gym load
-  // above. The last value read is kept on the phone per gym: when this read
-  // fails (patchy front-desk Wi-Fi) the gym keeps its current design instead
-  // of bouncing to the old one and back. Never read yet (or the migration
-  // isn't live) = old design.
   if (gym != null) {
     final cacheKey = 'new_home_$activeGymId';
-    try {
-      final row = await client
-          .from('gyms')
-          .select('new_home')
-          .eq('id', activeGymId)
-          .maybeSingle();
-      final newHome = row?['new_home'] == true;
+    final newHome = await newHomeF;
+    if (newHome != null) {
       gym['new_home'] = newHome;
       unawaited(
         SharedPreferences.getInstance().then(
           (p) => p.setBool(cacheKey, newHome),
         ),
       );
-    } catch (e) {
+    } else {
       final prefs = await SharedPreferences.getInstance();
       gym['new_home'] = prefs.getBool(cacheKey) ?? false;
-      debugPrint('[GymCRM] new_home read failed, using cached value: $e');
     }
   }
 

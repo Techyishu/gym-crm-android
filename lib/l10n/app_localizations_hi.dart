@@ -2489,4 +2489,19 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get addMenuExpenseHint => 'किराया, सैलरी, मशीनें, बिजली-पानी';
+
+  @override
+  String get saveAndAddNext => 'सेव करें और अगला जोड़ें';
+
+  @override
+  String get discardMemberTitle => 'यह मेंबर छोड़ दें?';
+
+  @override
+  String get discardMemberBody => 'इस मेंबर के लिए जो भरा है, वह मिट जाएगा।';
+
+  @override
+  String get discard => 'छोड़ दें';
+
+  @override
+  String get keepEditing => 'भरते रहें';
 }

@@ -837,5 +837,11 @@
   "addMenuStaff": "Staff",
   "addMenuStaffHint": "Invite a trainer, manager or front desk",
   "addMenuExpense": "Expense",
-  "addMenuExpenseHint": "Rent, salary, equipment, utilities"
+  "addMenuExpenseHint": "Rent, salary, equipment, utilities",
+
+  "saveAndAddNext": "Save & add next",
+  "discardMemberTitle": "Discard this member?",
+  "discardMemberBody": "What you typed for this member will be lost.",
+  "discard": "Discard",
+  "keepEditing": "Keep editing"
 }

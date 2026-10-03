@@ -766,5 +766,11 @@
   "addMenuStaff": "स्टाफ",
   "addMenuStaffHint": "ट्रेनर, मैनेजर या फ़्रंट डेस्क को जोड़ें",
   "addMenuExpense": "खर्चा",
-  "addMenuExpenseHint": "किराया, सैलरी, मशीनें, बिजली-पानी"
+  "addMenuExpenseHint": "किराया, सैलरी, मशीनें, बिजली-पानी",
+
+  "saveAndAddNext": "सेव करें और अगला जोड़ें",
+  "discardMemberTitle": "यह मेंबर छोड़ दें?",
+  "discardMemberBody": "इस मेंबर के लिए जो भरा है, वह मिट जाएगा।",
+  "discard": "छोड़ दें",
+  "keepEditing": "भरते रहें"
 }
