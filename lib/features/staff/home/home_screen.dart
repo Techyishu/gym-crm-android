@@ -6,8 +6,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/access/role_access.dart';
 import '../../../core/billing/billing_access.dart';
+import '../../../core/how_to_use.dart';
 import '../../../core/services/coachmark_service.dart';
 import '../../../core/services/data_refresh.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../core/services/review_prompt.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
@@ -17,12 +19,18 @@ import '../../../shared/widgets/adaptive_sheet.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../dashboard/money_dashboard_screen.dart'
-    show dashboardDataProvider, SetupChecklist, BirthdaysToday;
+    show
+        dashboardDataProvider,
+        SetupChecklist,
+        BirthdaysToday,
+        activationTarget;
+import '../../../core/providers/app_config_provider.dart';
 import '../members/members_screen.dart' show showAddMemberSheet;
 import '../notifications/notifications_screen.dart';
 import '../settings/gym_branches_sheet.dart';
 import '../settings/gym_code_sheet.dart';
 import '../settings/settings_screen.dart';
+import 'whatsapp_paused_banner.dart';
 
 // ── Feature list ──────────────────────────────────────────────────────────────
 // Everything the old More sheet held, plus Plans. Home shows these as cards;
@@ -277,6 +285,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  // "All features" tapped on a brand-new gym's collapsed Home.
+  bool _allFeatures = false;
+
   @override
   void initState() {
     super.initState();
@@ -310,9 +321,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final memberCount = (data?['memberCount'] as int?) ?? 0;
     final planCount = (data?['planCount'] as int?) ?? 0;
     final allTimeCheckins = (data?['allTimeCheckins'] as int?) ?? 0;
+    final hasPayment =
+        ((data?['monthRevenue'] as num?) ?? 0) > 0 ||
+        ((data?['lastMonthRevenue'] as num?) ?? 0) > 0;
+    // Stays until every step is done — including WhatsApp reminders, which
+    // the old rule ignored, so the card vanished with that step still open.
     final showChecklist =
         data != null &&
-        (memberCount < 3 || planCount == 0 || allTimeCheckins == 0);
+        !SetupChecklist.isComplete(
+          gym: gym,
+          memberCount: memberCount,
+          planCount: planCount,
+          allTimeCheckins: allTimeCheckins,
+          hasPayment: hasPayment,
+          target: activationTarget(ref.watch(appConfigProvider).valueOrNull),
+        );
+    final dueCount = (data?['dueCount'] as int?) ?? 0;
+    final pendingRevenue = ((data?['pendingRevenue'] as num?) ?? 0).toDouble();
+    // Check-in is Pro-only: a gym that isn't paying yet can't use it.
+    final checkInLocked = !const {
+      'pro',
+      'starter',
+      'elite',
+    }.contains(gym?['plan']);
+    // Under 3 members the 17 feature cards are noise; fold them away.
+    // app_config.home_collapse_below changes the cut-off without an update.
+    final collapseBelow =
+        (ref.watch(appConfigProvider).valueOrNull?['home_collapse_below']
+                as num?)
+            ?.toInt() ??
+        3;
+    final collapseFeatures = data != null && memberCount < collapseBelow;
     final role = profile?['role'] as String?;
     final permissions =
         ref.watch(staffPermissionsProvider).valueOrNull ??
@@ -334,96 +373,189 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          color: AppTheme.accent,
-          onRefresh: () async => ref.invalidate(dashboardDataProvider),
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            // Bottom room for the shell's floating Add button.
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 96),
-            children: [
-              _HomeHeader(
-                profile: profile,
-                showBilling: RoleAccess.canSeeBilling(role),
-              ),
-              const SizedBox(height: 16),
-              if (showChecklist) ...[
-                SetupChecklist(
-                  gym: gym,
-                  memberCount: memberCount,
-                  planCount: planCount,
-                  allTimeCheckins: allTimeCheckins,
+      body: DecoratedBox(
+        decoration: const BoxDecoration(gradient: AppTheme.canvasWash),
+        child: SafeArea(
+          bottom: false,
+          child: RefreshIndicator(
+            color: AppTheme.accent,
+            onRefresh: () async => ref.invalidate(dashboardDataProvider),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              // Bottom room for the shell's floating Add button.
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 96),
+              children: [
+                _HomeHeader(
+                  profile: profile,
+                  showBilling: RoleAccess.canSeeBilling(role),
                 ),
-                const SizedBox(height: 12),
-              ],
-              if (birthdays.isNotEmpty) ...[
-                BirthdaysToday(members: birthdays),
-                const SizedBox(height: 12),
-              ],
-              if (canMoney || canCheckIn) ...[
-                Row(
-                  children: [
-                    if (canMoney)
-                      Expanded(
-                        child: _BigCard(
-                          icon: AppIcons.payments,
-                          label: l.featMoney,
-                          hint: l.homeMoneyHint,
-                          dark: true,
-                          onTap: () => openWithReturn(context, '/staff/billing'),
-                        ),
-                      ),
-                    if (canMoney && canCheckIn) const SizedBox(width: 10),
-                    if (canCheckIn)
-                      Expanded(
-                        child: _BigCard(
-                          icon: AppIcons.qrScanner,
-                          label: l.featCheckIn,
-                          hint: l.homeCheckInHint,
-                          onTap: () => openWithReturn(context, '/staff/check-in'),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (canAddMember || canCollect) ...[
-                Row(
-                  children: [
-                    if (canAddMember)
-                      Expanded(
-                        child: _ActionTile(
-                          icon: AppIcons.personAdd,
-                          label: l.addMember,
-                          accent: true,
-                          onTap: () => showAddMemberSheet(context),
-                        ),
-                      ),
-                    if (canAddMember && canCollect) const SizedBox(width: 10),
-                    if (canCollect)
-                      Expanded(
-                        child: _ActionTile(
-                          icon: AppIcons.payments,
-                          label: l.collectPayment,
-                          onTap: () => openWithReturn(context, '/staff/billing'),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-              for (final entry in groups.entries) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(2, 22, 2, 8),
-                  child: Text(
-                    featureGroupLabel(context, entry.key).toUpperCase(),
-                    style: AppTheme.kicker,
+                const SizedBox(height: 16),
+                if (RoleAccess.canSeeBilling(role))
+                  WhatsAppPausedBanner(gym: gym),
+                if (showChecklist) ...[
+                  SetupChecklist(
+                    gym: gym,
+                    memberCount: memberCount,
+                    planCount: planCount,
+                    allTimeCheckins: allTimeCheckins,
+                    hasPayment: hasPayment,
                   ),
+                  const SizedBox(height: 12),
+                ],
+                if (birthdays.isNotEmpty) ...[
+                  BirthdaysToday(members: birthdays),
+                  const SizedBox(height: 12),
+                ],
+                if (canMoney || canCheckIn) ...[
+                  Row(
+                    children: [
+                      if (canMoney)
+                        Expanded(
+                          child: _BigCard(
+                            icon: AppIcons.payments,
+                            label: l.featMoney,
+                            // The real figure once something is owed, so the
+                            // card answers "who owes me?" before it's opened.
+                            hint: dueCount > 0
+                                ? l.homeMoneyDue(
+                                    formatCurrency(pendingRevenue),
+                                    dueCount,
+                                  )
+                                : l.homeMoneyHint,
+                            dark: true,
+                            onTap: () =>
+                                openWithReturn(context, '/staff/billing'),
+                          ),
+                        ),
+                      if (canMoney && canCheckIn) const SizedBox(width: 10),
+                      if (canCheckIn)
+                        Expanded(
+                          child: _BigCard(
+                            icon: AppIcons.qrScanner,
+                            label: l.featCheckIn,
+                            // Check-in is Pro-only, so a trial gym is told so
+                            // instead of tapping into a feature that refuses.
+                            hint: checkInLocked
+                                ? l.homeCheckInLocked
+                                : l.homeCheckInHint,
+                            badge: checkInLocked ? 'PRO' : null,
+                            teal: true,
+                            onTap: () => checkInLocked
+                                ? context.push('/staff/subscription')
+                                : openWithReturn(context, '/staff/check-in'),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                if (canAddMember || canCollect) ...[
+                  Row(
+                    children: [
+                      if (canAddMember)
+                        Expanded(
+                          child: _ActionTile(
+                            icon: AppIcons.personAdd,
+                            label: l.addMember,
+                            accent: true,
+                            onTap: () => showAddMemberSheet(context),
+                          ),
+                        ),
+                      if (canAddMember && canCollect) const SizedBox(width: 10),
+                      if (canCollect)
+                        Expanded(
+                          child: _ActionTile(
+                            icon: AppIcons.payments,
+                            label: l.collectPayment,
+                            tint: AppTheme.tintMoney,
+                            onTap: () =>
+                                openWithReturn(context, '/staff/billing'),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+                // Plans and Reminders are what a new owner needs next, so they
+                // stay on the first screen instead of hiding in "All features".
+                if (collapseFeatures &&
+                    !_allFeatures &&
+                    (can(GymModule.memberships) ||
+                        can(GymModule.settings))) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (can(GymModule.memberships))
+                        Expanded(
+                          child: _ActionTile(
+                            icon: AppIcons.cardMembership,
+                            label: l.featPlans,
+                            tint: AppTheme.tintRun,
+                            onTap: () =>
+                                openWithReturn(context, '/staff/plans'),
+                          ),
+                        ),
+                      if (can(GymModule.memberships) && can(GymModule.settings))
+                        const SizedBox(width: 10),
+                      if (can(GymModule.settings))
+                        Expanded(
+                          child: _ActionTile(
+                            icon: AppIcons.campaign,
+                            label: l.featReminders,
+                            tint: AppTheme.tintRun,
+                            onTap: () =>
+                                openWithReturn(context, '/staff/reminders'),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 10),
+                _ActionTile(
+                  icon: AppIcons.tutorial,
+                  label: l.howToUse,
+                  tint: AppTheme.tintInsights,
+                  onTap: () => openHowToUse(context),
                 ),
-                _FeatureGrid(items: entry.value),
+                // A brand-new gym sees one "All features" row instead of 17
+                // cards, so Getting started and Money stay on the first screen.
+                if (collapseFeatures && !_allFeatures)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: _ActionTile(
+                      icon: AppIcons.layers,
+                      label: l.allFeatures,
+                      tint: AppTheme.tintRun,
+                      onTap: () => setState(() => _allFeatures = true),
+                    ),
+                  )
+                else
+                  for (final entry in groups.entries) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(2, 22, 2, 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: AppTheme.tintForGroup(entry.key).fg,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Text(
+                            featureGroupLabel(context, entry.key).toUpperCase(),
+                            style: AppTheme.kicker.copyWith(
+                              color: AppTheme.tintForGroup(entry.key).fg,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _FeatureGrid(items: entry.value),
+                  ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -627,6 +759,10 @@ class _BigCard extends StatelessWidget {
   final String label;
   final String hint;
   final bool dark;
+  final bool teal;
+
+  /// Small gold tag in the card's top-right corner (e.g. 'PRO').
+  final String? badge;
   final VoidCallback onTap;
   const _BigCard({
     required this.icon,
@@ -634,11 +770,14 @@ class _BigCard extends StatelessWidget {
     required this.hint,
     required this.onTap,
     this.dark = false,
+    this.teal = false,
+    this.badge,
   });
 
   @override
   Widget build(BuildContext context) {
-    final fg = dark ? AppTheme.onDark : AppTheme.ink;
+    final onColor = dark || teal;
+    final fg = onColor ? AppTheme.onDark : AppTheme.ink;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -648,24 +787,66 @@ class _BigCard extends StatelessWidget {
         decoration: dark
             ? BoxDecoration(
                 color: AppTheme.darkCard,
+                gradient: AppTheme.darkGradient,
                 borderRadius: BorderRadius.circular(16),
+              )
+            : teal
+            ? BoxDecoration(
+                color: AppTheme.accent,
+                gradient: AppTheme.accentGradient,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: AppTheme.accentShadow,
               )
             : AppTheme.cardDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: dark ? AppTheme.darkInset : AppTheme.accentSoft,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                icon,
-                size: 22,
-                color: dark ? AppTheme.mintOnDark : AppTheme.accent,
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? Colors.white.withValues(alpha: 0.10)
+                        : teal
+                        ? Colors.white.withValues(alpha: 0.18)
+                        : AppTheme.accentSoft,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 22,
+                    color: dark
+                        ? AppTheme.mintOnDark
+                        : teal
+                        ? Colors.white
+                        : AppTheme.accent,
+                  ),
+                ),
+                const Spacer(),
+                if (badge != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8EACA),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(
+                      badge!,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                        color: Color(0xFF6E4A0C),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const Spacer(),
             Text(
@@ -684,7 +865,11 @@ class _BigCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
-                color: dark ? AppTheme.onDarkSoft : AppTheme.inkSoft,
+                color: dark
+                    ? AppTheme.onDarkSoft
+                    : teal
+                    ? const Color(0xFFD3E7E4)
+                    : AppTheme.inkSoft,
               ),
             ),
           ],
@@ -699,12 +884,14 @@ class _ActionTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool accent;
+  final SectionTint? tint;
   final VoidCallback onTap;
   const _ActionTile({
     required this.icon,
     required this.label,
     required this.onTap,
     this.accent = false,
+    this.tint,
   });
 
   @override
@@ -717,7 +904,9 @@ class _ActionTile extends StatelessWidget {
         decoration: accent
             ? BoxDecoration(
                 color: AppTheme.accent,
+                gradient: AppTheme.accentGradient,
                 borderRadius: BorderRadius.circular(14),
+                boxShadow: AppTheme.accentShadow,
               )
             : AppTheme.cardDecoration(radius: 14),
         child: Row(
@@ -725,7 +914,7 @@ class _ActionTile extends StatelessWidget {
             Icon(
               icon,
               size: 20,
-              color: accent ? Colors.white : AppTheme.accent,
+              color: accent ? Colors.white : (tint?.fg ?? AppTheme.accent),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -805,10 +994,14 @@ class _FeatureCard extends ConsumerWidget {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: AppTheme.accentSoft,
+                    color: AppTheme.tintForGroup(item.group).bg,
                     borderRadius: BorderRadius.circular(11),
                   ),
-                  child: Icon(item.icon, size: 19, color: AppTheme.accent),
+                  child: Icon(
+                    item.icon,
+                    size: 19,
+                    color: AppTheme.tintForGroup(item.group).fg,
+                  ),
                 ),
                 const Spacer(),
                 if (showBadge) const _NewBadge(),

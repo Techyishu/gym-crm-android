@@ -27,6 +27,7 @@ import '../../../core/services/data_refresh.dart';
 import '../../../core/services/review_prompt.dart';
 import '../../../core/widgets/new_design_back_button.dart';
 import '../../../l10n/l10n.dart';
+import '../../shared/invoice_remove.dart';
 
 final _plansProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   ref.watch(gymDataVersionProvider); // refetch after a write made elsewhere
@@ -824,9 +825,11 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
     final canAdd = ref.watch(
       gymPermissionProvider((GymModule.payments, GymAction.add)),
     );
-    final canDelete = ref.watch(
-      gymPermissionProvider((GymModule.payments, GymAction.delete)),
-    );
+    final canDelete =
+        ref.watch(
+          gymPermissionProvider((GymModule.payments, GymAction.delete)),
+        ) ||
+        ref.watch(gymPermissionProvider((GymModule.payments, GymAction.edit)));
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
@@ -906,19 +909,8 @@ class _BillingScreenState extends ConsumerState<BillingScreen> {
 
   Future<void> _deleteInvoice(BuildContext context, _TxnItem item) async {
     final container = ProviderScope.containerOf(context, listen: false);
-    final ok = await showConfirmDialog(
-      context,
-      title: context.l10n.deleteInvoiceTitle,
-      body: context.l10n.deleteInvoiceBody,
-      confirmLabel: context.l10n.delete,
-      icon: AppIcons.delete,
-    );
-    if (!mounted) return;
-    if (ok != true) return;
-    await Supabase.instance.client
-        .from('invoices')
-        .delete()
-        .eq('id', item.invoiceId);
+    final done = await removeInvoice(context, item.invoiceId);
+    if (done == null) return;
     container.invalidate(_billingFeedProvider);
     container.invalidate(_customPaymentsProvider);
   }

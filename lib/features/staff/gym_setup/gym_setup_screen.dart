@@ -8,8 +8,10 @@ import 'package:country_picker/country_picker.dart';
 import 'package:currency_picker/currency_picker.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/auth_canvas_kit.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../../l10n/l10n.dart';
+import '../../../shared/widgets/redesign.dart' show SelectChip;
 import '../../auth/providers/auth_provider.dart';
 
 /// Step 1 of the "Set up your gym" wizard — canvas `w1`. Reached ONLY by the
@@ -39,6 +41,11 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
   String _currencyCode = 'INR';
 
   bool _needsPhone = false;
+
+  // Gym size, one tap. Saved as gyms.settings.member_count and used to tell
+  // Google Ads which signups are real gyms (AppEvents.qualifiedGym).
+  String? _memberCount;
+  static const _sizes = ['under_30', '30_100', '100_300', 'over_300'];
 
   @override
   void initState() {
@@ -73,6 +80,10 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
         return;
       }
     }
+    if (_memberCount == null) {
+      setState(() => _error = context.l10n.memberCountRequired);
+      return;
+    }
 
     setState(() {
       _submitting = true;
@@ -87,6 +98,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
               ? '+${_country.phoneCode}${_phoneCtrl.text.trim()}'
               : null,
           gymType: null,
+          memberCount: _memberCount,
           currency: _currencyCode,
           goals: [],
         );
@@ -105,7 +117,10 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
     // sends users here when no profile exists yet), so registration and gym
     // setup are genuinely completing here for the first time.
     unawaited(AppEvents.signUpCompleted());
-    unawaited(AppEvents.gymSetupCompleted());
+    unawaited(AppEvents.gymSetupCompleted(memberCount: _memberCount));
+    if (_memberCount != 'under_30') {
+      unawaited(AppEvents.qualifiedGym(_memberCount!));
+    }
 
     final prefs = await SharedPreferences.getInstance();
     // home_route stays the real destination for future cold starts — the
@@ -133,25 +148,20 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
       child: Scaffold(
         backgroundColor: AppTheme.background,
         body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
+          // Same shell as FirstSetupScreen (steps 2-4) so the wizard reads as
+          // one flow: top-aligned, 440 max width, canvas kit fields.
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        Text(
-                          context.l10n.setUpYourGym,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.inkSoft,
-                          ),
-                        ),
                         Text(
                           context.l10n.setupStep(1),
                           style: const TextStyle(
@@ -163,77 +173,30 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    Row(
-                      children: List.generate(4, (i) {
-                        return Expanded(
-                          child: Container(
-                            margin: EdgeInsets.only(right: i == 3 ? 0 : 5),
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: i == 0 ? AppTheme.ink : AppTheme.surface2,
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                          ),
-                        );
-                      }),
+                    const CanvasProgress(total: 4, filled: 1),
+                    const SizedBox(height: 8),
+                    CanvasHeading(
+                      title: context.l10n.tellUsAboutGym,
+                      subtitle: context.l10n.membersWillSee,
                     ),
-                    const SizedBox(height: 22),
-                    Text(
-                      context.l10n.tellUsAboutGym,
-                      style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.8,
-                        height: 1.2,
-                        color: AppTheme.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      context.l10n.membersWillSee,
-                      style: const TextStyle(
-                        fontSize: 14.5,
-                        color: AppTheme.inkSoft,
-                      ),
-                    ),
+                    const SizedBox(height: 18),
                     if (_error.isNotEmpty) ...[
+                      CanvasBanner(message: _error),
                       const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 13,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.statusDangerBg,
-                          border: Border.all(color: AppTheme.statusDanger),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          _error,
-                          style: const TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.statusDanger,
-                          ),
-                        ),
-                      ),
                     ],
-                    const SizedBox(height: 16),
-                    _field(
+                    CanvasField(
                       label: context.l10n.gymName,
                       child: TextField(
                         controller: _gymNameCtrl,
                         textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
-                          hintText: 'FitZone Gym',
-                        ),
+                        decoration: canvasFieldDecoration(hint: 'FitZone Gym'),
                         onChanged: (_) {
                           if (_error.isNotEmpty) setState(() => _error = '');
                         },
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _field(
+                    CanvasField(
                       label: context.l10n.countryCurrency,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
@@ -252,16 +215,8 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                             }
                           }),
                         ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 15,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.surface,
-                            border: Border.all(color: AppTheme.border),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(0, 9, 10, 11),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -284,9 +239,39 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    Text(
+                      context.l10n.gymSizeQuestion,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: [
+                        for (final s in _sizes)
+                          SelectChip(
+                            label: switch (s) {
+                              'under_30' => context.l10n.sizeUnder30,
+                              '30_100' => '30–100',
+                              '100_300' => '100–300',
+                              _ => '300+',
+                            },
+                            selected: _memberCount == s,
+                            onTap: () => setState(() {
+                              _memberCount = s;
+                              if (_error.isNotEmpty) _error = '';
+                            }),
+                          ),
+                      ],
+                    ),
                     if (_needsPhone) ...[
                       const SizedBox(height: 16),
-                      _field(
+                      CanvasField(
                         label: context.l10n.mobileNumber,
                         child: TextField(
                           controller: _phoneCtrl,
@@ -295,26 +280,26 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly,
                           ],
-                          decoration: InputDecoration(
-                            counterText: '',
-                            hintText: '9876543210',
-                            prefixIcon: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                              child: Text(
-                                '+${_country.phoneCode}',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.inkSoft,
+                          decoration: canvasFieldDecoration(hint: '9876543210')
+                              .copyWith(
+                                counterText: '',
+                                prefixIcon: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                  ),
+                                  child: Text(
+                                    '+${_country.phoneCode}',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.inkSoft,
+                                    ),
+                                  ),
+                                ),
+                                prefixIconConstraints: const BoxConstraints(
+                                  minWidth: 0,
                                 ),
                               ),
-                            ),
-                            prefixIconConstraints: const BoxConstraints(
-                              minWidth: 0,
-                            ),
-                          ),
                           onChanged: (_) {
                             if (_error.isNotEmpty) setState(() => _error = '');
                           },
@@ -322,54 +307,13 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                       ),
                     ],
                     const SizedBox(height: 24),
-                    SizedBox(
-                      height: 52,
-                      child: Stack(
-                        children: [
-                          ElevatedButton(
-                            onPressed: _submitting ? null : _submit,
-                            child: Text(
-                              isIOS
-                                  ? context.l10n.createGym
-                                  : context.l10n.continueLabel,
-                            ),
-                          ),
-                          if (_submitting)
-                            Positioned.fill(
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: AppTheme.accentDark,
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                              Colors.white,
-                                            ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      context.l10n.saving,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 15.5,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+                    CanvasButton(
+                      label: isIOS
+                          ? context.l10n.createGym
+                          : context.l10n.continueLabel,
+                      loadingLabel: context.l10n.saving,
+                      loading: _submitting,
+                      onPressed: _submit,
                     ),
                     if (!isIOS) ...[
                       const SizedBox(height: 14),
@@ -391,43 +335,6 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _field({
-    required String label,
-    required Widget child,
-    bool optional = false,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.ink,
-              ),
-            ),
-            if (optional) ...[
-              const SizedBox(width: 6),
-              Text(
-                context.l10n.optionalLabel,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.inkHint,
-                ),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 6),
-        child,
-      ],
     );
   }
 }

@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 
+/// Foreground / soft-background colour pair for one Home section.
+class SectionTint {
+  final Color fg;
+  final Color bg;
+  const SectionTint(this.fg, this.bg);
+}
+
 class AppTheme {
   /// Bundled font family (see pubspec `fonts:`). Replaces the old runtime
   /// google_fonts fetch so text renders instantly on first/cold launch.
@@ -45,8 +52,70 @@ class AppTheme {
   /// The single card shadow used across the app — a barely-there lift that
   /// separates white cards from the cream canvas without a border.
   static const List<BoxShadow> cardShadow = [
-    BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
+    BoxShadow(color: Color(0x0F1F4A52), blurRadius: 14, offset: Offset(0, 5)),
+    BoxShadow(color: Color(0x08000000), blurRadius: 3, offset: Offset(0, 1)),
   ];
+
+  // ── Section tints ───────────────────────────────────────────────────────
+  // One colour per Home section so the launcher reads as places, not a wall
+  // of identical teal. `fg` for icons/labels, `bg` for the chip behind them.
+  static const SectionTint tintRun = SectionTint(
+    Color(0xFF2C6E7A),
+    Color(0xFFD6EBEE),
+  );
+  static const SectionTint tintGrow = SectionTint(
+    Color(0xFFD9582B),
+    Color(0xFFFBE2D6),
+  );
+  static const SectionTint tintPrograms = SectionTint(
+    Color(0xFF6C4FD1),
+    Color(0xFFE8E2FA),
+  );
+  static const SectionTint tintInsights = SectionTint(
+    Color(0xFF2F6FD0),
+    Color(0xFFDCE8FA),
+  );
+  static const SectionTint tintSetup = SectionTint(
+    Color(0xFFB87A0B),
+    Color(0xFFF8EACA),
+  );
+  static const SectionTint tintMoney = SectionTint(
+    Color(0xFF2E7D4F),
+    Color(0xFFD9EFE0),
+  );
+
+  /// Tint for a Home group (keyed by the English group name, as in
+  /// `StaffFeature.group`).
+  static SectionTint tintForGroup(String group) => switch (group) {
+    'Grow' => tintGrow,
+    'Member programs' => tintPrograms,
+    'Insights' => tintInsights,
+    'Setup' => tintSetup,
+    _ => tintRun,
+  };
+
+  /// Hero gradient for dark surfaces — same green-black, with depth.
+  static const LinearGradient darkGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF1F4A3A), Color(0xFF182720), Color(0xFF12201A)],
+    stops: [0.0, 0.55, 1.0],
+  );
+
+  /// Teal primary-action gradient (filled hero tiles).
+  static const LinearGradient accentGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF3A8794), Color(0xFF2C6E7A), Color(0xFF225862)],
+  );
+
+  /// Soft wash behind the top of Home / Dashboard — fades into [background].
+  static const LinearGradient canvasWash = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFFD3E7E4), Color(0xFFEBEADF), background],
+    stops: [0.0, 0.3, 0.55],
+  );
 
   /// Glow under teal primary actions (the raised check-in button, the
   /// members "Add" pill).
@@ -125,6 +194,7 @@ class AppTheme {
   static BoxDecoration darkCardDecoration({double radius = 20}) =>
       BoxDecoration(
         color: darkCard,
+        gradient: darkGradient,
         borderRadius: BorderRadius.circular(radius),
       );
 
@@ -239,8 +309,7 @@ class AppTheme {
       // so a bare Switch/SwitchListTile is already on-brand.
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.selected) ? accentFg : null,
+          (states) => states.contains(WidgetState.selected) ? accentFg : null,
         ),
         trackColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected) ? accent : null,

@@ -12,6 +12,7 @@ import 'app.dart';
 import 'features/legal/consent_screen.dart'
     show applyStoredConsent, analyticsConsentGranted;
 import 'core/services/activity_log_service.dart';
+import 'core/services/app_events.dart';
 import 'core/services/push_service.dart';
 import 'core/services/update_prompt.dart';
 import 'firebase_options.dart';
@@ -81,19 +82,28 @@ Future<void> main() async {
       // firebase_options.dart is Android-only; iOS reads GoogleService-Info.plist
       // natively (analytics is off there until consent — IS_ANALYTICS_ENABLED
       // is false in the plist). Skipped on web.
+      // A Firebase failure (e.g. plist missing from the bundle) must never
+      // block runApp — the app still works without push/analytics.
       if (!kIsWeb) {
-        if (defaultTargetPlatform == TargetPlatform.android) {
-          await Firebase.initializeApp(
-            options: DefaultFirebaseOptions.currentPlatform,
-          );
-        } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-          await Firebase.initializeApp();
+        try {
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            await Firebase.initializeApp(
+              options: DefaultFirebaseOptions.currentPlatform,
+            );
+          } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+            await Firebase.initializeApp();
+          }
+        } catch (e, s) {
+          debugPrint('[Firebase] init failed: $e');
+          unawaited(Sentry.captureException(e, stackTrace: s));
         }
       }
       // Runs on every platform, and after Firebase init so it can configure it:
       // Sentry's gate reads the flag this sets. DPDP — analytics, ad
       // measurement and crash reporting all stay off until /consent.
       await applyStoredConsent(await SharedPreferences.getInstance());
+      // Install counting only; every other Meta event stays behind ads consent.
+      unawaited(AppEvents.logAppOpen().catchError((_) {}));
 
       await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
 
@@ -102,7 +112,9 @@ Future<void> main() async {
       // Initialize RevenueCat before runApp so the customerInfoStream is ready.
       await RevenueCatService.initialize();
 
-      await PushService.initialize();
+      // Not awaited: on iOS requestPermission() waits for the user to answer
+      // the system dialog, which must not hold up the first frame.
+      unawaited(PushService.initialize());
 
       // If a session already exists at cold-start, log the user into RC /
       // push. Not awaited — these are network calls and must not block

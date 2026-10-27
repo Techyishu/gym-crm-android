@@ -14,6 +14,7 @@ import '../../core/utils/platform_info.dart' as platform_info;
 import '../../shared/widgets/redesign.dart';
 import '../../shared/widgets/responsive_content.dart';
 import '../../core/theme/app_icons.dart';
+import 'invoice_remove.dart';
 
 final _invoiceDetailProvider = FutureProvider.family<Map<String, dynamic>, String>((
   ref,
@@ -36,9 +37,11 @@ class InvoiceDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(_invoiceDetailProvider(invoiceId));
-    final canDelete = ref.watch(
-      gymPermissionProvider((GymModule.payments, GymAction.delete)),
-    );
+    final canRemove =
+        ref.watch(
+          gymPermissionProvider((GymModule.payments, GymAction.delete)),
+        ) ||
+        ref.watch(gymPermissionProvider((GymModule.payments, GymAction.edit)));
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -70,14 +73,11 @@ class InvoiceDetailScreen extends ConsumerWidget {
               onPressed: () => _sharePdf(async.value!),
               tooltip: 'Share as PDF',
             ),
-            if (canDelete)
+            if (canRemove)
               IconButton(
-                icon: const Icon(
-                  AppIcons.delete,
-                  color: AppTheme.statusDanger,
-                ),
-                onPressed: () => _delete(context, ref),
-                tooltip: 'Delete invoice',
+                icon: const Icon(AppIcons.delete, color: AppTheme.statusDanger),
+                onPressed: () => _remove(context, ref),
+                tooltip: 'Void or delete invoice',
               ),
           ],
         ],
@@ -92,21 +92,10 @@ class InvoiceDetailScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _delete(BuildContext context, WidgetRef ref) async {
-    final ok = await showConfirmDialog(
-      context,
-      title: 'Delete invoice?',
-      body:
-          'This invoice and its payment records will be permanently deleted. This cannot be undone.',
-      confirmLabel: 'Delete',
-      icon: AppIcons.delete,
-    );
-    if (ok != true) return;
-    await Supabase.instance.client
-        .from('invoices')
-        .delete()
-        .eq('id', invoiceId);
-    if (context.mounted) context.pop();
+  Future<void> _remove(BuildContext context, WidgetRef ref) async {
+    final done = await removeInvoice(context, invoiceId);
+    if (done == 'delete' && context.mounted) context.pop();
+    if (done == 'void') ref.invalidate(_invoiceDetailProvider(invoiceId));
   }
 
   Future<void> _sharePdf(Map<String, dynamic> inv) async {

@@ -45,46 +45,53 @@ class _FirstSetupScreenState extends ConsumerState<FirstSetupScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    context.l10n.setupStep(_stepIndex),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.inkHint,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        context.l10n.setupStep(_stepIndex),
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.inkHint,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  CanvasProgress(total: 4, filled: _stepIndex),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: _reachedReady
+                          ? _ReadyStep(plan: _plan, member: _member)
+                          : _plan != null
+                          ? _AddMemberStep(
+                              plan: _plan!,
+                              onDone: (member) => setState(() {
+                                _member = member;
+                                _reachedReady = true;
+                              }),
+                              onSkip: () =>
+                                  setState(() => _reachedReady = true),
+                            )
+                          : _CreatePlanStep(
+                              onCreated: (plan) => setState(() => _plan = plan),
+                            ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              CanvasProgress(total: 4, filled: _stepIndex),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: _reachedReady
-                      ? _ReadyStep(plan: _plan, member: _member)
-                      : _plan != null
-                      ? _AddMemberStep(
-                          plan: _plan!,
-                          onDone: (member) => setState(() {
-                            _member = member;
-                            _reachedReady = true;
-                          }),
-                          onSkip: () => setState(() => _reachedReady = true),
-                        )
-                      : _CreatePlanStep(
-                          onCreated: (plan) => setState(() => _plan = plan),
-                        ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

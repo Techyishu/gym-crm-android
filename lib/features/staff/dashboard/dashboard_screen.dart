@@ -26,6 +26,7 @@ import '../notifications/notifications_screen.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../l10n/l10n.dart';
+import '../home/whatsapp_paused_banner.dart';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -406,6 +407,7 @@ class _DashboardBody extends ConsumerWidget {
       // permanently occupying the home screen.
       _Header(gymName: gymName, gym: gym, showBilling: canBilling),
       const SizedBox(height: 12),
+      if (canBilling) WhatsAppPausedBanner(gym: gym),
       if (showChecklist) ...[
         _SetupChecklist(
           gym: gym,
@@ -765,9 +767,9 @@ class _BirthdaysToday extends StatelessWidget {
   Future<void> _wish(BuildContext context, Map<String, dynamic> m) async {
     final phone = (m['phone'] as String?)?.replaceAll(RegExp(r'[^0-9]'), '');
     if (phone == null || phone.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.noPhoneSaved)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.noPhoneSaved)));
       return;
     }
     final text = Uri.encodeComponent(

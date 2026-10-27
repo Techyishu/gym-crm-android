@@ -80,6 +80,8 @@
 		</array>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
+		<key>NSContactsUsageDescription</key>
+		<string>GymCRM lets you pick members from your phone contacts so you don't have to type their name and number.</string>
 		<key>NSCameraUsageDescription</key>
 		<string>GymCRM uses the camera to scan member QR codes for check-in and to take member profile photos.</string>
 		<key>NSPhotoLibraryAddUsageDescription</key>

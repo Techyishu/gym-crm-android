@@ -1,27 +1,59 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show max;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart' show NumberFormat;
 import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/providers/app_config_provider.dart';
 import '../../../core/providers/revenue_cat_provider.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/services/revenue_cat_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../l10n/l10n.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'cancel_subscription_screen.dart';
 import 'ios_custom_paywall.dart';
 import '../../../core/theme/app_icons.dart';
 
-const _kWhatsAppUrl = 'https://wa.me/917541004076';
+const kSupportWhatsAppUrl = 'https://wa.me/917541004076';
+
+/// "Talk to us" link: app_config.support_whatsapp when set, else the default.
+String supportWhatsAppUrl(WidgetRef ref) {
+  final n = ref.watch(appConfigProvider).valueOrNull?['support_whatsapp'];
+  return n is String && n.isNotEmpty ? 'https://wa.me/$n' : kSupportWhatsAppUrl;
+}
+
+/// Where checkout lives. Override for local testing against a gym-crm dev
+/// server: --dart-define=API_BASE=http://localhost:3000. Release builds never
+/// pass it, so they keep hitting production.
+const kBillingApiBase = String.fromEnvironment(
+  'API_BASE',
+  defaultValue: 'https://www.gymcrm.in',
+);
+
+/// Prices, terms and offers come from the database (get_paywall_pricing — the
+/// gym's locked plan or the current default, plus any offer), never from
+/// constants here. Checkout bills from the same tables, so the price shown and
+/// the price charged can't drift apart. Keyed by the typed coupon ('' = none).
+final paywallPricingProvider = FutureProvider.autoDispose
+    .family<Map<String, dynamic>, String>((ref, coupon) async {
+      final res = await Supabase.instance.client.rpc(
+        'get_paywall_pricing',
+        params: {'p_coupon': coupon.isEmpty ? null : coupon},
+      );
+      return Map<String, dynamic>.from(res as Map);
+    });
 
 /// The gym's own numbers, shown at the top of the paywall so the subscribe
 /// decision is framed against what the owner would lose rather than against a
@@ -150,7 +182,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 // ── Subscription screen (accessed from Settings while still active) ───────────
 
 class SubscriptionScreen extends ConsumerStatefulWidget {
-  const SubscriptionScreen({super.key});
+  /// Plan length to pre-select ('1mo' / '3mo' / '6mo' / '12mo'), e.g. from an
+  /// offer popup linking to /staff/subscription?term=12mo.
+  final String? initialTerm;
+  const SubscriptionScreen({super.key, this.initialTerm});
 
   @override
   ConsumerState<SubscriptionScreen> createState() => _SubscriptionScreenState();
@@ -180,27 +215,31 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
         title: const Text('Subscription'),
         leading: const BackButton(),
       ),
-      body: ResponsiveContent(child: _PlanBody(gym: gym)),
+      body: ResponsiveContent(
+        child: _PlanBody(gym: gym, initialTerm: widget.initialTerm),
+      ),
     );
   }
 }
 
 // ── Shared plan body ──────────────────────────────────────────────────────────
 
-class _PlanBody extends StatefulWidget {
+class _PlanBody extends ConsumerStatefulWidget {
   final Map<String, dynamic>? gym;
+  final String? initialTerm;
 
-  const _PlanBody({required this.gym});
+  const _PlanBody({required this.gym, this.initialTerm});
 
   @override
-  State<_PlanBody> createState() => _PlanBodyState();
+  ConsumerState<_PlanBody> createState() => _PlanBodyState();
 }
 
-class _PlanBodyState extends State<_PlanBody> {
+class _PlanBodyState extends ConsumerState<_PlanBody> {
   // Tier lives here rather than inside the pricing widget so the hero's
   // benefit list follows the toggle. A hero promising "unlimited members"
   // while Starter is selected is the kind of mismatch that gets refunded.
   String _tier = 'pro';
+  String _coupon = '';
 
   @override
   Widget build(BuildContext context) {
@@ -220,9 +259,26 @@ class _PlanBodyState extends State<_PlanBody> {
     // hidden — there is nothing left for it to switch between.
     final isActive = _paywallStatus(gym).tone == _StatusTone.active;
     final effectiveTier = (!_kStarterTierEnabled || isActive) ? 'pro' : _tier;
+    // The reminder allowance of the plan on sale (₹299 Pro: 100, ₹499: 300),
+    // straight from get_paywall_pricing, so the pitch matches what they get.
+    final proQuota =
+        (ref
+                    .watch(paywallPricingProvider(_coupon))
+                    .valueOrNull?['plans']?['pro']?['whatsapp_quota']
+                as num?)
+            ?.toInt();
     final features = isLegacy
         ? _kLegacyFeatures
-        : (effectiveTier == 'starter' ? _kStarterFeatures : _kProFeatures);
+        : effectiveTier == 'starter'
+        ? _kStarterFeatures
+        : [
+            ..._kProFeatures,
+            if (proQuota != null)
+              (
+                icon: AppIcons.layers,
+                text: context.l10n.paywallLimitsLine(proQuota),
+              ),
+          ];
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -232,15 +288,15 @@ class _PlanBodyState extends State<_PlanBody> {
           children: [
             _PaywallHero(gym: gym, features: features),
             const SizedBox(height: 24),
-            if (isLegacy)
-              _LegacyPricing(gym: gym)
-            else
-              _NewProPricing(
-                gym: gym,
-                tier: effectiveTier,
-                showTierToggle: _kStarterTierEnabled && !isActive,
-                onTierChanged: (t) => setState(() => _tier = t),
-              ),
+            _DbPricing(
+              gym: gym,
+              initialTerm: widget.initialTerm,
+              tier: effectiveTier,
+              showTierToggle: _kStarterTierEnabled && !isActive,
+              onTierChanged: (t) => setState(() => _tier = t),
+              coupon: _coupon,
+              onCouponChanged: (c) => setState(() => _coupon = c),
+            ),
             const SizedBox(height: 22),
             const _TrustFooterRow(),
             const SizedBox(height: 10),
@@ -398,9 +454,7 @@ class _FeatureList extends StatelessWidget {
               decoration: BoxDecoration(
                 border: i == features.length - 1
                     ? null
-                    : const Border(
-                        bottom: BorderSide(color: AppTheme.border),
-                      ),
+                    : const Border(bottom: BorderSide(color: AppTheme.border)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -530,11 +584,7 @@ _StatusInfo _paywallStatus(Map<String, dynamic>? gym) {
             '${exp.day}/${exp.month}/${exp.year}';
       }
     }
-    return (
-      icon: AppIcons.checkCircle,
-      message: sub,
-      tone: _StatusTone.active,
-    );
+    return (icon: AppIcons.checkCircle, message: sub, tone: _StatusTone.active);
   }
 
   // Trial active — iOS has no trial, so skip straight to the paywall message.
@@ -706,61 +756,6 @@ const _kLegacyFeatures = [
   (icon: AppIcons.supportAgent, text: 'Priority support'),
 ];
 
-// Multi-month terms at legacy gyms' locked-in ₹249/mo rate, same 7/12/20%
-// discount curve as _kProTerms. Dodo products: pdt_0NlI9s2bexR61Mzwwegj9 (3mo),
-// pdt_0NlIA0KQM7ZEHFNmfFNmw (6mo), pdt_0NlIDT6RzXCRV4YNUXYwN (12mo) — checkout
-// backend must map these against legacy_pricing gyms same way it already does
-// for the 1mo legacy_dodo_product_id.
-const _kLegacyMultiMonthTerms = [
-  _TermOption('3mo', '3 Months', 694, 3, discountPct: 7),
-  _TermOption('6mo', '6 Months', 1315, 6, discountPct: 12),
-  _TermOption(
-    '12mo',
-    '12 Months',
-    2390,
-    12,
-    discountPct: 20,
-    badge: '2 months free',
-  ),
-];
-
-class _LegacyPricing extends StatefulWidget {
-  final Map<String, dynamic>? gym;
-  const _LegacyPricing({required this.gym});
-
-  @override
-  State<_LegacyPricing> createState() => _LegacyPricingState();
-}
-
-class _LegacyPricingState extends State<_LegacyPricing> {
-  String _selectedTerm = '1mo';
-
-  @override
-  Widget build(BuildContext context) {
-    final monthlyPrice = widget.gym?['plan_price'] as int? ?? 249;
-    final terms = [
-      _TermOption('1mo', '1 Month', monthlyPrice, 1),
-      ..._kLegacyMultiMonthTerms,
-    ];
-    final selected = terms.firstWhere((t) => t.id == _selectedTerm);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _DurationSegmented(
-          terms: terms,
-          selected: _selectedTerm,
-          onChanged: (id) => setState(() => _selectedTerm = id),
-        ),
-        const SizedBox(height: 14),
-        _PricePanel(term: selected),
-        const SizedBox(height: 16),
-        _UpgradeButton(gym: widget.gym, term: _selectedTerm),
-      ],
-    );
-  }
-}
-
 // ── iOS: RevenueCat paywall + subscription management ─────────────────────────
 
 class _IosPaywall extends ConsumerWidget {
@@ -859,7 +854,14 @@ class _TermOption {
   final int totalPrice;
   final int months;
   final int? discountPct;
-  final String? badge;
+
+  /// Set when the price is a whole number of monthly prices: ₹2,990 for a
+  /// year at ₹299/month is "2 months free", which reads better than "17% off".
+  final int? freeMonths;
+
+  /// The live offer on this term (percent_off or amount_off, plus name,
+  /// cycles, code), or null.
+  final Map<String, dynamic>? offer;
 
   const _TermOption(
     this.id,
@@ -867,8 +869,27 @@ class _TermOption {
     this.totalPrice,
     this.months, {
     this.discountPct,
-    this.badge,
+    this.freeMonths,
+    this.offer,
   });
+}
+
+/// The term's price after its offer, in paise; null when no offer applies.
+/// A flat offer (amount_off, ₹) never takes the price below ₹1.
+int? _offerPaise(_TermOption t) {
+  final o = t.offer;
+  if (o == null) return null;
+  final pct = (o['percent_off'] as num?)?.toInt();
+  final amount = (o['amount_off'] as num?)?.toInt();
+  if (pct != null) return t.totalPrice * (100 - pct);
+  if (amount == null) return null;
+  return max((t.totalPrice - amount) * 100, 100);
+}
+
+/// "20% off" / "₹50 off".
+String _offerLabel(Map<String, dynamic> o) {
+  final pct = (o['percent_off'] as num?)?.toInt();
+  return pct != null ? '$pct% off' : '₹${(o['amount_off'] as num).toInt()} off';
 }
 
 // Master switch for whether the paywall offers Starter as a choice at all.
@@ -877,57 +898,43 @@ class _TermOption {
 // this flag; it only controls whether _PlanBody ever shows the toggle.
 const _kStarterTierEnabled = false;
 
-// Starter mirrors Pro's discount ladder (7 / 12 / 20%) so the two columns stay
-// comparable on the pricing page.
-//
-// These totals are display-only — the charge comes from the Dodo product, and
-// gym-crm/lib/dodopayments.ts mirrors the same prices for its downgrade guard.
-// Change all three together or the paywall quotes one price and checkout
-// charges another.
-const _kStarterTerms = [
-  _TermOption('1mo', '1 Month', 299, 1),
-  _TermOption('3mo', '3 Months', 839, 3, discountPct: 7),
-  _TermOption('6mo', '6 Months', 1579, 6, discountPct: 12),
-  _TermOption(
-    '12mo',
-    '12 Months',
-    2870,
-    12,
-    discountPct: 20,
-    badge: '2 months free',
-  ),
-];
-
-const _kProTerms = [
-  _TermOption('1mo', '1 Month', 499, 1),
-  _TermOption('3mo', '3 Months', 1399, 3, discountPct: 7),
-  _TermOption('6mo', '6 Months', 2599, 6, discountPct: 12),
-  _TermOption(
-    '12mo',
-    '12 Months',
-    4799,
-    12,
-    discountPct: 20,
-    badge: '2 months free',
-  ),
-];
-
-// Elite is hidden until plan gating is enforced. Do not delete.
-// No 3mo Elite product exists in Dodo yet — omitted here rather than showing
-// a term that would 503 at checkout.
-// ignore: unused_element
-const _kEliteTerms = [
-  _TermOption('1mo', '1 Month', 999, 1),
-  _TermOption('6mo', '6 Months', 5299, 6, discountPct: 12),
-  _TermOption(
-    '12mo',
-    '12 Months',
-    9599,
-    12,
-    discountPct: 20,
-    badge: 'Best Value',
-  ),
-];
+/// Builds the term ladder from get_paywall_pricing's `terms`. The "% off" and
+/// "N months free" labels are derived from the prices, so a new price in the
+/// database never shows a stale discount.
+List<_TermOption> _termsFrom(Map<String, dynamic>? plan) {
+  final raw = ((plan?['terms'] as List?) ?? const [])
+      .map((t) => Map<String, dynamic>.from(t as Map))
+      .toList();
+  int? monthly;
+  for (final t in raw) {
+    if (t['months'] == 1) monthly = (t['price'] as num).toInt();
+  }
+  return raw.map((t) {
+    final months = (t['months'] as num).toInt();
+    final price = (t['price'] as num).toInt();
+    final pct = monthly == null || months == 1
+        ? null
+        : (100 - price * 100 / (monthly * months)).round();
+    final free = monthly == null || months == 1 || price % monthly != 0
+        ? null
+        : months - price ~/ monthly;
+    return _TermOption(
+      t['term'] as String,
+      switch (months) {
+        1 => '1 month',
+        12 => '1 year',
+        _ => '$months months',
+      },
+      price,
+      months,
+      discountPct: pct != null && pct > 0 ? pct : null,
+      freeMonths: free != null && free > 0 ? free : null,
+      offer: t['offer'] == null
+          ? null
+          : Map<String, dynamic>.from(t['offer'] as Map),
+    );
+  }).toList();
+}
 
 // Benefit-first, in the order a gym owner cares about: money he is losing,
 // time he is wasting, then everything else. Plan limits still apply but belong
@@ -937,10 +944,7 @@ const _kProFeatures = [
     icon: AppIcons.chat,
     text: 'We WhatsApp your members before their fees are due — automatically',
   ),
-  (
-    icon: AppIcons.wallet,
-    text: 'Know exactly who owes you money, today',
-  ),
+  (icon: AppIcons.wallet, text: 'Know exactly who owes you money, today'),
   (
     icon: AppIcons.showChart,
     text: 'See what you collected this month without opening a register',
@@ -949,18 +953,12 @@ const _kProFeatures = [
     icon: AppIcons.qrCode,
     text: 'Members check in with a QR code, no register at the door',
   ),
-  (
-    icon: AppIcons.personAdd,
-    text: 'Never lose a walk-in enquiry again',
-  ),
+  (icon: AppIcons.personAdd, text: 'Never lose a walk-in enquiry again'),
   (
     icon: AppIcons.badge,
     text: 'Your staff get their own logins, with only the access you allow',
   ),
-  (
-    icon: AppIcons.layers,
-    text: 'Unlimited members and staff logins, 300 WhatsApp reminders a month',
-  ),
+  // + the limits line, built in _PlanBody from the plan's whatsapp_quota.
 ];
 
 // Starter (₹299) — same core product, with the limits enforced by
@@ -968,10 +966,7 @@ const _kProFeatures = [
 // Keep this list in step with `_starterLockedModules` there: a feature listed
 // as included that the app then locks is a refund request.
 const _kStarterFeatures = [
-  (
-    icon: AppIcons.wallet,
-    text: 'Know exactly who owes you money, today',
-  ),
+  (icon: AppIcons.wallet, text: 'Know exactly who owes you money, today'),
   (
     icon: AppIcons.chat,
     text: 'WhatsApp your members before fees are due — 100 reminders a month',
@@ -988,10 +983,7 @@ const _kStarterFeatures = [
     icon: AppIcons.personAdd,
     text: 'Leads, expenses, batches and exports — all included',
   ),
-  (
-    icon: AppIcons.layers,
-    text: 'Up to 100 members, 1 login',
-  ),
+  (icon: AppIcons.layers, text: 'Up to 100 members, 1 login'),
 ];
 
 // Elite is hidden until plan gating is enforced. Do not delete.
@@ -1000,10 +992,7 @@ const _kEliteFeatures = [
   (icon: AppIcons.groups, text: 'Unlimited members & check-ins'),
   (icon: AppIcons.badge, text: 'Unlimited staff logins & roles'),
   (icon: AppIcons.mail, text: 'Automatic email due reminders'),
-  (
-    icon: AppIcons.chat,
-    text: '1,500 free WhatsApp due reminders/month',
-  ),
+  (icon: AppIcons.chat, text: '1,500 free WhatsApp due reminders/month'),
   (icon: AppIcons.showChart, text: 'Advanced reports & analytics'),
   (icon: AppIcons.event, text: 'Class scheduling & bookings'),
   (icon: AppIcons.personAdd, text: 'Leads & CRM'),
@@ -1011,57 +1000,570 @@ const _kEliteFeatures = [
   (icon: AppIcons.supportAgent, text: 'Priority support'),
 ];
 
-class _NewProPricing extends StatefulWidget {
+class _DbPricing extends ConsumerStatefulWidget {
   final Map<String, dynamic>? gym;
   final String tier;
   final bool showTierToggle;
   final ValueChanged<String> onTierChanged;
-  const _NewProPricing({
+  final String coupon;
+  final ValueChanged<String> onCouponChanged;
+  final String? initialTerm;
+  const _DbPricing({
     required this.gym,
+    this.initialTerm,
     required this.tier,
     required this.showTierToggle,
     required this.onTierChanged,
+    required this.coupon,
+    required this.onCouponChanged,
   });
 
   @override
-  State<_NewProPricing> createState() => _NewProPricingState();
+  ConsumerState<_DbPricing> createState() => _DbPricingState();
 }
 
-class _NewProPricingState extends State<_NewProPricing> {
-  // Monthly by default. Annual (₹4,799) used to be pre-selected, which asks a
-  // gym owner for a year up front at the exact moment he is least convinced.
-  // Longer terms stay available in the segmented selector as an upsell, not
-  // as the default ask.
-  String _selectedTerm = '1mo';
+class _DbPricingState extends ConsumerState<_DbPricing> {
+  // Monthly by default (app_config.paywall_default_term can change it). Annual
+  // used to be pre-selected, which asks a gym owner for a year up front at the
+  // exact moment he is least convinced. Null until the owner taps a card.
+  String? _selectedTerm;
 
-  List<_TermOption> get _terms =>
-      widget.tier == 'starter' ? _kStarterTerms : _kProTerms;
+  // Offer codes already reported as offer_viewed on this visit.
+  final _loggedOffers = <String>{};
 
   @override
   Widget build(BuildContext context) {
-    // Term ids are identical across both ladders, so a tier switch keeps the
-    // duration the owner already chose.
-    final selected = _terms.firstWhere(
-      (t) => t.id == _selectedTerm,
-      orElse: () => _terms.first,
+    final pricingAsync = ref.watch(paywallPricingProvider(widget.coupon));
+    final defaultTerm =
+        ref.watch(appConfigProvider).valueOrNull?['paywall_default_term']
+            as String? ??
+        '1mo';
+
+    return pricingAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 48),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      // No fallback prices: a stale hardcoded number is worse than a retry.
+      error: (_, _) => _PricingUnavailable(
+        onRetry: () => ref.invalidate(paywallPricingProvider(widget.coupon)),
+      ),
+      data: (pricing) {
+        final plans = Map<String, dynamic>.from(
+          (pricing['plans'] as Map?) ?? const {},
+        );
+        final plan = plans[widget.tier] == null
+            ? null
+            : Map<String, dynamic>.from(plans[widget.tier] as Map);
+        final terms = _termsFrom(plan);
+        if (terms.isEmpty) {
+          return _PricingUnavailable(
+            onRetry: () =>
+                ref.invalidate(paywallPricingProvider(widget.coupon)),
+          );
+        }
+        // Term ids are identical across tiers, so a tier switch keeps the
+        // duration the owner already chose.
+        final selected = terms.firstWhere(
+          (t) => t.id == (_selectedTerm ?? widget.initialTerm ?? defaultTerm),
+          orElse: () => terms.first,
+        );
+        for (final t in terms) {
+          final code = t.offer?['code'] as String?;
+          if (code != null && _loggedOffers.add(code)) {
+            unawaited(AppEvents.offerViewed(code, t.id));
+          }
+        }
+        // Each term carries its own offer (get_paywall_pricing resolves them
+        // per term), matching what Dodo will actually discount on checkout.
+        final offer = selected.offer;
+        // In paise: 50% of ₹499 is ₹249.50, and the button must say what
+        // Dodo will charge, not a rounded ₹250.
+        final payNowPaise = _offerPaise(selected) ?? selected.totalPrice * 100;
+        final payNow = _formatRupees(payNowPaise);
+
+        final current = pricing['current'] == null
+            ? null
+            : Map<String, dynamic>.from(pricing['current'] as Map);
+        // The term the gym is already subscribed to: its price box shows what
+        // they actually pay, and its button can't sell it to them again.
+        final isCurrentTerm =
+            current != null &&
+            current['plan'] == widget.tier &&
+            current['term'] == selected.id;
+        final currentPct = isCurrentTerm
+            ? (current['discount_pct'] as num?)?.toInt()
+            : null;
+        final currentLeft = (current?['discount_cycles_left'] as num?)?.toInt();
+
+        // What a card shows instead of its list price, in paise: the offer on
+        // that term, or the gym's own running discount on the term it pays for.
+        int? cardPaise(_TermOption t) {
+          final offered = _offerPaise(t);
+          if (offered != null) return offered;
+          final ownPct =
+              current != null &&
+                  current['plan'] == widget.tier &&
+                  current['term'] == t.id
+              ? (current['discount_pct'] as num?)?.toInt()
+              : null;
+          return ownPct == null ? null : t.totalPrice * (100 - ownPct);
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (current != null && current['plan_price'] != null) ...[
+              _CurrentPlanNote(current: current),
+              const SizedBox(height: 14),
+            ],
+            if (widget.showTierToggle) ...[
+              _TierToggle(tier: widget.tier, onChanged: widget.onTierChanged),
+              const SizedBox(height: 12),
+            ],
+            const Text(
+              'Choose your plan',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.ink,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _TermGrid(
+              terms: terms,
+              selected: selected.id,
+              onChanged: (id) => setState(() => _selectedTerm = id),
+              discountedPaise: cardPaise,
+            ),
+            if (currentPct != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                currentLeft == null
+                    ? 'Your $currentPct% discount applies every month.'
+                    : 'Your $currentPct% discount: $currentLeft more '
+                          '${currentLeft == 1 ? 'month' : 'months'}, then ₹${selected.totalPrice}.',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.inkSoft,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            if (offer != null) ...[
+              const SizedBox(height: 12),
+              _OfferNote(offer: offer, term: selected, payNow: payNow),
+            ],
+            const SizedBox(height: 16),
+            _UpgradeButton(
+              gym: widget.gym,
+              plan: widget.tier,
+              term: selected.id,
+              price: payNow,
+              coupon: widget.coupon,
+              isCurrentTerm: isCurrentTerm,
+              hasSubscription: current != null,
+            ),
+            // Dodo adds 18% GST on top (tax-exclusive products). The button
+            // keeps the plan price; this line spells out the tax and total.
+            if (current == null) ...[
+              const SizedBox(height: 8),
+              Text(
+                '$payNow + ${_formatRupees((payNowPaise * 18 / 100).round())} '
+                'GST = ${_formatRupees((payNowPaise * 118 / 100).round())} · '
+                'UPI, cards & netbanking',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.inkSoft,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            if (current != null) ...[
+              const SizedBox(height: 6),
+              const _ManageSubscriptionLink(),
+            ],
+            // Coupons only apply to a new checkout, not to a plan change on a
+            // live subscription.
+            if (current == null) ...[
+              const SizedBox(height: 6),
+              _CouponField(
+                coupon: widget.coupon,
+                valid: pricing['coupon_valid'] as bool?,
+                onApply: widget.onCouponChanged,
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Two quiet text links under the subscribed button: our own cancel flow
+/// (reason → save offer → confirm), and Dodo's customer portal for the card /
+/// UPI mandate and invoices. Links, not a red button — findable, not
+/// suggested.
+class _ManageSubscriptionLink extends ConsumerStatefulWidget {
+  const _ManageSubscriptionLink();
+
+  @override
+  ConsumerState<_ManageSubscriptionLink> createState() =>
+      _ManageSubscriptionLinkState();
+}
+
+class _ManageSubscriptionLinkState
+    extends ConsumerState<_ManageSubscriptionLink> {
+  bool _loading = false;
+
+  Future<void> _openCancel() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const CancelSubscriptionScreen()),
+    );
+    if (changed == true) {
+      ref.invalidate(paywallPricingProvider);
+      ref.invalidate(staffProfileProvider);
+    }
+  }
+
+  Future<void> _open() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return;
+    setState(() => _loading = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$kBillingApiBase/api/billing/mobile/portal'),
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+      );
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final url = data['url'] as String?;
+      if (response.statusCode != 200 || url == null) {
+        throw Exception(data['error'] ?? 'portal ${response.statusCode}');
+      }
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open subscription settings. Try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(
+      fontSize: 13,
+      color: AppTheme.inkSoft,
+      fontWeight: FontWeight.w600,
+      decoration: TextDecoration.underline,
+      decorationColor: AppTheme.inkHint,
+    );
+    return Wrap(
+      alignment: WrapAlignment.center,
+      children: [
+        TextButton(
+          onPressed: _loading ? null : _open,
+          child: Text(
+            _loading ? 'Opening…' : 'Payment method & invoices',
+            style: style,
+          ),
+        ),
+        TextButton(
+          onPressed: _openCancel,
+          child: const Text('Cancel subscription', style: style),
+        ),
+      ],
+    );
+  }
+}
+
+class _PricingUnavailable extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _PricingUnavailable({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Column(
+        children: [
+          const Text(
+            'Could not load prices.',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.inkSoft,
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+        ],
+      ),
+    );
+  }
+}
+
+/// What a subscribed gym pays now: "~~₹499~~ ₹249.50/month for 5 more months,
+/// then ₹499", or just "₹499/month". From get_paywall_pricing's `current`,
+/// which the Dodo webhook keeps in step with the subscription's discount.
+class _CurrentPlanNote extends StatelessWidget {
+  final Map<String, dynamic> current;
+  const _CurrentPlanNote({required this.current});
+
+  @override
+  Widget build(BuildContext context) {
+    final price = (current['plan_price'] as num).toInt();
+    final pct = (current['discount_pct'] as num?)?.toInt();
+    final left = (current['discount_cycles_left'] as num?)?.toInt();
+    final discounted = pct == null ? null : _formatRupees(price * (100 - pct));
+    final period = left == null
+        ? 'every month'
+        : left == 1
+        ? 'for 1 more month, then ₹$price'
+        : 'for $left more months, then ₹$price';
+    const ink = TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w700,
+      color: AppTheme.ink,
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (widget.showTierToggle) ...[
-          _TierToggle(tier: widget.tier, onChanged: widget.onTierChanged),
-          const SizedBox(height: 12),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: AppTheme.cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'YOUR PLAN',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+              color: AppTheme.inkSoft,
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (discounted == null)
+            Text('₹$price/month', style: ink)
+          else
+            Text.rich(
+              TextSpan(
+                style: ink,
+                children: [
+                  TextSpan(
+                    text: '₹$price',
+                    style: const TextStyle(
+                      decoration: TextDecoration.lineThrough,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.inkSoft,
+                    ),
+                  ),
+                  TextSpan(text: ' $discounted/month $period'),
+                ],
+              ),
+            ),
         ],
-        _DurationSegmented(
-          terms: _terms,
-          selected: selected.id,
-          onChanged: (id) => setState(() => _selectedTerm = id),
+      ),
+    );
+  }
+}
+
+/// "₹249.50" for paise with a remainder, "₹299" otherwise.
+// Always INR here (Dodo bills in rupees), whatever the gym's own currency is.
+final _inr = NumberFormat.decimalPattern('en_IN');
+String _formatRupees(int paise) => paise % 100 == 0
+    ? '₹${_inr.format(paise ~/ 100)}'
+    : '₹${_inr.format(paise ~/ 100)}.${(paise % 100).toString().padLeft(2, '0')}';
+
+/// "50% OFF · ~~₹499~~ ₹249.50/month for your first 6 months, then ₹499".
+/// Dodo applies the actual discount from the offer's code; this only restates
+/// it, so it must say when the discount ends.
+class _OfferNote extends StatelessWidget {
+  final Map<String, dynamic> offer;
+  final _TermOption term;
+  final String payNow;
+  const _OfferNote({
+    required this.offer,
+    required this.term,
+    required this.payNow,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _offerLabel(offer).toUpperCase();
+    final cycles = (offer['cycles'] as num?)?.toInt();
+    final code = offer['code'] as String?;
+    final unit = switch (term.months) {
+      1 => 'month',
+      12 => 'year',
+      _ => '${term.months} months',
+    };
+    final full = _formatRupees(term.totalPrice * 100);
+    // "₹249 for your first month, then ₹299/month." · "₹2,490 for your first
+    // year, then ₹2,990/year." · "₹239.20/month for your first 3 months, …"
+    final sentence = cycles == null
+        ? ' $payNow every $unit.'
+        : cycles == 1
+        ? ' $payNow for your first $unit, then $full/$unit.'
+        : ' $payNow/$unit for your first $cycles payments, then $full/$unit.';
+    const gold = Color(0xFFE3C07A);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: AppTheme.darkCard,
+        gradient: AppTheme.darkGradient,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: gold,
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Text(
+              '${(offer['name'] as String? ?? 'Offer').toUpperCase()} · $label',
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1,
+                color: AppTheme.ink,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text.rich(
+            TextSpan(
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+                color: AppTheme.onDark,
+              ),
+              children: [
+                TextSpan(
+                  text: _formatRupees(term.totalPrice * 100),
+                  style: const TextStyle(
+                    decoration: TextDecoration.lineThrough,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.onDarkSoft,
+                  ),
+                ),
+                TextSpan(text: sentence),
+              ],
+            ),
+          ),
+          if (code != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(AppIcons.check, size: 14, color: gold),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    offer['is_coupon'] == true
+                        ? 'Coupon $code applied'
+                        : 'Applied automatically at checkout',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: gold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Collapsed by default so the paywall doesn't suggest everyone should go
+/// hunting for a code before paying.
+class _CouponField extends StatefulWidget {
+  final String coupon;
+  final bool? valid;
+  final ValueChanged<String> onApply;
+  const _CouponField({
+    required this.coupon,
+    required this.valid,
+    required this.onApply,
+  });
+
+  @override
+  State<_CouponField> createState() => _CouponFieldState();
+}
+
+class _CouponFieldState extends State<_CouponField> {
+  late final _controller = TextEditingController(text: widget.coupon);
+  late bool _open = widget.coupon.isNotEmpty;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_open) {
+      return Center(
+        child: TextButton(
+          onPressed: () => setState(() => _open = true),
+          child: const Text(
+            'Have a coupon code?',
+            style: TextStyle(fontSize: 13, color: AppTheme.inkSoft),
+          ),
         ),
-        const SizedBox(height: 14),
-        _PricePanel(term: selected),
-        const SizedBox(height: 16),
-        _UpgradeButton(gym: widget.gym, plan: widget.tier, term: _selectedTerm),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(hintText: 'Coupon code'),
+                onSubmitted: (v) => widget.onApply(v.trim().toUpperCase()),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              // Inline OutlinedButton in a Row: the theme's full-width
+              // minimumSize would crush the field next to it.
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+              onPressed: () =>
+                  widget.onApply(_controller.text.trim().toUpperCase()),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+        if (widget.valid != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              widget.valid! ? 'Coupon applied' : 'This code is not valid',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: widget.valid! ? AppTheme.accent : AppTheme.error,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -1142,178 +1644,207 @@ class _TierTab extends StatelessWidget {
   }
 }
 
-// ── Duration selector ─────────────────────────────────────────────────────────
+// ── Plan cards ────────────────────────────────────────────────────────────────
 
-/// Reuses the app's own pill-toggle idiom (see login screen's Staff/Member
-/// switch) instead of inventing a new interaction — four stacked bordered
-/// radio-cards read as a form; a segmented selector reads as a choice already
-/// made for you, which is the more confident framing on a paywall.
-class _DurationSegmented extends StatelessWidget {
+/// Every term visible at once as a 2×2 grid, so the yearly saving sits next to
+/// the monthly price instead of behind a tab. Each card carries its own price,
+/// per-month figure and saving; the selected one gets the accent border.
+class _TermGrid extends StatelessWidget {
   final List<_TermOption> terms;
   final String selected;
   final ValueChanged<String> onChanged;
-  const _DurationSegmented({
+
+  /// Price to show instead of the list price, in paise (offer or own discount).
+  final int? Function(_TermOption) discountedPaise;
+  const _TermGrid({
     required this.terms,
     required this.selected,
     required this.onChanged,
+    required this.discountedPaise,
   });
-
-  static String _shortLabel(_TermOption t) => switch (t.months) {
-    1 => '1 mo',
-    3 => '3 mo',
-    6 => '6 mo',
-    12 => '1 yr',
-    _ => t.label,
-  };
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppTheme.surface2,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        children: terms.map((t) {
-          final isSelected = t.id == selected;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onChanged(t.id),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.accent : Colors.transparent,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                alignment: Alignment.center,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _shortLabel(t),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: isSelected ? AppTheme.accentFg : AppTheme.ink,
-                      ),
-                    ),
-                    if (t.discountPct != null)
-                      Text(
-                        '${t.discountPct}% off',
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          color: isSelected
-                              ? AppTheme.accentFg.withValues(alpha: 0.75)
-                              : AppTheme.inkHint,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+    Widget cell(int i) => i < terms.length
+        ? _TermCard(
+            term: terms[i],
+            selected: terms[i].id == selected,
+            discountedPaise: discountedPaise(terms[i]),
+            onTap: () => onChanged(terms[i].id),
+          )
+        : const SizedBox.shrink();
+
+    return Column(
+      children: [
+        for (var i = 0; i < terms.length; i += 2) ...[
+          if (i > 0) const SizedBox(height: 12),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: cell(i)),
+                const SizedBox(width: 10),
+                Expanded(child: cell(i + 1)),
+              ],
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        ],
+      ],
     );
   }
 }
 
-// ── Price panel ────────────────────────────────────────────────────────────────
-
-/// The single focal price for whichever term is selected — replaces four
-/// near-identical stacked cards with one panel that gets bigger and more
-/// legible the moment it's the only price on screen.
-class _PricePanel extends StatelessWidget {
+class _TermCard extends StatelessWidget {
   final _TermOption term;
-  const _PricePanel({required this.term});
+  final bool selected;
+  final int? discountedPaise;
+  final VoidCallback onTap;
+  const _TermCard({
+    required this.term,
+    required this.selected,
+    required this.discountedPaise,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final offer = term.offer;
     final perMonth = (term.totalPrice / term.months).round();
-    final isMonthly = term.months == 1;
+    final free = term.freeMonths;
+    final saving = free != null
+        ? '$free ${free == 1 ? 'month' : 'months'} free'
+        : term.discountPct != null
+        ? 'save ${term.discountPct}%'
+        : null;
+    final sub = offer != null
+        ? (offer['cycles'] == 1
+              ? '${_offerLabel(offer)} first payment'
+              : '${_offerLabel(offer)} with offer')
+        : term.months == 1
+        ? 'per month'
+        : '₹$perMonth/mo${saving == null ? '' : ' · $saving'}';
+    final badge = offer != null
+        ? 'OFFER'
+        : free != null
+        ? '$free ${free == 1 ? 'MONTH' : 'MONTHS'} FREE'
+        : null;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            alignment: WrapAlignment.spaceBetween,
-            runSpacing: 6,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 14, 12, 13),
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xFFF4F9F9) : AppTheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: selected ? AppTheme.accent : AppTheme.border,
+                  width: selected ? 1.5 : 1,
+                ),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: AppTheme.accent.withValues(alpha: 0.10),
+                          spreadRadius: 3,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '₹${term.totalPrice}',
-                    style: AppTheme.numberStyle(
-                      fontSize: 34,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.ink,
+                    term.label,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.inkSoft,
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Text(
-                      isMonthly ? '/ month' : 'for ${term.label.toLowerCase()}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.inkSoft,
+                  const SizedBox(height: 6),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.end,
+                    spacing: 6,
+                    children: [
+                      Text(
+                        discountedPaise == null
+                            ? _formatRupees(term.totalPrice * 100)
+                            : _formatRupees(discountedPaise!),
+                        style: AppTheme.numberStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.ink,
+                        ),
                       ),
+                      if (discountedPaise != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Text(
+                            _formatRupees(term.totalPrice * 100),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.inkHint,
+                              decoration: TextDecoration.lineThrough,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    sub,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: offer != null || saving != null
+                          ? AppTheme.statusActive
+                          : AppTheme.inkSoft,
                     ),
                   ),
                 ],
               ),
-              if (term.badge != null)
-                Container(
+            ),
+            if (badge != null)
+              Positioned(
+                top: -9,
+                right: 10,
+                child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
+                    horizontal: 8,
+                    vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.accentSoft,
-                    borderRadius: BorderRadius.circular(8),
+                    color: offer != null
+                        ? const Color(0xFFE3C07A)
+                        : AppTheme.accent,
+                    borderRadius: BorderRadius.circular(99),
                   ),
                   child: Text(
-                    term.badge!,
-                    style: const TextStyle(
-                      fontSize: 11,
+                    badge,
+                    style: TextStyle(
+                      fontSize: 10,
                       fontWeight: FontWeight.w800,
-                      color: AppTheme.accent,
+                      letterSpacing: 0.3,
+                      color: offer != null ? AppTheme.ink : Colors.white,
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            isMonthly
-                ? 'Less than one member\'s monthly fee.'
-                : '₹$perMonth/mo · ${term.discountPct ?? 0}% cheaper than paying monthly.',
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppTheme.inkSoft,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+              ),
+          ],
+        ),
       ),
     );
   }
 }
-
 // ── WhatsApp help (footer) ────────────────────────────────────────────────────
 
 /// Was a full "Contact us for pricing" card sitting directly under the prices,
@@ -1321,11 +1852,11 @@ class _PricePanel extends StatelessWidget {
 /// into a manual sales conversation. Demoted to a plain footer link: still an
 /// escape hatch for people who genuinely need one, no longer the easier path
 /// than paying.
-class _WhatsAppFooterLink extends StatelessWidget {
+class _WhatsAppFooterLink extends ConsumerWidget {
   const _WhatsAppFooterLink();
 
-  Future<void> _openWhatsApp(BuildContext context) async {
-    final uri = Uri.parse(_kWhatsAppUrl);
+  Future<void> _openWhatsApp(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1336,10 +1867,11 @@ class _WhatsAppFooterLink extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final url = supportWhatsAppUrl(ref);
     return Center(
       child: TextButton(
-        onPressed: () => _openWhatsApp(context),
+        onPressed: () => _openWhatsApp(context, url),
         child: const Text(
           'Need help choosing? Talk to us',
           style: TextStyle(
@@ -1361,10 +1893,27 @@ class _UpgradeButton extends ConsumerStatefulWidget {
   final Map<String, dynamic>? gym;
   final String plan;
   final String term;
+
+  /// What the owner pays today (after any offer), e.g. "₹249.50".
+  final String price;
+
+  final String coupon;
+
+  /// The gym already pays for exactly this plan + term.
+  final bool isCurrentTerm;
+
+  /// A live subscription exists, so this button changes its plan rather than
+  /// starting a new one. A cancelled gym still inside its paid period has
+  /// access but no subscription, and must see "Subscribe".
+  final bool hasSubscription;
   const _UpgradeButton({
     required this.gym,
     this.plan = 'pro',
     required this.term,
+    required this.price,
+    this.coupon = '',
+    this.isCurrentTerm = false,
+    this.hasSubscription = false,
   });
 
   @override
@@ -1406,7 +1955,7 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
     setState(() => _loading = true);
     try {
       final response = await http.post(
-        Uri.parse('https://www.gymcrm.in/api/billing/mobile/checkout'),
+        Uri.parse('$kBillingApiBase/api/billing/mobile/checkout'),
         headers: {
           'Authorization': 'Bearer ${session.accessToken}',
           'Content-Type': 'application/json',
@@ -1415,6 +1964,7 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
           'plan': widget.plan,
           'term': widget.term,
           'platform': kIsWeb ? 'web' : 'mobile',
+          if (widget.coupon.isNotEmpty) 'coupon': widget.coupon,
         }),
       );
 
@@ -1438,7 +1988,9 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
       if (data['alreadyActive'] == true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('You are already subscribed to this plan.')),
+            const SnackBar(
+              content: Text('You are already subscribed to this plan.'),
+            ),
           );
         }
         ref.invalidate(staffProfileProvider);
@@ -1477,28 +2029,8 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
   }
 
   /// Names the price so the button restates the commitment instead of the
-  /// generic "Upgrade to Pro" it used to say. Mirrors the term lists the
-  /// pricing bodies render, including the legacy gym's locked-in 1mo rate.
-  ///
-  /// Was hardcoded to _kProTerms regardless of widget.plan — every tier's
-  /// button showed the Pro price even while Starter was selected.
-  String get _ctaLabel {
-    final isLegacy = widget.gym?['legacy_pricing'] == true;
-    final terms = isLegacy
-        ? [
-            _TermOption(
-              '1mo',
-              '1 Month',
-              widget.gym?['plan_price'] as int? ?? 249,
-              1,
-            ),
-            ..._kLegacyMultiMonthTerms,
-          ]
-        : (widget.plan == 'starter' ? _kStarterTerms : _kProTerms);
-    final match = terms.where((t) => t.id == widget.term);
-    if (match.isEmpty) return 'Subscribe';
-    return 'Subscribe · ₹${match.first.totalPrice}';
-  }
+  /// generic "Upgrade to Pro" it used to say.
+  String get _ctaLabel => 'Subscribe · ${widget.price}';
 
   @override
   Widget build(BuildContext context) {
@@ -1509,6 +2041,24 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
         planExpiresAt != null &&
         (DateTime.tryParse(planExpiresAt)?.toUtc().isAfter(now) ?? false);
     final isActive = (plan == 'pro' && planExpiresAt == null) || hasExpiry;
+    // Greyed out only while access is live. A gym whose subscription lapsed
+    // (expired, or stuck with a past expiry) must be able to buy it again.
+    final alreadyOwned = widget.isCurrentTerm && isActive;
+
+    if (alreadyOwned) {
+      return SizedBox(
+        height: 52,
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: null,
+          icon: const Icon(AppIcons.checkCircle, size: 18),
+          label: const Text(
+            'Subscribed · your current plan',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          ),
+        ),
+      );
+    }
 
     return SizedBox(
       height: 52,
@@ -1525,7 +2075,7 @@ class _UpgradeButtonState extends ConsumerState<_UpgradeButton>
                 ),
               )
             : Text(
-                isActive ? 'Change plan' : _ctaLabel,
+                widget.hasSubscription ? 'Change plan' : _ctaLabel,
                 style: const TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 15,

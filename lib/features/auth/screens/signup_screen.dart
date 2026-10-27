@@ -12,6 +12,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../../core/widgets/auth_canvas_kit.dart' show OrbitFormCard;
 import '../../../core/widgets/auth_form_kit.dart';
+import '../../../shared/widgets/redesign.dart' show SelectChip;
 import '../providers/auth_provider.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../l10n/l10n.dart';
@@ -28,6 +29,9 @@ class SignupScreen extends ConsumerStatefulWidget {
 
 class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
+  String? _memberCount;
+  bool _sizeError = false;
+  static const _sizes = ['under_30', '30_100', '100_300', 'over_300'];
   final _gymNameCtrl = TextEditingController();
   final _firstCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
@@ -158,6 +162,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       gymName: _gymNameCtrl.text.trim(),
       phone: phoneDigits.isEmpty ? null : '+${_country.phoneCode}$phoneDigits',
       currency: _currencyCode,
+      memberCount: _memberCount,
       goals: [],
     );
 
@@ -176,7 +181,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
 
-    unawaited(AppEvents.gymSetupCompleted());
+    unawaited(AppEvents.gymSetupCompleted(memberCount: _memberCount));
+    if (_memberCount != 'under_30') {
+      unawaited(AppEvents.qualifiedGym(_memberCount!));
+    }
 
     final prefs = await SharedPreferences.getInstance();
     // home_route stays the real destination for future cold starts — the
@@ -243,7 +251,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       setState(() => _termsError = true);
       return;
     }
-    if (!valid) return;
+    if (_memberCount == null) setState(() => _sizeError = true);
+    if (!valid || _memberCount == null) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -438,6 +447,43 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // Same question as the Google path's /gym-setup — feeds the
+              // qualified_gym event, so both paths must ask it.
+              AuthFieldLabel(context.l10n.gymSizeQuestion),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  for (final s in _sizes)
+                    SelectChip(
+                      label: switch (s) {
+                        'under_30' => context.l10n.sizeUnder30,
+                        '30_100' => '30–100',
+                        '100_300' => '100–300',
+                        _ => '300+',
+                      },
+                      selected: _memberCount == s,
+                      onTap: () => setState(() {
+                        _memberCount = s;
+                        _sizeError = false;
+                      }),
+                    ),
+                ],
+              ),
+              if (_sizeError)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    context.l10n.memberCountRequired,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.statusDanger,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 16),
 
               // Labelled "Name" (not "First name") — last name isn't collected

@@ -126,7 +126,8 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
         .select(
           'id, name, slug, member_code, plan, settings, razorpay_key_id, '
           'registration_enabled, registration_token, whatsapp_reminder_enabled, '
-          'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing, created_at',
+          'plan_expires_at, trial_ends_at, dodo_subscription_id, plan_price, status, legacy_pricing, created_at, '
+          'whatsapp_quota, whatsapp_monthly_quota_used, whatsapp_credits, price_plan',
         )
         .eq('id', activeGymId)
         .maybeSingle(),
@@ -450,8 +451,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
       clearGymSetupResolution();
       // Owed the one-time setup wizard. Recorded rather than navigated to,
       // because the consent gate redirects over a plain go() on a first signup.
-      await (await SharedPreferences.getInstance())
-          .setBool(kPendingFirstSetup, true);
+      await (await SharedPreferences.getInstance()).setBool(
+        kPendingFirstSetup,
+        true,
+      );
       // The signedIn event (app.dart) already re-read gymIdProvider once, back
       // when this account still had no profile row — so it cached the "No gym
       // assigned" error. Every gym-scoped screen reads through that provider,

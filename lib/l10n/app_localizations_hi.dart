@@ -129,6 +129,12 @@ class AppLocalizationsHi extends AppLocalizations {
   String get homeCheckInHint => 'स्कैन या हाज़िरी';
 
   @override
+  String get howToUse => 'GymCRM कैसे इस्तेमाल करें';
+
+  @override
+  String get howToUseOpenFailed => 'YouTube नहीं खुला';
+
+  @override
   String get trialEndsToday => 'ट्रायल आज खत्म हो रहा है';
 
   @override
@@ -2358,7 +2364,7 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get freeTrialNoCard =>
-      '3 दिन का मुफ्त ट्रायल · क्रेडिट कार्ड जरूरी नहीं';
+      '7 दिन का मुफ्त ट्रायल · क्रेडिट कार्ड जरूरी नहीं';
 
   @override
   String get optionalLabel => '— वैकल्पिक';
@@ -2504,4 +2510,145 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get keepEditing => 'भरते रहें';
+
+  @override
+  String get whatsappPausedTitle => 'WhatsApp रिमाइंडर रुके हुए हैं';
+
+  @override
+  String whatsappPausedBody(int quota) {
+    return 'इस महीने के $quota रिमाइंडर खत्म हो गए। और खरीदने तक मेंबर्स को फीस रिमाइंडर नहीं जाएंगे।';
+  }
+
+  @override
+  String get whatsappBuyMore => 'और खरीदें';
+
+  @override
+  String paywallLimitsLine(int quota) {
+    return 'अनलिमिटेड मेंबर और स्टाफ लॉगिन, हर महीने $quota WhatsApp रिमाइंडर';
+  }
+
+  @override
+  String get gymSizeQuestion => 'आपके जिम में कितने मेंबर हैं?';
+
+  @override
+  String get sizeUnder30 => '30 से कम';
+
+  @override
+  String get memberCountRequired => 'बताएं आपके जिम में कितने मेंबर हैं।';
+
+  @override
+  String get addYourMembers => 'अपने मेंबर जोड़ें';
+
+  @override
+  String membersAddedOf(int count, int target) {
+    return 'मेंबर जोड़े: $count / $target';
+  }
+
+  @override
+  String membersStepHint(int target) {
+    return 'जो मेंबर फीस दें, उन्हें जोड़ते जाएं। $target होते ही ड्यू और रिमाइंडर अपने आप चलेंगे।';
+  }
+
+  @override
+  String get fromContacts => 'कॉन्टैक्ट से';
+
+  @override
+  String get uploadExcel => 'Excel / CSV';
+
+  @override
+  String get membersPrivacyLine =>
+      'हम आपके मेंबर्स को कभी मैसेज नहीं करते। सिर्फ आप कर सकते हैं।';
+
+  @override
+  String get checklistFirstPayment => 'आज की पहली फीस दर्ज करें';
+
+  @override
+  String get addFromContacts => 'कॉन्टैक्ट से जोड़ें';
+
+  @override
+  String get searchNameOrPhone => 'नाम या फोन खोजें';
+
+  @override
+  String addNMembers(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count मेंबर जोड़ें',
+      one: '1 मेंबर जोड़ें',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get contactsPermissionDenied =>
+      'कॉन्टैक्ट से मेंबर चुनने के लिए फोन सेटिंग में कॉन्टैक्ट की अनुमति दें।';
+
+  @override
+  String get contactsNeedsUpdate =>
+      'कॉन्टैक्ट से जोड़ने के लिए ऐप का नया वर्शन चाहिए। Play Store से अपडेट करें।';
+
+  @override
+  String get contactsLoadFailed => 'कॉन्टैक्ट नहीं पढ़ पाए। फिर से कोशिश करें।';
+
+  @override
+  String homeMoneyDue(String amount, int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count मेंबर',
+      one: '1 मेंबर',
+    );
+    return '$amount बाकी · $_temp0';
+  }
+
+  @override
+  String get homeCheckInLocked => 'Pro में उपलब्ध';
+
+  @override
+  String get allFeatures => 'सभी फीचर';
+
+  @override
+  String get invoiceRemoveTitle => 'यह इनवॉइस हटाएं?';
+
+  @override
+  String get invoiceVoidAction => 'इनवॉइस रद्द करें (Void)';
+
+  @override
+  String get invoiceVoidHelp =>
+      'इनवॉइस और उसका नंबर रिकॉर्ड में रहेगा, लेकिन बकाया में नहीं गिना जाएगा। डुप्लीकेट के लिए यह सबसे अच्छा है।';
+
+  @override
+  String get invoiceDeleteAction => 'हमेशा के लिए हटाएं';
+
+  @override
+  String get invoiceDeleteHelp =>
+      'इनवॉइस मिट जाएगा। आपकी इनवॉइस सीरीज़ में उसका नंबर गायब रहेगा।';
+
+  @override
+  String invoiceDeleteWithPaymentsBody(String amount) {
+    return 'इससे $amount के पेमेंट भी आपकी कमाई से हट जाएंगे। इसी बिल का दूसरा इनवॉइस बना रहेगा। अगर यह पैसा सच में दो बार मिला था, तो इसे रिफंड करें।';
+  }
+
+  @override
+  String get invoiceVoidReasonLabel => 'कारण (ज़रूरी)';
+
+  @override
+  String get invoiceVoidReasonHint => 'जैसे: डुप्लीकेट इनवॉइस';
+
+  @override
+  String get invoiceVoided => 'इनवॉइस रद्द हो गया';
+
+  @override
+  String get invoiceDeleted => 'इनवॉइस हटा दिया गया';
+
+  @override
+  String get invoiceOnlyBillCantRemove =>
+      'यह पेड इनवॉइस इस अवधि का इकलौता बिल है, इसलिए हटाया नहीं जा सकता। इसके बजाय रिफंड या सुधार करें।';
+
+  @override
+  String get invoiceNotAllowed => 'आपके पास इनवॉइस हटाने की अनुमति नहीं है।';
+
+  @override
+  String get invoiceRemoveFailed =>
+      'इनवॉइस नहीं हटा सका। कृपया फिर कोशिश करें।';
 }

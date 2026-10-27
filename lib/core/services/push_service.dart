@@ -16,15 +16,20 @@ class PushService {
     // ponytail: web push needs a service worker + VAPID key, not set up —
     // skip rather than risk blocking boot. Add when web push is wired up.
     if (kIsWeb) return;
-    final fcm = FirebaseMessaging.instance;
-    await fcm.requestPermission();
-    await fcm.setForegroundNotificationPresentationOptions(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-    FirebaseMessaging.onMessageOpenedApp.listen(_open);
-    fcm.onTokenRefresh.listen(_saveToken);
+    try {
+      final fcm = FirebaseMessaging.instance;
+      await fcm.requestPermission();
+      await fcm.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      FirebaseMessaging.onMessageOpenedApp.listen(_open);
+      fcm.onTokenRefresh.listen(_saveToken);
+    } catch (e, s) {
+      // Firebase not configured (see main.dart) — push is simply off.
+      debugPrint('[Push] initialize error: $e\n$s');
+    }
   }
 
   /// App opened from a terminated state by tapping a push. Call after the

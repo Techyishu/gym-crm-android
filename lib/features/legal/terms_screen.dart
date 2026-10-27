@@ -70,7 +70,7 @@ class _TermsContent extends StatelessWidget {
                     'Subscriptions are billed monthly or annually as chosen. You may cancel at any time via your '
                     'Apple ID subscription settings; cancellation takes effect at the end of the current billing '
                     'period. No refunds are issued for unused periods.'
-              : 'New gym-owner accounts receive a 3-day free trial with full access. After the trial, '
+              : 'New gym-owner accounts receive a 7-day free trial with full access. After the trial, '
                     'continued use requires an active subscription. Subscription plans and pricing are listed at gymcrm.in.\n\n'
                     'Subscriptions are billed monthly or annually as chosen. You may cancel at any time; '
                     'cancellation takes effect at the end of the current billing period. No refunds are issued for unused periods.',

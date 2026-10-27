@@ -134,6 +134,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get homeCheckInHint => 'Scan or mark attendance';
 
   @override
+  String get howToUse => 'How to use GymCRM';
+
+  @override
+  String get howToUseOpenFailed => 'Could not open YouTube';
+
+  @override
   String get trialEndsToday => 'Trial ends today';
 
   @override
@@ -2392,7 +2398,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get createGym => 'Create Gym';
 
   @override
-  String get freeTrialNoCard => '3-day free trial · No credit card needed';
+  String get freeTrialNoCard => '7-day free trial · No credit card needed';
 
   @override
   String get optionalLabel => '— optional';
@@ -2541,4 +2547,147 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get keepEditing => 'Keep editing';
+
+  @override
+  String get whatsappPausedTitle => 'WhatsApp reminders paused';
+
+  @override
+  String whatsappPausedBody(int quota) {
+    return 'This month\'s $quota reminders are used up. Members won\'t get fee reminders until you buy more.';
+  }
+
+  @override
+  String get whatsappBuyMore => 'Buy more';
+
+  @override
+  String paywallLimitsLine(int quota) {
+    return 'Unlimited members and staff logins, $quota WhatsApp reminders a month';
+  }
+
+  @override
+  String get gymSizeQuestion => 'How many members does your gym have?';
+
+  @override
+  String get sizeUnder30 => 'Under 30';
+
+  @override
+  String get memberCountRequired => 'Choose how many members your gym has.';
+
+  @override
+  String get addYourMembers => 'Add your members';
+
+  @override
+  String membersAddedOf(int count, int target) {
+    return 'Members added: $count / $target';
+  }
+
+  @override
+  String membersStepHint(int target) {
+    return 'Add members as they pay. At $target, dues and reminders run on their own.';
+  }
+
+  @override
+  String get fromContacts => 'From contacts';
+
+  @override
+  String get uploadExcel => 'Excel / CSV';
+
+  @override
+  String get membersPrivacyLine =>
+      'We never message your members. Only you can.';
+
+  @override
+  String get checklistFirstPayment => 'Record today\'s first payment';
+
+  @override
+  String get addFromContacts => 'Add from contacts';
+
+  @override
+  String get searchNameOrPhone => 'Search name or phone';
+
+  @override
+  String addNMembers(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Add $count members',
+      one: 'Add 1 member',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get contactsPermissionDenied =>
+      'Allow contacts access in your phone settings to pick members from contacts.';
+
+  @override
+  String get contactsNeedsUpdate =>
+      'Adding from contacts needs the latest app version. Please update from the Play Store.';
+
+  @override
+  String get contactsLoadFailed =>
+      'Could not read your contacts. Please try again.';
+
+  @override
+  String homeMoneyDue(String amount, int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count members',
+      one: '1 member',
+    );
+    return '$amount due · $_temp0';
+  }
+
+  @override
+  String get homeCheckInLocked => 'Unlocks with Pro';
+
+  @override
+  String get allFeatures => 'All features';
+
+  @override
+  String get invoiceRemoveTitle => 'Remove this invoice?';
+
+  @override
+  String get invoiceVoidAction => 'Void invoice';
+
+  @override
+  String get invoiceVoidHelp =>
+      'Keeps the invoice and its number on record, but stops it counting as money owed. Best for a duplicate.';
+
+  @override
+  String get invoiceDeleteAction => 'Delete permanently';
+
+  @override
+  String get invoiceDeleteHelp =>
+      'Erases the invoice. Its number will be missing from your series.';
+
+  @override
+  String invoiceDeleteWithPaymentsBody(String amount) {
+    return 'This also removes $amount of payments from your revenue. Another invoice for the same bill stays. If you actually received this money twice, refund it instead.';
+  }
+
+  @override
+  String get invoiceVoidReasonLabel => 'Reason (required)';
+
+  @override
+  String get invoiceVoidReasonHint => 'e.g. Duplicate invoice';
+
+  @override
+  String get invoiceVoided => 'Invoice voided';
+
+  @override
+  String get invoiceDeleted => 'Invoice deleted';
+
+  @override
+  String get invoiceOnlyBillCantRemove =>
+      'This paid invoice is the only bill for this period, so it can\'t be removed. Refund or correct it instead.';
+
+  @override
+  String get invoiceNotAllowed =>
+      'You don\'t have permission to remove invoices.';
+
+  @override
+  String get invoiceRemoveFailed =>
+      'Couldn\'t remove the invoice. Please try again.';
 }

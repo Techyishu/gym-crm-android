@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,6 +24,9 @@ import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../expenses/expenses_screen.dart' show showAddExpenseSheet;
 import '../members/members_screen.dart' show showAddMemberSheet;
+import '../members/contacts_import_screen.dart';
+import '../members/import_csv_screen.dart';
+import '../../../core/providers/app_config_provider.dart';
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 
@@ -533,62 +538,98 @@ class _DashboardBody extends ConsumerWidget {
 
 // ─── Setup checklist (getting started) ────────────────────────────────────────
 
+/// Members a gym needs before GymCRM pays for itself: gyms past ~20 members
+/// paid at ~74%, almost no gym below did. app_config.activation_target
+/// overrides it.
+int activationTarget(Map<String, dynamic>? config) =>
+    (config?['activation_target'] as num?)?.toInt() ?? 20;
+
 class SetupChecklist extends ConsumerWidget {
   final Map<String, dynamic>? gym;
   final int memberCount, planCount, allTimeCheckins;
+
+  /// Any payment recorded yet (this or last month — trials are a week long).
+  final bool hasPayment;
   const SetupChecklist({
     super.key,
     required this.gym,
     required this.memberCount,
     required this.planCount,
     required this.allTimeCheckins,
+    required this.hasPayment,
   });
+
+  /// Check-in is Pro-only (DB trigger), so a trial gym can't tick it — the step
+  /// only appears once the gym pays.
+  static bool _paying(Map<String, dynamic>? gym) =>
+      const {'pro', 'starter', 'elite'}.contains(gym?['plan']);
+
+  /// Everything done → Home hides the card.
+  static bool isComplete({
+    required Map<String, dynamic>? gym,
+    required int memberCount,
+    required int planCount,
+    required int allTimeCheckins,
+    required bool hasPayment,
+    required int target,
+  }) =>
+      memberCount >= target &&
+      planCount > 0 &&
+      hasPayment &&
+      gym?['whatsapp_reminder_enabled'] == true &&
+      (!_paying(gym) || allTimeCheckins > 0);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
     final whatsappOn = gym?['whatsapp_reminder_enabled'] == true;
     final container = ProviderScope.containerOf(context, listen: false);
+    final target = activationTarget(ref.watch(appConfigProvider).valueOrNull);
+    void refresh(_) => container.invalidate(dashboardDataProvider);
 
-    // Labels name the outcome, not the mechanic — "Add 3 members" tells you
-    // what to do, "see your dashboard come alive" tells you why it's worth
-    // doing. "Add members" opens the sheet directly instead of routing to the
-    // members list first — one less stop between intent and the first value.
+    // The fee step only matters in the rare case the signup wizard didn't
+    // create a plan; otherwise it was a free tick that taught nothing.
     final steps = [
+      if (planCount == 0)
+        (
+          label: l.checklistSetFee,
+          done: false,
+          onTap: () => context.push('/staff/plans'),
+        ),
       (
-        label: context.l10n.checklistAddMembers,
-        done: memberCount >= 3,
-        onTap: () => showAddMemberSheet(
-          context,
-        ).then((_) => container.invalidate(dashboardDataProvider)),
+        label: l.checklistFirstPayment,
+        done: hasPayment,
+        onTap: () => openWithReturn(context, '/staff/billing'),
       ),
       (
-        label: context.l10n.checklistSetFee,
-        done: planCount > 0,
-        onTap: () => context.push('/staff/plans'),
-      ),
-      (
-        label: context.l10n.checklistTryCheckIn,
-        done: allTimeCheckins > 0,
-        onTap: () => openWithReturn(context, '/staff/check-in'),
-      ),
-      (
-        label: context.l10n.checklistWhatsApp,
+        label: l.checklistWhatsApp,
         done: whatsappOn,
         onTap: () => context.push('/staff/reminders'),
       ),
+      if (_paying(gym))
+        (
+          label: l.checklistTryCheckIn,
+          done: allTimeCheckins > 0,
+          onTap: () => openWithReturn(context, '/staff/check-in'),
+        ),
     ];
-    final doneCount = steps.where((s) => s.done).length;
+    final membersDone = memberCount >= target;
+    final doneCount = steps.where((s) => s.done).length + (membersDone ? 1 : 0);
+    final total = steps.length + 1;
+    // The first unfinished small step is drawn as the filled "next" button —
+    // but only once members are in; until then the members block is the ask.
+    final nextIndex = membersDone ? steps.indexWhere((s) => !s.done) : -1;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: AppTheme.cardDecoration(),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               Text(
-                context.l10n.gettingStarted,
+                l.gettingStarted,
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
@@ -597,7 +638,7 @@ class SetupChecklist extends ConsumerWidget {
               ),
               const Spacer(),
               Text(
-                '$doneCount / ${steps.length}',
+                '$doneCount / $total',
                 style: AppTheme.numberStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -606,68 +647,242 @@ class SetupChecklist extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
+          if (!membersDone)
+            _MembersStep(
+              count: memberCount,
+              target: target,
+              onAdd: () => showAddMemberSheet(context).then(refresh),
+              onContacts: kIsWeb
+                  ? null
+                  : () => Navigator.of(context, rootNavigator: true)
+                        .push(
+                          MaterialPageRoute(
+                            builder: (_) => const ContactsImportScreen(),
+                          ),
+                        )
+                        .then(refresh),
+              onImport: () => Navigator.of(context)
+                  .push(
+                    MaterialPageRoute(builder: (_) => const ImportCsvScreen()),
+                  )
+                  .then(refresh),
+            )
+          else
+            _StepRow(
+              label: l.membersAddedOf(memberCount, target),
+              done: true,
+              next: false,
+              onTap: () => context.go('/staff/members'),
+            ),
+          const SizedBox(height: 6),
+          for (var i = 0; i < steps.length; i++)
+            _StepRow(
+              label: steps[i].label,
+              done: steps[i].done,
+              next: i == nextIndex,
+              onTap: steps[i].onTap,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The ask until the gym has its members in: a counter to the activation
+/// target and three ways to add them, fastest first.
+class _MembersStep extends StatelessWidget {
+  final int count, target;
+  final VoidCallback onAdd, onImport;
+  final VoidCallback? onContacts;
+  const _MembersStep({
+    required this.count,
+    required this.target,
+    required this.onAdd,
+    required this.onImport,
+    required this.onContacts,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    Widget quick(IconData icon, String label, VoidCallback onTap) => Expanded(
+      child: OutlinedButton.icon(
+        // Inline in a Row: override the theme's full-width minimumSize.
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          backgroundColor: AppTheme.surface,
+          side: const BorderSide(color: AppTheme.border),
+        ),
+        onPressed: onTap,
+        icon: Icon(icon, size: 17, color: AppTheme.accent),
+        label: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.ink,
+          ),
+        ),
+      ),
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.accentSoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.accent, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l.addYourMembers,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.ink,
+                  ),
+                ),
+              ),
+              Text(
+                '$count / $target',
+                style: AppTheme.numberStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.accent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(99),
             child: LinearProgressIndicator(
-              value: doneCount / steps.length,
-              minHeight: 5,
-              backgroundColor: AppTheme.surface2,
+              value: (count / target).clamp(0.02, 1.0),
+              minHeight: 7,
+              backgroundColor: AppTheme.surface,
               valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accent),
             ),
           ),
-          const SizedBox(height: 14),
-          ...steps.map(
-            (s) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: GestureDetector(
-                onTap: s.onTap,
-                behavior: HitTestBehavior.opaque,
-                child: Row(
-                  children: [
-                    Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: s.done
-                            ? AppTheme.statusActive
-                            : AppTheme.surface2,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: s.done
-                          ? const Icon(
-                              AppIcons.check,
-                              size: 14,
-                              color: Colors.white,
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        s.label,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          color: s.done ? AppTheme.inkSoft : AppTheme.ink,
-                          decoration: s.done
-                              ? TextDecoration.lineThrough
-                              : null,
-                        ),
-                      ),
-                    ),
-                    if (!s.done)
-                      const Icon(
-                        AppIcons.chevronRight,
-                        size: 18,
-                        color: AppTheme.inkHint,
-                      ),
-                  ],
-                ),
+          const SizedBox(height: 8),
+          Text(
+            l.membersStepHint(target),
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.inkSoft,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(AppIcons.personAdd, size: 18),
+              label: Text(
+                l.addMember,
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (onContacts != null) ...[
+                quick(AppIcons.people, l.fromContacts, onContacts!),
+                const SizedBox(width: 8),
+              ],
+              quick(AppIcons.uploadFile, l.uploadExcel, onImport),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _StepRow extends StatelessWidget {
+  final String label;
+  final bool done, next;
+  final VoidCallback onTap;
+  const _StepRow({
+    required this.label,
+    required this.done,
+    required this.next,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (next) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: SizedBox(
+          height: 50,
+          child: ElevatedButton(
+            onPressed: onTap,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const Icon(AppIcons.chevronRight, size: 18),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return InkWell(
+      onTap: done ? null : onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Row(
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: done ? AppTheme.statusActive : AppTheme.surface2,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: done
+                  ? const Icon(AppIcons.check, size: 15, color: Colors.white)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: done ? AppTheme.inkSoft : AppTheme.ink,
+                  decoration: done ? TextDecoration.lineThrough : null,
+                ),
+              ),
+            ),
+            if (!done)
+              const Icon(
+                AppIcons.chevronRight,
+                size: 18,
+                color: AppTheme.inkHint,
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -688,9 +903,9 @@ class BirthdaysToday extends StatelessWidget {
   Future<void> _wish(BuildContext context, Map<String, dynamic> m) async {
     final phone = (m['phone'] as String?)?.replaceAll(RegExp(r'[^0-9]'), '');
     if (phone == null || phone.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.noPhoneSaved)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.l10n.noPhoneSaved)));
       return;
     }
     final text = Uri.encodeComponent(

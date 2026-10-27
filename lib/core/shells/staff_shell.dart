@@ -6,7 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/access/gym_permissions.dart';
+import '../../core/services/app_events.dart';
+import '../../features/staff/home/promotion_popup.dart';
 import 'add_fab.dart';
 import '../../core/billing/billing_access.dart';
 import '../../core/providers/revenue_cat_provider.dart';
@@ -121,6 +124,61 @@ class _StaffShellState extends ConsumerState<StaffShell>
     });
   }
 
+  bool _sessionSynced = false;
+
+  /// Once per app session, after the gym loads: Firebase user properties,
+  /// the owner's app_instance_id for server-side purchase events, and the
+  /// database-driven offer popup (owners only — staff can't buy).
+  void _syncSession(Map<String, dynamic> gym, String? role, bool hasAccess) {
+    if (_sessionSynced) return;
+    _sessionSynced = true;
+    final plan = gym['plan'] as String?;
+    final billingState = !hasAccess
+        ? 'expired'
+        : (plan == 'pro' || plan == 'starter' || plan == 'elite')
+        ? 'paying'
+        : 'trial';
+    final isOwner = role == 'owner';
+
+    unawaited(() async {
+      try {
+        final members = await Supabase.instance.client
+            .from('members')
+            .select('id')
+            .eq('gym_id', gym['id'] as String)
+            .eq('is_demo_data', false)
+            .count(CountOption.exact);
+        await AppEvents.setGymProperties(
+          billingState: billingState,
+          pricePlan: gym['price_plan'] as String?,
+          newHome: usesNewHome(gym),
+          members: members.count,
+        );
+        if (isOwner) {
+          final instanceId = await AppEvents.appInstanceId();
+          if (instanceId != null) {
+            await Supabase.instance.client.rpc(
+              'set_analytics_instance',
+              params: {'p_instance_id': instanceId},
+            );
+          }
+        }
+      } catch (_) {
+        // Analytics must never break the shell.
+      }
+    }());
+
+    if (!isOwner) {
+      markNoPromotion();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(maybeShowPromotion(context, billingState: billingState));
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final shell = widget.shell;
@@ -144,6 +202,7 @@ class _StaffShellState extends ConsumerState<StaffShell>
           ? ref.watch(iosProAccessProvider) ||
                 hasActiveBillingAccess(gym, ignoreTrial: true)
           : hasActiveBillingAccess(gym);
+      if (gym != null) _syncSession(gym, role, hasAccess);
       if (!hasAccess) return const PaywallScreen();
     }
 
@@ -573,14 +632,14 @@ const _oldMoreOrder = [
 ];
 
 List<StaffFeature> _oldMoreItems(GymPermissions permissions, String? role) =>
-    visibleStaffFeatures(permissions, role)
-        .where((f) => _oldMoreOrder.contains(f.route))
-        .toList()
-      ..sort(
-        (a, b) => _oldMoreOrder
-            .indexOf(a.route)
-            .compareTo(_oldMoreOrder.indexOf(b.route)),
-      );
+    visibleStaffFeatures(
+      permissions,
+      role,
+    ).where((f) => _oldMoreOrder.contains(f.route)).toList()..sort(
+      (a, b) => _oldMoreOrder
+          .indexOf(a.route)
+          .compareTo(_oldMoreOrder.indexOf(b.route)),
+    );
 
 class _OldBottomNav extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
@@ -1106,7 +1165,11 @@ class _MoreRow extends ConsumerWidget {
                 ],
               ),
             ),
-            const Icon(AppIcons.chevronRight, size: 20, color: AppTheme.inkHint),
+            const Icon(
+              AppIcons.chevronRight,
+              size: 20,
+              color: AppTheme.inkHint,
+            ),
           ],
         ),
       ),

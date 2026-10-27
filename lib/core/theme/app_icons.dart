@@ -62,6 +62,7 @@ abstract final class AppIcons {
   static const uploadFile = PhosphorIconsRegular.uploadSimple;
   static const play = PhosphorIconsRegular.play;
   static const pause = PhosphorIconsRegular.pause;
+  static const tutorial = PhosphorIconsRegular.playCircle;
   static const preview = PhosphorIconsRegular.eye;
   static const visibility = PhosphorIconsRegular.eye;
   static const visibilityOff = PhosphorIconsRegular.eyeSlash;

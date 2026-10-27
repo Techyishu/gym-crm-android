@@ -2,27 +2,36 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { sendPush } from '../_shared/fcm.ts'
 
 // Runs daily via pg_cron -> public.trigger_whatsapp_credit_push(). Pushes the
-// gym OWNER (external_id == profiles.id, role='owner') when their WhatsApp
-// balance (free monthly quota + purchased credits, same pool whatsapp-reminders
-// and send-whatsapp-invoice draw from) is low or exhausted.
+// gym OWNER when their WhatsApp balance (free monthly quota + purchased
+// credits, same pool whatsapp-reminders and send-whatsapp-invoice draw from)
+// is low or exhausted.
 //
-// Mirrors billing-expiry-push's notifications_log dedupe so a gym gets at
-// most one push per state (low / exhausted) per day, not one every cron tick.
+// Rate: per quota cycle, "low" once, "exhausted" once plus one follow-up two
+// days later. The old once-per-day dedupe sent ~15-20 identical pushes a month
+// to the same gym, which trained owners to ignore them.
 
 const CRON_SECRET = Deno.env.get('CRON_SECRET')!
 
-const LOW_THRESHOLD = 10
+/** "Low" fires with this many reminders left, unless app_config says otherwise. */
+const DEFAULT_LOW_LEFT = 20
+const EXHAUSTED_FOLLOW_UP_MS = 2 * 86400000
 
-// Mirrors planQuota() in whatsapp-reminders/index.ts — keep these in sync.
-function planQuota(gym: { plan: string; legacy_pricing?: boolean }): number {
-  if (gym.legacy_pricing) return 100
-  if (gym.plan === 'pro') return 300
-  if (gym.plan === 'elite') return 1500
-  return 0
-}
-
-function dateStr(d: Date) {
-  return d.toISOString().split('T')[0]
+/**
+ * Start of the gym's current quota cycle. The quota resets on the day-of-month
+ * of plan_started_at (else created_at), clamped to short months, the same rule
+ * as public.reset_whatsapp_quota_anniversaries().
+ */
+function cycleStart(anchorIso: string, now = new Date()): string {
+  const anchorDay = new Date(anchorIso).getUTCDate()
+  const day = (y: number, m: number) =>
+    Math.min(anchorDay, new Date(Date.UTC(y, m + 1, 0)).getUTCDate())
+  let y = now.getUTCFullYear()
+  let m = now.getUTCMonth()
+  if (now.getUTCDate() < day(y, m)) {
+    m -= 1
+    if (m < 0) { m = 11; y -= 1 }
+  }
+  return new Date(Date.UTC(y, m, day(y, m))).toISOString()
 }
 
 Deno.serve(async (req) => {
@@ -37,12 +46,12 @@ Deno.serve(async (req) => {
     { auth: { persistSession: false } }
   )
 
-  // Only gyms actually using WhatsApp reminders — otherwise every starter
-  // gym sitting at the default signup credit grant (10, same as LOW_THRESHOLD)
-  // would false-positive as "low" forever, whether they use the feature or not.
+  // Only gyms using WhatsApp reminders. whatsapp_quota is the DB computed
+  // column (public.whatsapp_quota(gyms)), so the price-plan quota lives in one
+  // place instead of being mirrored here.
   const { data: gyms, error: gymsErr } = await supabase
     .from('gyms')
-    .select('id, plan, legacy_pricing, whatsapp_credits, whatsapp_monthly_quota_used')
+    .select('id, plan, plan_expires_at, plan_started_at, created_at, whatsapp_quota, whatsapp_credits, whatsapp_monthly_quota_used')
     .eq('whatsapp_reminder_enabled', true)
 
   if (gymsErr) {
@@ -50,13 +59,26 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: gymsErr.message }), { status: 500 })
   }
 
+  const { data: lowRow } = await supabase
+    .from('app_config')
+    .select('value')
+    .eq('key', 'whatsapp_low_warning')
+    .maybeSingle()
+  const LOW_LEFT = Number(lowRow?.value) > 0 ? Number(lowRow!.value) : DEFAULT_LOW_LEFT
+
   let sent = 0
   let skipped = 0
   let failed = 0
-  const today = dateStr(new Date())
+  const now = new Date()
 
   for (const gym of gyms ?? []) {
-    const quotaLeft = Math.max(planQuota(gym) - (gym.whatsapp_monthly_quota_used ?? 0), 0)
+    // Paying gyms only. Unpaid gyms sit on their 10 signup credits and were
+    // being told "running low" every single day.
+    const quota = gym.whatsapp_quota ?? 0
+    const expired = gym.plan_expires_at != null && new Date(gym.plan_expires_at) <= now
+    if (quota <= 0 || gym.plan === 'free' || gym.plan === 'trial' || expired) continue
+
+    const quotaLeft = Math.max(quota - (gym.whatsapp_monthly_quota_used ?? 0), 0)
     const remaining = quotaLeft + (gym.whatsapp_credits ?? 0)
 
     let type: string
@@ -64,24 +86,31 @@ Deno.serve(async (req) => {
     let body: string
     if (remaining <= 0) {
       type = 'whatsapp_credit_exhausted'
-      title = 'WhatsApp credits exhausted'
-      body = "You've used all your WhatsApp reminders for this month. Top up now to keep renewal reminders going out."
-    } else if (remaining <= LOW_THRESHOLD) {
+      title = 'WhatsApp reminders paused'
+      body = `You've used this month's ${quota} reminders, so members aren't getting fee reminders. Buy more to restart them.`
+    } else if (remaining <= LOW_LEFT) {
       type = 'whatsapp_credit_low'
-      title = 'WhatsApp credits running low'
-      body = `Only ${remaining} WhatsApp reminder${remaining === 1 ? '' : 's'} left this month. Top up soon to avoid interruption.`
+      title = 'WhatsApp reminders running low'
+      body = `Only ${remaining} WhatsApp reminder${remaining === 1 ? '' : 's'} left this month. Buy more so fee reminders don't stop.`
     } else {
       continue
     }
 
-    const { data: already } = await supabase
+    const since = cycleStart(gym.plan_started_at ?? gym.created_at, now)
+    const { data: prior } = await supabase
       .from('notifications_log')
-      .select('id')
+      .select('created_at')
       .eq('gym_id', gym.id)
       .eq('type', type)
-      .gte('created_at', `${today}T00:00:00Z`)
-      .limit(1)
-    if (already?.length) { skipped++; continue }
+      .eq('status', 'sent')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+    const priorCount = prior?.length ?? 0
+    const due = type === 'whatsapp_credit_low'
+      ? priorCount === 0
+      : priorCount === 0 ||
+        (priorCount === 1 && now.getTime() - Date.parse(prior![0].created_at) >= EXHAUSTED_FOLLOW_UP_MS)
+    if (!due) { skipped++; continue }
 
     const { data: owner } = await supabase
       .from('profiles')

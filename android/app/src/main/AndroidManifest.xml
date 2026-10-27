@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- "Add from phone contacts" in the Getting started card. Read only. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
     <!-- Advertising ID. Required for Meta / Google install attribution; without
          it, ad platforms cannot tie a purchase back to the campaign that paid
          for it. Declare this in the Play Console Data safety form. -->

@@ -5,6 +5,7 @@ import '../billing/billing_access.dart';
 import '../theme/app_theme.dart';
 import '../utils/platform_info.dart';
 import '../theme/app_icons.dart';
+import '../../features/staff/home/promotion_popup.dart' show promotionShown;
 
 const _kDismissedKeyPrefix = 'plan_expiry_popup_dismissed_';
 
@@ -42,7 +43,7 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
     if (isIOS) return;
 
     // Never show this the moment a brand-new gym lands on its own dashboard —
-    // with a 3-day trial, "days left <= 3" is true from the very first
+    // with a short trial, "days left <= 3" can be true from the very first
     // second, so this used to be the first thing a new owner ever saw.
     final createdAt = DateTime.tryParse(
       widget.gym['created_at'] as String? ?? '',
@@ -55,6 +56,14 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
 
     final daysLeft = planExpiryDaysRemaining(widget.gym);
     if (daysLeft == null || daysLeft > 3) return;
+
+    // An offer popup from public.promotions already asks them to subscribe —
+    // don't stack this generic one on top of it. (Times out for safety.)
+    final offerShown = await promotionShown.future.timeout(
+      const Duration(seconds: 6),
+      onTimeout: () => false,
+    );
+    if (offerShown) return;
 
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_todayKey) ?? false) return;
@@ -88,9 +97,7 @@ class _PlanExpiryBannerState extends State<PlanExpiryBanner> {
     final tintBg = expired || daysLeft == 0
         ? AppTheme.statusDangerBg
         : AppTheme.statusWarnBg;
-    final icon = expired || daysLeft == 0
-        ? AppIcons.error
-        : AppIcons.schedule;
+    final icon = expired || daysLeft == 0 ? AppIcons.error : AppIcons.schedule;
 
     showDialog(
       context: context,

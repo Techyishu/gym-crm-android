@@ -31,6 +31,16 @@ class AppEvents {
   static Future<bool> _adsConsented() async =>
       (await SharedPreferences.getInstance()).getBool(kConsentAds) ?? false;
 
+  /// App-open ping so Meta can count the install on first open, before any
+  /// sign-up or consent. Only needed without ads consent — with consent the
+  /// SDK's auto-logging already sends it. Must run after applyStoredConsent(),
+  /// which sets Limited Data Use first, so Meta restricts processing. Carries
+  /// no user data, params or user ID — just the standard activate-app event.
+  static Future<void> logAppOpen() async {
+    if (!_meta || await _adsConsented()) return;
+    await _fb.logEvent(name: 'fb_mobile_activate_app');
+  }
+
   static Future<void> _log(String name, [Map<String, Object>? params]) async {
     if (_firebase) {
       await FirebaseAnalytics.instance.logEvent(name: name, parameters: params);
@@ -51,24 +61,29 @@ class AppEvents {
 
   /// `setup_gym` succeeded. The real activation point: the account now has a
   /// gym behind it rather than a bare auth row.
-  static Future<void> gymSetupCompleted() => _log('gym_setup_completed');
+  static Future<void> gymSetupCompleted({String? memberCount}) => _log(
+    'gym_setup_completed',
+    memberCount == null ? null : {'member_count': memberCount},
+  );
+
+  /// Setup finished by a gym that says it has 30+ members. The conversion to
+  /// bid Google Ads on: it tells the campaign which installs are real gyms,
+  /// not students, members or trainers. Fired once, right after setup.
+  static Future<void> qualifiedGym(String memberCount) =>
+      _log('qualified_gym', {'member_count': memberCount});
 
   /// First member added to a gym. Strongest early predictor of a paying gym.
   static Future<void> firstMemberAdded() => _log('first_member_added');
 
-  /// Subscription paid. The event both platforms should ultimately bid on.
+  /// Subscription paid — Meta only. Firebase/Google gets `purchase` from the
+  /// Dodo webhook (GA4 Measurement Protocol, gyms.firebase_app_instance_id),
+  /// which also covers renewals and phones that drop the checkout deep link;
+  /// logging it here too would count every first payment twice.
   static Future<void> purchase({
     required double amount,
     String currency = 'INR',
     String? plan,
   }) async {
-    if (_firebase) {
-      await FirebaseAnalytics.instance.logPurchase(
-        value: amount,
-        currency: currency,
-        parameters: plan == null ? null : {'plan': plan},
-      );
-    }
     if (!_meta) return;
     if (!await _adsConsented()) return;
     await _fb.logPurchase(amount: amount, currency: currency);
@@ -117,6 +132,56 @@ class AppEvents {
   /// logged when an already-subscribed owner browses Settings > Subscription
   /// voluntarily, which renders the same body but isn't a sales moment.
   static Future<void> paywallViewed() => _log('paywall_viewed');
+
+  /// A paywall plan card showed a live offer (once per paywall visit).
+  static Future<void> offerViewed(String code, String term) =>
+      _log('offer_viewed', {'offer_code': code, 'term': term});
+
+  /// The Home "WhatsApp reminders paused" banner was shown.
+  static Future<void> whatsappPaused() => _log('whatsapp_paused');
+
+  /// The database-driven offer popup (public.promotions) was shown / tapped.
+  static Future<void> promotionViewed(String id) =>
+      _log('promotion_viewed', {'promotion_id': id});
+  static Future<void> promotionClicked(String id) =>
+      _log('promotion_clicked', {'promotion_id': id});
+
+  /// Segments for Firebase / Google Ads audiences: billing state, locked price
+  /// plan, Home design and gym size. Android-only, like every Firebase call.
+  static Future<void> setGymProperties({
+    required String billingState,
+    String? pricePlan,
+    required bool newHome,
+    required int members,
+  }) async {
+    if (!_firebase) return;
+    final a = FirebaseAnalytics.instance;
+    final bucket = members == 0
+        ? '0'
+        : members < 3
+        ? '1-2'
+        : members < 20
+        ? '3-19'
+        : '20+';
+    await a.setUserProperty(name: 'billing_state', value: billingState);
+    await a.setUserProperty(name: 'price_plan', value: pricePlan ?? 'none');
+    await a.setUserProperty(
+      name: 'home_design',
+      value: newHome ? 'new' : 'classic',
+    );
+    await a.setUserProperty(name: 'member_bucket', value: bucket);
+  }
+
+  /// The device's Firebase app_instance_id, or null off Android / before
+  /// analytics consent. The Dodo webhook needs it to send `purchase`.
+  static Future<String?> appInstanceId() async {
+    if (!_firebase) return null;
+    try {
+      return await FirebaseAnalytics.instance.appInstanceId;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Owner tapped Subscribe and checkout began. On Android this is also the
   /// moment the app hands off to an external Custom Tab for Dodo checkout —

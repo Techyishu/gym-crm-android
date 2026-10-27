@@ -302,6 +302,18 @@ abstract class AppLocalizations {
   /// **'Scan or mark attendance'**
   String get homeCheckInHint;
 
+  /// No description provided for @howToUse.
+  ///
+  /// In en, this message translates to:
+  /// **'How to use GymCRM'**
+  String get howToUse;
+
+  /// No description provided for @howToUseOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open YouTube'**
+  String get howToUseOpenFailed;
+
   /// No description provided for @trialEndsToday.
   ///
   /// In en, this message translates to:
@@ -4353,7 +4365,7 @@ abstract class AppLocalizations {
   /// No description provided for @freeTrialNoCard.
   ///
   /// In en, this message translates to:
-  /// **'3-day free trial · No credit card needed'**
+  /// **'7-day free trial · No credit card needed'**
   String get freeTrialNoCard;
 
   /// No description provided for @optionalLabel.
@@ -4643,6 +4655,222 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Keep editing'**
   String get keepEditing;
+
+  /// No description provided for @whatsappPausedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp reminders paused'**
+  String get whatsappPausedTitle;
+
+  /// No description provided for @whatsappPausedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This month\'s {quota} reminders are used up. Members won\'t get fee reminders until you buy more.'**
+  String whatsappPausedBody(int quota);
+
+  /// No description provided for @whatsappBuyMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Buy more'**
+  String get whatsappBuyMore;
+
+  /// No description provided for @paywallLimitsLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited members and staff logins, {quota} WhatsApp reminders a month'**
+  String paywallLimitsLine(int quota);
+
+  /// No description provided for @gymSizeQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'How many members does your gym have?'**
+  String get gymSizeQuestion;
+
+  /// No description provided for @sizeUnder30.
+  ///
+  /// In en, this message translates to:
+  /// **'Under 30'**
+  String get sizeUnder30;
+
+  /// No description provided for @memberCountRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose how many members your gym has.'**
+  String get memberCountRequired;
+
+  /// No description provided for @addYourMembers.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your members'**
+  String get addYourMembers;
+
+  /// No description provided for @membersAddedOf.
+  ///
+  /// In en, this message translates to:
+  /// **'Members added: {count} / {target}'**
+  String membersAddedOf(int count, int target);
+
+  /// No description provided for @membersStepHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add members as they pay. At {target}, dues and reminders run on their own.'**
+  String membersStepHint(int target);
+
+  /// No description provided for @fromContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'From contacts'**
+  String get fromContacts;
+
+  /// No description provided for @uploadExcel.
+  ///
+  /// In en, this message translates to:
+  /// **'Excel / CSV'**
+  String get uploadExcel;
+
+  /// No description provided for @membersPrivacyLine.
+  ///
+  /// In en, this message translates to:
+  /// **'We never message your members. Only you can.'**
+  String get membersPrivacyLine;
+
+  /// No description provided for @checklistFirstPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'Record today\'s first payment'**
+  String get checklistFirstPayment;
+
+  /// No description provided for @addFromContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'Add from contacts'**
+  String get addFromContacts;
+
+  /// No description provided for @searchNameOrPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Search name or phone'**
+  String get searchNameOrPhone;
+
+  /// No description provided for @addNMembers.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Add 1 member} other{Add {count} members}}'**
+  String addNMembers(int count);
+
+  /// No description provided for @contactsPermissionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow contacts access in your phone settings to pick members from contacts.'**
+  String get contactsPermissionDenied;
+
+  /// No description provided for @contactsNeedsUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Adding from contacts needs the latest app version. Please update from the Play Store.'**
+  String get contactsNeedsUpdate;
+
+  /// No description provided for @contactsLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not read your contacts. Please try again.'**
+  String get contactsLoadFailed;
+
+  /// No description provided for @homeMoneyDue.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount} due · {count, plural, =1{1 member} other{{count} members}}'**
+  String homeMoneyDue(String amount, int count);
+
+  /// No description provided for @homeCheckInLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlocks with Pro'**
+  String get homeCheckInLocked;
+
+  /// No description provided for @allFeatures.
+  ///
+  /// In en, this message translates to:
+  /// **'All features'**
+  String get allFeatures;
+
+  /// No description provided for @invoiceRemoveTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this invoice?'**
+  String get invoiceRemoveTitle;
+
+  /// No description provided for @invoiceVoidAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Void invoice'**
+  String get invoiceVoidAction;
+
+  /// No description provided for @invoiceVoidHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Keeps the invoice and its number on record, but stops it counting as money owed. Best for a duplicate.'**
+  String get invoiceVoidHelp;
+
+  /// No description provided for @invoiceDeleteAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete permanently'**
+  String get invoiceDeleteAction;
+
+  /// No description provided for @invoiceDeleteHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Erases the invoice. Its number will be missing from your series.'**
+  String get invoiceDeleteHelp;
+
+  /// No description provided for @invoiceDeleteWithPaymentsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This also removes {amount} of payments from your revenue. Another invoice for the same bill stays. If you actually received this money twice, refund it instead.'**
+  String invoiceDeleteWithPaymentsBody(String amount);
+
+  /// No description provided for @invoiceVoidReasonLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reason (required)'**
+  String get invoiceVoidReasonLabel;
+
+  /// No description provided for @invoiceVoidReasonHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Duplicate invoice'**
+  String get invoiceVoidReasonHint;
+
+  /// No description provided for @invoiceVoided.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice voided'**
+  String get invoiceVoided;
+
+  /// No description provided for @invoiceDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice deleted'**
+  String get invoiceDeleted;
+
+  /// No description provided for @invoiceOnlyBillCantRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'This paid invoice is the only bill for this period, so it can\'t be removed. Refund or correct it instead.'**
+  String get invoiceOnlyBillCantRemove;
+
+  /// No description provided for @invoiceNotAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'You don\'t have permission to remove invoices.'**
+  String get invoiceNotAllowed;
+
+  /// No description provided for @invoiceRemoveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t remove the invoice. Please try again.'**
+  String get invoiceRemoveFailed;
 }
 
 class _AppLocalizationsDelegate

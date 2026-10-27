@@ -98,6 +98,8 @@ final _memberCheckInsProvider =
 
 final _memberInvoicesProvider =
     FutureProvider.family<List<Map<String, dynamic>>, String>((ref, id) async {
+      // An invoice voided/deleted from its own screen has to leave this list.
+      ref.watch(gymDataVersionProvider);
       final gymId = await ref.read(gymIdProvider.future);
       return await Supabase.instance.client
           .from('invoices')

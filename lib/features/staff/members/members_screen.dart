@@ -1385,12 +1385,19 @@ class _NoPlansBox extends StatelessWidget {
 /// of routing to the members list first. Fire-and-forget: resolves once the
 /// sheet closes for any reason (saved or dismissed); callers invalidate
 /// whatever provider they own.
-Future<void> showAddMemberSheet(BuildContext context) async {
+///
+/// [queue] (name, phone) pairs — e.g. contacts the owner picked — are worked
+/// through one by one: each opens the same form prefilled, so plan, payment
+/// and details are asked exactly as for a hand-typed member.
+Future<void> showAddMemberSheet(
+  BuildContext context, {
+  List<(String, String)> queue = const [],
+}) async {
   // A full page (both designs) with "Save & add next" for adding members back
   // to back, and a discard check instead of a swipe that loses typed data.
   final added = await Navigator.of(context, rootNavigator: true)
       .push<Map<String, dynamic>>(
-        MaterialPageRoute(builder: (_) => const _AddMemberPage()),
+        MaterialPageRoute(builder: (_) => _AddMemberPage(queue: queue)),
       );
   if (added == null || !context.mounted) return;
   await showAdaptiveSheet(
@@ -1647,7 +1654,8 @@ class _AddMemberException implements Exception {
 /// New design's Add member page. Each "Save & add next" swaps in a fresh form
 /// (new key), so every field starts empty like the first time.
 class _AddMemberPage extends StatefulWidget {
-  const _AddMemberPage();
+  final List<(String, String)> queue;
+  const _AddMemberPage({this.queue = const []});
 
   @override
   State<_AddMemberPage> createState() => _AddMemberPageState();
@@ -1656,30 +1664,69 @@ class _AddMemberPage extends StatefulWidget {
 class _AddMemberPageState extends State<_AddMemberPage> {
   int _round = 0;
 
+  // Next prefilled contact, or leave the page once the queue is used up.
+  void _next() {
+    if (widget.queue.isNotEmpty && _round + 1 >= widget.queue.length) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _round++);
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppTheme.background,
-    appBar: AppBar(
-      title: Text(context.l10n.addMember),
-      leading: const BackButton(),
-    ),
-    body: SafeArea(
-      top: false,
-      child: ResponsiveContent(
-        child: AddMemberSheet(
-          key: ValueKey(_round),
-          onAddedNext: () => setState(() => _round++),
+  Widget build(BuildContext context) {
+    final queued = widget.queue.isNotEmpty;
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: Text(
+          queued
+              ? '${context.l10n.addMember} · ${_round + 1}/${widget.queue.length}'
+              : context.l10n.addMember,
+        ),
+        leading: const BackButton(),
+        actions: [
+          if (queued) TextButton(onPressed: _next, child: const Text('Skip')),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: ResponsiveContent(
+          child: AddMemberSheet(
+            key: ValueKey(_round),
+            initialName: queued ? widget.queue[_round].$1 : null,
+            initialPhone: queued ? widget.queue[_round].$2 : null,
+            inQueue: queued,
+            lastInQueue: queued && _round + 1 >= widget.queue.length,
+            onAddedNext: _next,
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class AddMemberSheet extends ConsumerStatefulWidget {
   /// Set only on the new design's page: shows "Save & add next", which calls
   /// this after a save instead of closing.
   final VoidCallback? onAddedNext;
-  const AddMemberSheet({super.key, this.onAddedNext});
+
+  /// Prefill for a picked contact.
+  final String? initialName;
+  final String? initialPhone;
+
+  /// Working through picked contacts: the one save button moves to the next
+  /// contact instead of closing the page and dropping the rest.
+  final bool inQueue;
+  final bool lastInQueue;
+  const AddMemberSheet({
+    super.key,
+    this.onAddedNext,
+    this.initialName,
+    this.initialPhone,
+    this.inQueue = false,
+    this.lastInQueue = false,
+  });
 
   @override
   ConsumerState<AddMemberSheet> createState() => _AddMemberSheetState();
@@ -1722,6 +1769,13 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
   bool _moreDetails = false;
 
   bool get _asPage => widget.onAddedNext != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl.text = widget.initialName ?? '';
+    _phoneCtrl.text = localMobileDigits(widget.initialPhone);
+  }
 
   /// Nothing typed yet — leaving the page needs no "discard?" check.
   bool get _isBlank =>
@@ -2244,7 +2298,7 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           ),
           child: Row(
             children: [
-              if (_asPage) ...[
+              if (_asPage && !widget.inQueue) ...[
                 Expanded(
                   child: OutlinedButton(
                     // Local minimumSize: the theme's full-width default would
@@ -2265,7 +2319,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 child: SizedBox(
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: _loading ? null : _save,
+                    onPressed: _loading
+                        ? null
+                        : () => _save(addNext: widget.inQueue),
                     child: _loading
                         ? const SizedBox(
                             height: 20,
@@ -2275,7 +2331,11 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                               strokeWidth: 2,
                             ),
                           )
-                        : Text(context.l10n.addMember),
+                        : Text(
+                            widget.inQueue && !widget.lastInQueue
+                                ? context.l10n.saveAndAddNext
+                                : context.l10n.addMember,
+                          ),
                   ),
                 ),
               ),

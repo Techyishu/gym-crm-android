@@ -62,6 +62,7 @@ import '../features/shared/invoice_detail_screen.dart';
 import 'shells/staff_shell.dart';
 import 'shells/member_shell.dart';
 
+
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _staffNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'staff');
 final _memberNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'member');
@@ -437,7 +438,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         parentNavigatorKey: rootNavigatorKey,
         path: '/staff/subscription',
-        builder: (_, __) => const SubscriptionScreen(),
+        // ?term=12mo pre-selects that plan (the offer popup links here).
+        builder: (_, state) =>
+            SubscriptionScreen(initialTerm: state.uri.queryParameters['term']),
       ),
       // New design's Plans page (Home → Plans); old design keeps Money's tab.
       GoRoute(

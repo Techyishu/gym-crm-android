@@ -28,7 +28,9 @@ const _csvColumns = [
   'status',
   'joined_at',
 ];
-const _requiredColumns = {'first_name', 'last_name', 'email'};
+// Only a name is required: most gym registers have a name and a phone, not an
+// email. Email and phone, when present, are what duplicates are matched on.
+const _requiredColumns = {'first_name'};
 const _validStatuses = {'active', 'frozen', 'expired', 'cancelled', ''};
 final _emailRe = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
@@ -86,7 +88,10 @@ class _Invalid {
 }
 
 class ImportCsvScreen extends ConsumerStatefulWidget {
-  const ImportCsvScreen({super.key});
+  /// Rows to import instead of a file (e.g. picked phone contacts), keyed by
+  /// the CSV column names. The screen opens straight on the preview.
+  final List<Map<String, String>>? initialRows;
+  const ImportCsvScreen({super.key, this.initialRows});
 
   @override
   ConsumerState<ImportCsvScreen> createState() => _ImportCsvScreenState();
@@ -102,6 +107,23 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
   int _imported = 0;
   int _skipped = 0;
   List<_Invalid> _errors = [];
+
+  @override
+  void initState() {
+    super.initState();
+    final rows = widget.initialRows;
+    if (rows != null && rows.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _validate(rows);
+      });
+    }
+  }
+
+  /// Last 10 digits — "+91 98290-41210" and "9829041210" are the same member.
+  static String _phoneKey(String phone) {
+    final d = phone.replaceAll(RegExp(r'\D'), '');
+    return d.length > 10 ? d.substring(d.length - 10) : d;
+  }
 
   // ── CSV parsing (handles quotes, BOM, CRLF — same as the web) ──────────────
   List<String> _parseLine(String line) {
@@ -160,39 +182,42 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
       final r = rows[i];
       final rowNum = i + 2;
       final email = r['email'] ?? '';
+      final phone = r['phone'] ?? '';
+      final label = email.isNotEmpty ? email : phone;
       final status = r['status'] ?? '';
       final joinedAt = r['joined_at'] ?? '';
       if ((r['first_name'] ?? '').isEmpty) {
-        invalid.add(_Invalid(rowNum, email, 'Missing first_name'));
+        invalid.add(_Invalid(rowNum, label, 'Missing first_name'));
         continue;
       }
-      if ((r['last_name'] ?? '').isEmpty) {
-        invalid.add(_Invalid(rowNum, email, 'Missing last_name'));
-        continue;
-      }
-      if (email.isEmpty || !_emailRe.hasMatch(email)) {
-        invalid.add(_Invalid(rowNum, email, 'Invalid or missing email'));
+      if (email.isNotEmpty && !_emailRe.hasMatch(email)) {
+        invalid.add(_Invalid(rowNum, label, 'Invalid email'));
         continue;
       }
       if (status.isNotEmpty && !_validStatuses.contains(status)) {
-        invalid.add(_Invalid(rowNum, email, 'Invalid status "$status"'));
+        invalid.add(_Invalid(rowNum, label, 'Invalid status "$status"'));
         continue;
       }
       if (joinedAt.isNotEmpty && DateTime.tryParse(joinedAt) == null) {
         invalid.add(
-          _Invalid(rowNum, email, 'Invalid joined_at — use YYYY-MM-DD'),
+          _Invalid(rowNum, label, 'Invalid joined_at — use YYYY-MM-DD'),
         );
         continue;
       }
-      if (seen.contains(email.toLowerCase())) {
-        invalid.add(_Invalid(rowNum, email, 'Duplicate email in file'));
+      // Same person twice in the file: same email, or same phone.
+      final keys = [
+        if (email.isNotEmpty) 'e:${email.toLowerCase()}',
+        if (_phoneKey(phone).length >= 6) 'p:${_phoneKey(phone)}',
+      ];
+      if (keys.any(seen.contains)) {
+        invalid.add(_Invalid(rowNum, label, 'Duplicate in file'));
         continue;
       }
-      seen.add(email.toLowerCase());
+      seen.addAll(keys);
       valid.add(
         _CsvRow(
           r['first_name']!,
-          r['last_name']!,
+          r['last_name'] ?? '',
           email,
           r['phone'] ?? '',
           r['notes'] ?? '',
@@ -246,8 +271,7 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
 
   void _copyTemplate() {
     final header = _csvColumns.join(',');
-    const example =
-        'John,Doe,john@example.com,9876543210,Regular member,active,2024-01-15';
+    const example = 'Rahul,Sharma,,9876543210,Morning batch,active,2024-01-15';
     Clipboard.setData(ClipboardData(text: '$header\n$example'));
     _toast('Template copied to clipboard');
   }
@@ -279,30 +303,41 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
         countBefore = null;
       }
 
-      // Dedupe against existing gym emails (same as the server import).
+      // Skip members the gym already has: same email or same phone.
       final existing = await client
           .from('members')
-          .select('email')
+          .select('email, phone')
           .eq('gym_id', gymId);
-      final existingEmails = {
-        for (final m in (existing as List))
-          (m['email'] as String).toLowerCase(),
-      };
+      final existingEmails = <String>{};
+      final existingPhones = <String>{};
+      for (final m in (existing as List)) {
+        final e = (m['email'] as String?)?.toLowerCase();
+        if (e != null && e.isNotEmpty) existingEmails.add(e);
+        final p = _phoneKey(m['phone'] as String? ?? '');
+        if (p.length >= 6) existingPhones.add(p);
+      }
 
       final errors = <_Invalid>[];
       final toInsert = <Map<String, dynamic>>[];
       for (var i = 0; i < _valid.length; i++) {
         final r = _valid[i];
-        if (existingEmails.contains(r.email.toLowerCase())) {
-          errors.add(_Invalid(i + 2, r.email, 'Email already exists'));
+        final label = r.email.isNotEmpty ? r.email : r.phone;
+        if (r.email.isNotEmpty &&
+            existingEmails.contains(r.email.toLowerCase())) {
+          errors.add(_Invalid(i + 2, label, 'Email already exists'));
+          continue;
+        }
+        if (_phoneKey(r.phone).length >= 6 &&
+            existingPhones.contains(_phoneKey(r.phone))) {
+          errors.add(_Invalid(i + 2, label, 'Phone already exists'));
           continue;
         }
         final joined = DateTime.tryParse(r.joinedAt) ?? DateTime.now();
         toInsert.add({
           'gym_id': gymId,
           'first_name': r.firstName,
-          'last_name': r.lastName,
-          'email': r.email,
+          'last_name': r.lastName.isEmpty ? null : r.lastName,
+          'email': r.email.isEmpty ? null : r.email,
           'phone': r.phone.isEmpty ? null : r.phone,
           'notes': r.notes.isEmpty ? null : r.notes,
           'status': r.status,
@@ -330,10 +365,16 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           // crossed the cap — say so, or the importer reports a bare "Insert
           // failed" against 100 rows and the owner has no idea why.
           final reason =
-              planLimitMessage(e) ?? duplicatePhoneMessage(e) ?? 'Insert failed';
+              planLimitMessage(e) ??
+              duplicatePhoneMessage(e) ??
+              'Insert failed';
           for (var j = 0; j < batch.length; j++) {
             errors.add(
-              _Invalid(i + j + 2, batch[j]['email'] as String, reason),
+              _Invalid(
+                i + j + 2,
+                (batch[j]['email'] ?? batch[j]['phone'] ?? '') as String,
+                reason,
+              ),
             );
           }
           if (planLimitMessage(e) != null) break;
@@ -487,10 +528,7 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                       color: AppTheme.activeBg,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(
-                      AppIcons.uploadFile,
-                      color: AppTheme.ink,
-                    ),
+                    child: const Icon(AppIcons.uploadFile, color: AppTheme.ink),
                   ),
                   const SizedBox(height: 12),
                   const Text(
@@ -671,7 +709,7 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
                                     ),
                                   ),
                                   Text(
-                                    r.email,
+                                    r.email.isNotEmpty ? r.email : r.phone,
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: AppTheme.inkSoft,

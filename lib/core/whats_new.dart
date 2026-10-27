@@ -18,6 +18,17 @@ class WhatsNewEntry {
 
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
+    version: '1.0.3+63',
+    date: '27 Oct 2026',
+    title: 'Faster setup, cleaner invoices',
+    bullets: [
+      'Add members straight from your phone contacts. Pick them, then go through each one with the plan and payment filled in.',
+      'Plans and Reminders now sit on your first screen, so you no longer have to open All features to find them.',
+      'Made a duplicate invoice? You can now void it, or delete it when it is safe, and the lists update right away.',
+      'The setup screens for new gyms now look the same on every sign-up route, and ask how many members you have.',
+    ],
+  ),
+  WhatsNewEntry(
     version: '1.0.3+61',
     date: '3 Oct 2026',
     title: 'Add many members quickly',

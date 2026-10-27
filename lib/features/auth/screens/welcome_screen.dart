@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/how_to_use.dart';
+import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/app_locale.dart';
 import '../../../l10n/l10n.dart';
@@ -55,6 +57,17 @@ class WelcomeScreen extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // Language is chosen right here, on the first screen, not
+                      // on a separate screen after "I run a gym". English stays
+                      // the default until they tap.
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _LanguageToggle(
+                          selected: ref.watch(appLocaleProvider).languageCode,
+                          onSelect: (code) => setAppLocale(ref, Locale(code)),
+                        ),
+                      ),
+                      const SizedBox(height: _space8),
                       _OrbitHero(height: compact ? 320 : 390),
                       SizedBox(height: compact ? _space20 : _space24),
                       Padding(
@@ -76,11 +89,7 @@ class WelcomeScreen extends ConsumerWidget {
                       _PortalButton(
                         label: context.l10n.runAGym,
                         primary: true,
-                        onTap: () async {
-                          final chosen = await hasChosenAppLocale();
-                          if (!context.mounted) return;
-                          context.go(chosen ? '/login' : '/language');
-                        },
+                        onTap: () => context.go('/login'),
                       ),
                       const SizedBox(height: _space12),
                       _PortalButton(
@@ -89,6 +98,22 @@ class WelcomeScreen extends ConsumerWidget {
                         onTap: () => context.go('/login/member'),
                       ),
                       const SizedBox(height: _space12),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () => openHowToUse(context),
+                          icon: const Icon(AppIcons.tutorial, size: 18),
+                          label: Text(context.l10n.howToUse),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.accent,
+                            minimumSize: const Size(44, 44),
+                            textStyle: const TextStyle(
+                              fontFamily: AppTheme.fontFamily,
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
                       Center(
                         child: TextButton(
                           onPressed: () => _openHelp(context),
@@ -121,6 +146,58 @@ class WelcomeScreen extends ConsumerWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// "हिन्दी | English" pill for the top corner. The selected side is filled, and
+/// the whole screen switches the moment it's tapped.
+class _LanguageToggle extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onSelect;
+  const _LanguageToggle({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget side(String code, String label) {
+      final on = selected == code;
+      return Semantics(
+        button: true,
+        selected: on,
+        child: GestureDetector(
+          onTap: () => onSelect(code),
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 72, minHeight: 40),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: on ? AppTheme.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: on ? Colors.white : AppTheme.ink,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppTheme.surface2,
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [side('hi', 'हिन्दी'), side('en', 'English')],
       ),
     );
   }

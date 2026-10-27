@@ -73,14 +73,17 @@ const _kWhatsAppTemplates = [
 
 // Quota lives in lib/core/billing/plan_limits.dart, shared with the DB
 // (plan_whatsapp_quota) and the edge functions (_shared/plan_limits.ts).
-int _planQuota(Map<String, dynamic> gym) => whatsappQuota(gym);
+// whatsapp_quota is the DB's own figure (it follows the gym's price plan, so
+// ₹299 Pro gets 100); the local table is only a fallback for older rows.
+int _planQuota(Map<String, dynamic> gym) =>
+    (gym['whatsapp_quota'] as num?)?.toInt() ?? whatsappQuota(gym);
 
 final _remindersGymProvider = FutureProvider.autoDispose<Map<String, dynamic>?>(
   (ref) async {
     final gymId = await ref.watch(gymIdProvider.future);
     return await Supabase.instance.client
         .from('gyms')
-        .select()
+        .select('*, whatsapp_quota')
         .eq('id', gymId)
         .maybeSingle();
   },
