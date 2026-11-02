@@ -13,6 +13,7 @@ import '../../../core/billing/billing_access.dart';
 import '../../../core/billing/to_collect.dart';
 import '../settings/gym_branches_sheet.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../core/services/offline_checkin_queue.dart';
 import '../../../core/services/review_prompt.dart';
@@ -537,11 +538,13 @@ class _SetupChecklist extends ConsumerWidget {
         done: allTimeCheckins > 0,
         onTap: () => context.push('/staff/check-in'),
       ),
-      (
-        label: context.l10n.checklistWhatsApp,
-        done: whatsappOn,
-        onTap: () => context.push('/staff/reminders'),
-      ),
+      // Automatic WhatsApp is India-only, so it's no step for other gyms.
+      if (gymCountry == 'IN')
+        (
+          label: context.l10n.checklistWhatsApp,
+          done: whatsappOn,
+          onTap: () => context.push('/staff/reminders'),
+        ),
     ];
     final doneCount = steps.where((s) => s.done).length;
 
@@ -765,8 +768,8 @@ class _BirthdaysToday extends StatelessWidget {
       '${m['first_name'] ?? ''} ${m['last_name'] ?? ''}'.trim();
 
   Future<void> _wish(BuildContext context, Map<String, dynamic> m) async {
-    final phone = (m['phone'] as String?)?.replaceAll(RegExp(r'[^0-9]'), '');
-    if (phone == null || phone.isEmpty) {
+    final phone = whatsAppDigits(m['phone'] as String?);
+    if (phone.isEmpty) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(context.l10n.noPhoneSaved)));

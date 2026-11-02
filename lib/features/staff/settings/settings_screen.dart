@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'package:country_picker/country_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +19,7 @@ import '../../../core/access/gym_permissions.dart';
 import '../../../core/billing/plan_limits.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/utils/platform_info.dart' as platform_info;
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
@@ -26,9 +28,7 @@ import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/app_locale.dart';
 import '../../../l10n/l10n.dart';
-
-/// Public base URL for member self-registration links (matches the web app).
-const _registrationBaseUrl = 'https://gymcrm.in';
+import '../registration/registration_share.dart' show registrationLink;
 
 // Supabase project URL — hardcoded to match main.dart (required for Shorebird patch compatibility).
 // Plain-HTTP bridge (biometric devices can't do TLS) — forwards to the Supabase edge function.
@@ -1085,6 +1085,8 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
   String? _error;
   bool _initialized = false;
   String _currencyCode = 'INR';
+  // Drives the dial code on every member phone field + WhatsApp link.
+  Country _country = Country.parse('IN');
 
   // ponytail: fixed shortlist; add codes here if a gym asks for one we missed
   static const _currencies = [
@@ -1144,6 +1146,9 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
     _descCtrl.text = _settings['description'] as String? ?? '';
     _logoUrl = _settings['logo_url'] as String?;
     _currencyCode = _settings['currency'] as String? ?? 'INR';
+    _country =
+        Country.tryParse(_settings['country'] as String? ?? 'IN') ??
+        Country.parse('IN');
     _initialized = true;
   }
 
@@ -1226,6 +1231,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
         'website': _websiteCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'currency': _currencyCode,
+        'country': _country.countryCode,
         if (uploadedLogoUrl != null) 'logo_url': uploadedLogoUrl,
       };
       await Supabase.instance.client
@@ -1233,6 +1239,7 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
           .update({'name': _nameCtrl.text.trim(), 'settings': settings})
           .eq('id', gymId);
       setCurrency(_currencyCode);
+      setGymCountry(_country.countryCode);
       widget.onSaved();
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -1352,6 +1359,24 @@ class _GymDetailsSheetState extends ConsumerState<_GymDetailsSheet> {
                     ),
                 ],
                 onChanged: (v) => setState(() => _currencyCode = v ?? 'INR'),
+              ),
+              const SizedBox(height: 14),
+              const FieldLabel('Country (for member phone numbers)'),
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => showCountryPicker(
+                  context: context,
+                  showPhoneCode: true,
+                  onSelect: (c) => setState(() => _country = c),
+                ),
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    suffixIcon: Icon(Icons.expand_more),
+                  ),
+                  child: Text(
+                    '${_country.flagEmoji}  ${_country.name}  (+${_country.phoneCode})',
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               Container(
@@ -1893,11 +1918,19 @@ class _RegistrationLinkSheetState
   bool _toggling = false;
   bool _regenerating = false;
   bool _seeded = false;
+  // Whether the public form shows each plan's price (gyms.settings key,
+  // read by get_registration_form; missing means shown).
+  bool _showPrices = true;
+  Map<String, dynamic> _settings = const {};
 
   void _seed(Map<String, dynamic> gym) {
     if (_seeded) return;
     _seeded = true;
     _gymId = gym['id'] as String?;
+    _settings = Map<String, dynamic>.from(
+      (gym['settings'] as Map?) ?? const {},
+    );
+    _showPrices = _settings['registration_show_prices'] != false;
     _enabled = gym['registration_enabled'] as bool? ?? false;
     _token = gym['registration_token'] as String? ?? '';
     _expiresAt = gym['registration_token_expires_at'] as String?;
@@ -1916,8 +1949,7 @@ class _RegistrationLinkSheetState
     return 'Expires in ${diff.inMinutes}m';
   }
 
-  String get _link =>
-      _token.isEmpty ? '' : '$_registrationBaseUrl/register/$_token';
+  String get _link => _token.isEmpty ? '' : registrationLink(_token);
 
   Future<void> _toggle() async {
     if (_gymId == null) return;
@@ -1939,6 +1971,24 @@ class _RegistrationLinkSheetState
     }
   }
 
+  Future<void> _togglePrices() async {
+    if (_gymId == null) return;
+    final next = !_showPrices;
+    final merged = {..._settings, 'registration_show_prices': next};
+    setState(() => _showPrices = next);
+    try {
+      await Supabase.instance.client
+          .from('gyms')
+          .update({'settings': merged})
+          .eq('id', _gymId!);
+      _settings = merged;
+    } catch (e) {
+      debugPrint('[GymCRM] Toggle registration prices error: $e');
+      if (mounted) setState(() => _showPrices = !next);
+      _toast('Failed to update setting');
+    }
+  }
+
   Future<void> _regenerate() async {
     if (_gymId == null) return;
     final ok = await showConfirmDialog(
@@ -1954,21 +2004,19 @@ class _RegistrationLinkSheetState
     setState(() => _regenerating = true);
     try {
       final next = _uuidV4();
-      final nextExpiry = DateTime.now()
-          .toUtc()
-          .add(const Duration(hours: 24))
-          .toIso8601String();
+      // No expiry: the QR on the desk poster has to outlive a day. The old
+      // link still stops working the moment it is replaced.
       await Supabase.instance.client
           .from('gyms')
           .update({
             'registration_token': next,
-            'registration_token_expires_at': nextExpiry,
+            'registration_token_expires_at': null,
           })
           .eq('id', _gymId!);
       if (mounted)
         setState(() {
           _token = next;
-          _expiresAt = nextExpiry;
+          _expiresAt = null;
         });
       _toast('New registration link generated');
     } catch (e) {
@@ -2016,6 +2064,24 @@ class _RegistrationLinkSheetState
                   ),
                 ],
               ),
+
+              if (_enabled) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Show plan prices on the form',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          color: AppTheme.inkSoft,
+                        ),
+                      ),
+                    ),
+                    Switch(value: _showPrices, onChanged: (_) => _togglePrices()),
+                  ],
+                ),
+              ],
 
               if (_enabled && _link.isNotEmpty) ...[
                 const SizedBox(height: 16),

@@ -50,6 +50,7 @@ import '../features/staff/workout/staff_workout_plans_screen.dart';
 import '../features/staff/diet/staff_diet_plans_screen.dart';
 import '../features/staff/notifications/notifications_screen.dart';
 import '../features/member/portal/portal_home_screen.dart';
+import '../features/member/registration/register_screen.dart';
 import '../features/member/billing/member_billing_screen.dart';
 import '../features/member/workout/workout_screen.dart';
 import '../features/member/diet/diet_screen.dart';
@@ -141,6 +142,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           state.uri.scheme != 'https') {
         return prefs.getString('home_route') ?? '/login';
       }
+
+      // The gym's self-registration QR/link is public: a visitor has no
+      // account, and an owner opening their own link must not be bounced to
+      // the dashboard either. Nothing below (consent gate, role lookup) applies.
+      if (state.matchedLocation.startsWith('/register/')) return null;
 
       final user = Supabase.instance.client.auth.currentUser;
 
@@ -312,6 +318,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: rootNavigatorKey,
         path: '/consent',
         builder: (_, __) => const ConsentScreen(),
+      ),
+      GoRoute(
+        path: '/register/:token',
+        builder: (_, state) =>
+            MemberRegisterScreen(token: state.pathParameters['token']!),
       ),
       GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
       GoRoute(path: '/language', builder: (_, __) => const LanguageScreen()),

@@ -2690,4 +2690,106 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get invoiceRemoveFailed =>
       'Couldn\'t remove the invoice. Please try again.';
+
+  @override
+  String regTitle(String gym) {
+    return 'Join $gym';
+  }
+
+  @override
+  String regSubtitle(String gym) {
+    return 'Fill in your details. $gym will check them and confirm your membership.';
+  }
+
+  @override
+  String get regPhoto => 'Photo';
+
+  @override
+  String get regDob => 'Date of birth';
+
+  @override
+  String get regDobNotSet => 'Not set';
+
+  @override
+  String get regMoreDetails => 'Add email and emergency contact';
+
+  @override
+  String get regPlanHeading => 'CHOOSE YOUR PLAN';
+
+  @override
+  String get regPlanRequired => 'Please choose a plan';
+
+  @override
+  String regConsent(String gym) {
+    return 'I agree to share these details with $gym for my membership.';
+  }
+
+  @override
+  String get regConsentRequired => 'Please tick the box to continue';
+
+  @override
+  String get regSubmit => 'Send registration';
+
+  @override
+  String get regSentTitle => 'Registration sent';
+
+  @override
+  String regSentBody(String gym) {
+    return '$gym will check your details and confirm your membership.';
+  }
+
+  @override
+  String get regAnother => 'Register someone else';
+
+  @override
+  String get regErrInvalid => 'This registration link isn\'t valid.';
+
+  @override
+  String get regErrDisabled =>
+      'Registration isn\'t open for this gym right now.';
+
+  @override
+  String get regErrExpired =>
+      'This registration link has expired. Please ask the gym for a new one.';
+
+  @override
+  String get regErrGeneric =>
+      'Couldn\'t send your registration. Please check your details and try again.';
+
+  @override
+  String get regErrBusy =>
+      'The gym is getting many registrations right now. Please try again in a few minutes.';
+
+  @override
+  String get regErrPhoto =>
+      'That photo couldn\'t be used. Please try a different one.';
+
+  @override
+  String get regErrLoad =>
+      'Couldn\'t open this page. Check your connection and try again.';
+
+  @override
+  String get regRetry => 'Try again';
+
+  @override
+  String regMonths(int n) {
+    String _temp0 = intl.Intl.pluralLogic(
+      n,
+      locale: localeName,
+      other: '$n months',
+      one: '1 month',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String regDays(int n) {
+    String _temp0 = intl.Intl.pluralLogic(
+      n,
+      locale: localeName,
+      other: '$n days',
+      one: '1 day',
+    );
+    return '$_temp0';
+  }
 }

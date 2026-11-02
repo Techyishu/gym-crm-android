@@ -1,3 +1,4 @@
+import 'package:currency_picker/currency_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 
@@ -21,6 +22,24 @@ void setCurrency(String? code) {
   _currencyCode = c;
   _currency = NumberFormat.simpleCurrency(name: c, decimalDigits: 0);
   _currencyExact = NumberFormat.simpleCurrency(name: c, decimalDigits: 2);
+}
+
+const _euroCountries = {
+  'AT', 'BE', 'HR', 'CY', 'EE', 'FI', 'FR', 'DE', 'GR', 'IE', 'IT', //
+  'LV', 'LT', 'LU', 'MT', 'NL', 'PT', 'SK', 'SI', 'ES',
+};
+
+/// The currency a gym in [countryIso] most likely uses ("AE" → "AED"), or
+/// null if unknown. ISO 4217 codes start with the ISO 3166 country code,
+/// except shared currencies — the euro is the one gyms realistically hit.
+// ponytail: prefix rule; other shared currencies (XOF, XCD…) fall back to the picker's current value
+String? currencyForCountry(String countryIso) {
+  final iso = countryIso.toUpperCase();
+  if (_euroCountries.contains(iso)) return 'EUR';
+  for (final c in CurrencyService().getAll()) {
+    if (c.code.startsWith(iso)) return c.code;
+  }
+  return null;
 }
 
 final _date = DateFormat('d MMM yyyy');

@@ -4871,6 +4871,150 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Couldn\'t remove the invoice. Please try again.'**
   String get invoiceRemoveFailed;
+
+  /// No description provided for @regTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Join {gym}'**
+  String regTitle(String gym);
+
+  /// No description provided for @regSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill in your details. {gym} will check them and confirm your membership.'**
+  String regSubtitle(String gym);
+
+  /// No description provided for @regPhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo'**
+  String get regPhoto;
+
+  /// No description provided for @regDob.
+  ///
+  /// In en, this message translates to:
+  /// **'Date of birth'**
+  String get regDob;
+
+  /// No description provided for @regDobNotSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get regDobNotSet;
+
+  /// No description provided for @regMoreDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Add email and emergency contact'**
+  String get regMoreDetails;
+
+  /// No description provided for @regPlanHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'CHOOSE YOUR PLAN'**
+  String get regPlanHeading;
+
+  /// No description provided for @regPlanRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Please choose a plan'**
+  String get regPlanRequired;
+
+  /// No description provided for @regConsent.
+  ///
+  /// In en, this message translates to:
+  /// **'I agree to share these details with {gym} for my membership.'**
+  String regConsent(String gym);
+
+  /// No description provided for @regConsentRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Please tick the box to continue'**
+  String get regConsentRequired;
+
+  /// No description provided for @regSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Send registration'**
+  String get regSubmit;
+
+  /// No description provided for @regSentTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Registration sent'**
+  String get regSentTitle;
+
+  /// No description provided for @regSentBody.
+  ///
+  /// In en, this message translates to:
+  /// **'{gym} will check your details and confirm your membership.'**
+  String regSentBody(String gym);
+
+  /// No description provided for @regAnother.
+  ///
+  /// In en, this message translates to:
+  /// **'Register someone else'**
+  String get regAnother;
+
+  /// No description provided for @regErrInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'This registration link isn\'t valid.'**
+  String get regErrInvalid;
+
+  /// No description provided for @regErrDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Registration isn\'t open for this gym right now.'**
+  String get regErrDisabled;
+
+  /// No description provided for @regErrExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'This registration link has expired. Please ask the gym for a new one.'**
+  String get regErrExpired;
+
+  /// No description provided for @regErrGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t send your registration. Please check your details and try again.'**
+  String get regErrGeneric;
+
+  /// No description provided for @regErrBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'The gym is getting many registrations right now. Please try again in a few minutes.'**
+  String get regErrBusy;
+
+  /// No description provided for @regErrPhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'That photo couldn\'t be used. Please try a different one.'**
+  String get regErrPhoto;
+
+  /// No description provided for @regErrLoad.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open this page. Check your connection and try again.'**
+  String get regErrLoad;
+
+  /// No description provided for @regRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Try again'**
+  String get regRetry;
+
+  /// No description provided for @regMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'{n, plural, =1{1 month} other{{n} months}}'**
+  String regMonths(int n);
+
+  /// No description provided for @regDays.
+  ///
+  /// In en, this message translates to:
+  /// **'{n, plural, =1{1 day} other{{n} days}}'**
+  String regDays(int n);
 }
 
 class _AppLocalizationsDelegate

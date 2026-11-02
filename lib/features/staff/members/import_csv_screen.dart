@@ -119,11 +119,10 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
     }
   }
 
-  /// Last 10 digits — "+91 98290-41210" and "9829041210" are the same member.
-  static String _phoneKey(String phone) {
-    final d = phone.replaceAll(RegExp(r'\D'), '');
-    return d.length > 10 ? d.substring(d.length - 10) : d;
-  }
+  /// Full number with the gym's country code — "+91 98290-41210" and
+  /// "9829041210" are the same member, but two countries' numbers that share
+  /// their last 10 digits are not.
+  static String _phoneKey(String phone) => whatsAppDigits(phone);
 
   // ── CSV parsing (handles quotes, BOM, CRLF — same as the web) ──────────────
   List<String> _parseLine(String line) {
@@ -338,7 +337,8 @@ class _ImportCsvScreenState extends ConsumerState<ImportCsvScreen> {
           'first_name': r.firstName,
           'last_name': r.lastName.isEmpty ? null : r.lastName,
           'email': r.email.isEmpty ? null : r.email,
-          'phone': r.phone.isEmpty ? null : r.phone,
+          // Stored with the country code, or WhatsApp reminders never reach them.
+          'phone': phoneWithCountryCode(r.phone),
           'notes': r.notes.isEmpty ? null : r.notes,
           'status': r.status,
           'joined_at': joined.toUtc().toIso8601String(),

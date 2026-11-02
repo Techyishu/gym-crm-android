@@ -516,11 +516,11 @@ class _AddMemberStepState extends ConsumerState<_AddMemberStep> {
             controller: _phoneCtrl,
             keyboardType: TextInputType.phone,
             decoration: canvasFieldDecoration(hint: '9876543210').copyWith(
-              prefixIcon: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Text(
-                  '+91',
-                  style: TextStyle(
+                  '+$gymDialCode',
+                  style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.inkSoft,

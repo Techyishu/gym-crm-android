@@ -122,6 +122,10 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
             final showInvoiceBadge =
                 coachmark?.shouldShow('feature_invoice_whatsapp') ?? false;
 
+            // Automatic WhatsApp is India-only; elsewhere those tabs show a note
+            // and must never read "On", whatever the stored flag says.
+            final india =
+                ((gym['settings'] as Map?)?['country'] ?? 'IN') == 'IN';
             final tabs = [
               (
                 icon: AppIcons.notifications,
@@ -132,13 +136,17 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
               (
                 icon: AppIcons.chat,
                 label: context.l10n.whatsapp,
-                on: gym['whatsapp_reminder_enabled'] as bool? ?? false,
+                on:
+                    india &&
+                    (gym['whatsapp_reminder_enabled'] as bool? ?? false),
                 isNew: false,
               ),
               (
                 icon: AppIcons.receipt,
                 label: context.l10n.invoices,
-                on: gym['whatsapp_invoice_enabled'] as bool? ?? false,
+                on:
+                    india &&
+                    (gym['whatsapp_invoice_enabled'] as bool? ?? false),
                 isNew: showInvoiceBadge,
               ),
             ];
@@ -186,6 +194,12 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
                     child: switch (_tab) {
                       0 => _PushReminderCard(gym: gym, onChanged: onChanged),
+                      // Automatic WhatsApp (reminders + invoices) is India-only
+                      // — Meta bills per message by the member's country at up
+                      // to 40x India's rate, and the server refuses the send.
+                      // Read from this gym row, not the global gymCountry: a
+                      // direct /staff/reminders load never fetches the profile.
+                      _ when !india => const _WhatsAppIndiaOnlyNote(),
                       1 => _WhatsAppReminderCard(
                         gym: gym,
                         onChanged: onChanged,
@@ -198,6 +212,41 @@ class _RemindersScreenState extends ConsumerState<RemindersScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// Shown on the WhatsApp/Invoices tabs for gyms outside India, in place of
+/// the toggles and the message-pack shop.
+class _WhatsAppIndiaOnlyNote extends StatelessWidget {
+  const _WhatsAppIndiaOnlyNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.cardDecoration(),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Automatic WhatsApp is available in India only',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.ink,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'To remind a member, open them on the Members page and tap '
+            'WhatsApp. The message is sent from your own phone, free.\n\n'
+            'Members using the member app still get push reminders — see the '
+            'Push tab.',
+            style: TextStyle(fontSize: 13.5, color: AppTheme.inkSoft),
+          ),
+        ],
       ),
     );
   }

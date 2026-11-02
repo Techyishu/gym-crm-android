@@ -8,6 +8,7 @@ import '../../../core/access/role_access.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../l10n/l10n.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/services/data_refresh.dart';
 import '../../../shared/widgets/redesign.dart';
@@ -1183,8 +1184,7 @@ class _WhatsAppIcon extends StatelessWidget {
 
   Future<void> _launch(BuildContext context) async {
     final phone = item.member['phone'] as String? ?? '';
-    final clean = phone.replaceAll(RegExp(r'\D'), '');
-    final number = clean.startsWith('91') ? clean : '91$clean';
+    final number = whatsAppDigits(phone);
     final when = formatDateFromString(_ymd(item.due));
     // A reminder for something still ahead; a plain hello for a late payment.
     final text = item.days > 0

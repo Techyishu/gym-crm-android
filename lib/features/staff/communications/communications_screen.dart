@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -124,13 +125,7 @@ class _WaDueRemindersCardState extends ConsumerState<_WaDueRemindersCard> {
     }
   }
 
-  String _e164(String phone) {
-    final d = phone.replaceAll(RegExp(r'\D'), '');
-    if (d.isEmpty) return '';
-    if (d.startsWith('91') && d.length == 12) return d;
-    if (d.length == 10) return '91$d';
-    return d;
-  }
+  String _e164(String phone) => whatsAppDigits(phone);
 
   String _buildMsg(String name, String? dateStr) {
     final n = name.isEmpty ? 'there' : name;

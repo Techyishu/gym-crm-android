@@ -19,6 +19,15 @@ class WhatsNewEntry {
 const whatsNewEntries = <WhatsNewEntry>[
   WhatsNewEntry(
     version: '1.0.3+63',
+    date: '28 Oct 2026',
+    title: 'Gyms outside India',
+    bullets: [
+      'Pick your country in Settings → Gym details. Member phone numbers and WhatsApp buttons then use your country code instead of +91.',
+      'Members with a number from outside India can sign up for the member app without an SMS code. You approve them from the Members page.',
+    ],
+  ),
+  WhatsNewEntry(
+    version: '1.0.3+63',
     date: '27 Oct 2026',
     title: 'Faster setup, cleaner invoices',
     bullets: [

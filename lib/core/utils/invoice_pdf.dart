@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'formatters.dart';
+import 'validators.dart' show gymCountry;
 
 /// Shared by InvoiceDetailScreen (share button) and future WhatsApp flow.
 /// Takes the same map shape returned by:
@@ -165,7 +166,7 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> inv) async {
                       ),
                     if (gstin != null && gstin.isNotEmpty)
                       pw.Text(
-                        'GSTIN: $gstin',
+                        '${gymCountry == 'IN' ? 'GSTIN' : 'Tax ID'}: $gstin',
                         style: pw.TextStyle(
                           font: regular,
                           fontSize: 10,
@@ -392,12 +393,17 @@ Future<Uint8List> buildInvoicePdf(Map<String, dynamic> inv) async {
 
           if (settings['show_gst_breakup'] == true && gstAmount > 0) ...[
             _pdfAmountRow(regular, bold, 'TAXABLE VALUE', taxableAmount),
-            if (cgstAmount > 0)
-              _pdfAmountRow(regular, bold, 'CGST', cgstAmount),
-            if (sgstAmount > 0)
-              _pdfAmountRow(regular, bold, 'SGST', sgstAmount),
-            if (igstAmount > 0)
-              _pdfAmountRow(regular, bold, 'IGST', igstAmount),
+            // CGST/SGST/IGST is India's split; elsewhere it is one tax line.
+            if (gymCountry != 'IN')
+              _pdfAmountRow(regular, bold, 'TAX', gstAmount)
+            else ...[
+              if (cgstAmount > 0)
+                _pdfAmountRow(regular, bold, 'CGST', cgstAmount),
+              if (sgstAmount > 0)
+                _pdfAmountRow(regular, bold, 'SGST', sgstAmount),
+              if (igstAmount > 0)
+                _pdfAmountRow(regular, bold, 'IGST', igstAmount),
+            ],
             pw.Divider(color: PdfColors.grey300),
           ],
 

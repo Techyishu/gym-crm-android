@@ -27,11 +27,11 @@ final _attendanceDatesProvider = FutureProvider<List<DateTime>>((ref) async {
       .gte('checked_in_at', since.toIso8601String())
       .order('checked_in_at', ascending: true);
 
-  return (data as List).map((e) {
-    // Convert to IST (UTC+5:30) for consistent day boundaries.
-    final utc = DateTime.parse(e['checked_in_at'] as String).toUtc();
-    return utc.add(const Duration(hours: 5, minutes: 30));
-  }).toList();
+  // The member's phone sits in the gym's time zone, so local time gives the
+  // right day boundaries in India and abroad (this used to add +5:30).
+  return (data as List)
+      .map((e) => DateTime.parse(e['checked_in_at'] as String).toLocal())
+      .toList();
 });
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -77,8 +77,7 @@ class _AttendanceBody extends StatelessWidget {
 
   Set<String> get _daySet => dates.map(_dayKey).toSet();
 
-  DateTime get _nowIST =>
-      DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+  DateTime get _nowIST => DateTime.now();
 
   int get _thisMonthCount {
     final now = _nowIST;

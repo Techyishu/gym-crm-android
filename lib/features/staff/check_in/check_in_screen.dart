@@ -189,7 +189,7 @@ class _CheckInScreenState extends ConsumerState<CheckInScreen> {
   }
 
   /// Core check-in: validates the member, blocks a second check-in on the same
-  /// day (Asia/Kolkata), inserts the row, and returns the outcome. Does not
+  /// day (device-local), inserts the row, and returns the outcome. Does not
   /// touch the banner or the QR confirmation — the callers decide how to show it.
   Future<_CheckResult> _doCheckIn(
     String memberId, {

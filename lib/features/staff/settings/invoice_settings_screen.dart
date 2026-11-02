@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart' show gymCountry;
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -44,6 +45,9 @@ class _InvoiceSettingsScreenState extends ConsumerState<InvoiceSettingsScreen> {
   String? _error;
 
   /// A rate the owner meant to charge — anything above 0.
+  // GST/CGST/SGST wording is India's; other gyms get plain "tax".
+  bool get _india => gymCountry == 'IN';
+
   bool get _gstRateEntered =>
       (double.tryParse(_gstPercent.text.trim()) ?? 0) > 0;
 
@@ -274,7 +278,9 @@ class _InvoiceSettingsScreenState extends ConsumerState<InvoiceSettingsScreen> {
                     TextFormField(
                       controller: _gstin,
                       textCapitalization: TextCapitalization.characters,
-                      decoration: const InputDecoration(labelText: 'GSTIN'),
+                      decoration: InputDecoration(
+                        labelText: _india ? 'GSTIN' : 'Tax ID (VAT/TRN)',
+                      ),
                     ),
                     const SizedBox(height: 26),
                     const Text('Numbering & tax', style: AppTheme.sectionTitle),
@@ -305,8 +311,8 @@ class _InvoiceSettingsScreenState extends ConsumerState<InvoiceSettingsScreen> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: 'GST rate (%)',
+                      decoration: InputDecoration(
+                        labelText: _india ? 'GST rate (%)' : 'Tax rate (%)',
                       ),
                       onChanged: (_) => setState(() {}),
                       validator: (value) {
@@ -315,25 +321,34 @@ class _InvoiceSettingsScreenState extends ConsumerState<InvoiceSettingsScreen> {
                           return 'Enter a rate from 0 to 100';
                         }
                         if (_showGstBreakup && number == 0) {
-                          return 'Enter a rate above 0, or turn GST breakup off';
+                          return _india
+                              ? 'Enter a rate above 0, or turn GST breakup off'
+                              : 'Enter a rate above 0, or turn tax off';
                         }
                         return null;
                       },
                     ),
-                    _switch('GST breakup (CGST + SGST)', _showGstBreakup, (
-                      value,
-                    ) {
-                      setState(() => _showGstBreakup = value);
-                      // Surface "rate above 0" the moment the switch goes on,
-                      // rather than holding it back until they hit Save.
-                      if (value) _formKey.currentState?.validate();
-                    }),
+                    _switch(
+                      _india
+                          ? 'GST breakup (CGST + SGST)'
+                          : 'Show tax on invoice',
+                      _showGstBreakup,
+                      (value) {
+                        setState(() => _showGstBreakup = value);
+                        // Surface "rate above 0" the moment the switch goes on,
+                        // rather than holding it back until they hit Save.
+                        if (value) _formKey.currentState?.validate();
+                      },
+                    ),
                     if (_gstRateEntered && !_showGstBreakup)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Text(
-                          'This rate is saved but not applied. Turn on GST '
-                          'breakup to add GST to new invoices.',
+                          _india
+                              ? 'This rate is saved but not applied. Turn on GST '
+                                    'breakup to add GST to new invoices.'
+                              : 'This rate is saved but not applied. Turn on '
+                                    'Show tax on invoice to add it.',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppTheme.statusWarn,

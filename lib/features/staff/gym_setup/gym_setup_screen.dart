@@ -5,9 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:country_picker/country_picker.dart';
-import 'package:currency_picker/currency_picker.dart';
 import '../../../core/services/app_events.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/formatters.dart' show currencyForCountry;
 import '../../../core/widgets/auth_canvas_kit.dart';
 import '../../../core/utils/platform_info.dart';
 import '../../../l10n/l10n.dart';
@@ -26,10 +26,6 @@ class GymSetupScreen extends ConsumerStatefulWidget {
 }
 
 final _digitsOnly = RegExp(r'^\d{4,14}$');
-
-class _CurrencyServiceHolder {
-  static final service = CurrencyService();
-}
 
 class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
   bool _submitting = false;
@@ -100,6 +96,7 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
           gymType: null,
           memberCount: _memberCount,
           currency: _currencyCode,
+          country: _country.countryCode,
           goals: [],
         );
 
@@ -206,13 +203,9 @@ class _GymSetupScreenState extends ConsumerState<GymSetupScreen> {
                           exclude: const ['PK', 'BD'],
                           onSelect: (c) => setState(() {
                             _country = c;
-                            final match = _CurrencyServiceHolder.service
-                                .getAll()
-                                .where((cur) => cur.flag == c.countryCode)
-                                .toList();
-                            if (match.isNotEmpty) {
-                              _currencyCode = match.first.code;
-                            }
+                            _currencyCode =
+                                currencyForCountry(c.countryCode) ??
+                                _currencyCode;
                           }),
                         ),
                         child: Padding(

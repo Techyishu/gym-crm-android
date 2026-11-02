@@ -11,6 +11,7 @@ import '../../../core/router.dart'
 import '../../../core/services/activity_log_service.dart';
 import '../../../core/services/offline_checkin_queue.dart';
 import '../../../core/utils/formatters.dart';
+import '../../../core/utils/validators.dart';
 
 const _activeGymIdPrefsKey = 'active_gym_id';
 
@@ -152,8 +153,9 @@ final staffProfileProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
     }
   }
 
-  final settings = gym?['settings'];
-  setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
+  final settings = gym?['settings'] as Map<String, dynamic>?;
+  setCurrency(settings?['currency'] as String?);
+  setGymCountry(settings?['country'] as String?);
   return {...profile, 'gyms': gym};
 });
 
@@ -249,8 +251,11 @@ final memberRecordProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
       .eq('user_id', user.id)
       .maybeSingle();
 
-  final settings = (member?['gyms'] as Map<String, dynamic>?)?['settings'];
-  setCurrency((settings as Map<String, dynamic>?)?['currency'] as String?);
+  final settings =
+      (member?['gyms'] as Map<String, dynamic>?)?['settings']
+          as Map<String, dynamic>?;
+  setCurrency(settings?['currency'] as String?);
+  setGymCountry(settings?['country'] as String?);
   return member;
 });
 
@@ -413,6 +418,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     String? gymType,
     String? memberCount,
     String? currency,
+    String? country,
     required List<String> goals,
   }) async {
     try {
@@ -429,9 +435,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
                 },
               )
               as String;
-      // setup_gym doesn't take a currency param — set it via the same
-      // gyms.settings JSONB path Settings > Gym Details uses.
-      if (currency != null && currency.isNotEmpty) {
+      // setup_gym doesn't take currency/country params — set them via the
+      // same gyms.settings JSONB path Settings > Gym Details uses.
+      if ((currency != null && currency.isNotEmpty) ||
+          (country != null && country.isNotEmpty)) {
         final gym = await _client
             .from('gyms')
             .select('settings')
@@ -439,12 +446,17 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
             .single();
         final settings = {
           ...Map<String, dynamic>.from(gym['settings'] as Map? ?? {}),
-          'currency': currency,
+          if (currency != null && currency.isNotEmpty) 'currency': currency,
+          if (country != null && country.isNotEmpty) 'country': country,
         };
         await _client
             .from('gyms')
             .update({'settings': settings})
             .eq('id', gymId);
+        // The first-setup wizard's phone field renders before the profile
+        // reload, so seed these now or it shows +91 for a UAE gym.
+        setCurrency(settings['currency'] as String?);
+        setGymCountry(settings['country'] as String?);
       }
       // The gym exists now, so the router's "this user belongs on /gym-setup"
       // decision is stale — drop it before anything navigates.

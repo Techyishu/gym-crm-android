@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/access/gym_permissions.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/lead.dart';
@@ -20,8 +21,7 @@ Future<void> _dialPhone(String phone) async {
 }
 
 Future<void> _openWhatsApp(String phone, {String? text}) async {
-  final clean = phone.replaceAll(RegExp(r'\D'), '');
-  final number = clean.startsWith('91') ? clean : '91$clean';
+  final number = whatsAppDigits(phone);
   final suffix = text != null ? '?text=${Uri.encodeComponent(text)}' : '';
   await launchUrl(
     Uri.parse('https://wa.me/$number$suffix'),

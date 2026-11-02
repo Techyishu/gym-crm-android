@@ -14,6 +14,7 @@ import '../../../core/billing/local_payment_guard.dart';
 import '../../../core/billing/payment_dates.dart';
 import '../../../core/billing/to_collect.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/invoice_pdf.dart';
 import '../../../shared/models/invoice.dart';
@@ -2362,8 +2363,7 @@ class _WhatsAppInvoiceButtonState extends State<_WhatsAppInvoiceButton> {
           : 'Hi $name, your invoice $invNum for $amount is due. Download it here: $downloadUrl';
 
       // 6. Open WhatsApp directly to member's chat
-      final clean = phone.replaceAll(RegExp(r'\D'), '');
-      final number = clean.startsWith('91') ? clean : '91$clean';
+      final number = whatsAppDigits(phone);
       final uri = Uri.parse(
         'https://wa.me/$number?text=${Uri.encodeComponent(text)}',
       );

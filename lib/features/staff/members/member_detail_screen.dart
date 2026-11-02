@@ -381,8 +381,7 @@ class _MemberDetailScreenState extends ConsumerState<MemberDetailScreen> {
   Future<void> _whatsApp(Member m) async {
     final phone = m.phone;
     if (phone == null || phone.isEmpty) return;
-    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
-    final url = Uri.parse('https://wa.me/91$cleaned');
+    final url = Uri.parse('https://wa.me/${whatsAppDigits(phone)}');
     if (await canLaunchUrl(url))
       await launchUrl(url, mode: LaunchMode.externalApplication);
   }
@@ -1667,8 +1666,7 @@ class _MemberQuickActionsState extends ConsumerState<_MemberQuickActions> {
                 ElevatedButton.icon(
                   onPressed: () async {
                     Navigator.pop(ctx);
-                    final clean = m.phone!.replaceAll(RegExp(r'\D'), '');
-                    final number = clean.startsWith('91') ? clean : '91$clean';
+                    final number = whatsAppDigits(m.phone);
                     final uri = Uri.parse(
                       'https://wa.me/$number?text=${Uri.encodeComponent(msg)}',
                     );
@@ -2769,7 +2767,7 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
       ).showSnackBar(SnackBar(content: Text(context.l10n.enterValidEmail)));
       return;
     }
-    if (phone.isNotEmpty && !isValidIndianMobile(phone)) {
+    if (phone.isNotEmpty && !isValidMobile(phone)) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(context.l10n.enterValidMobile)));
@@ -2971,11 +2969,11 @@ class _EditMemberSheetState extends State<_EditMemberSheet> {
                 keyboardType: TextInputType.phone,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
-                  prefixIcon: const Padding(
-                    padding: EdgeInsets.only(left: 12, right: 4),
+                  prefixIcon: Padding(
+                    padding: const EdgeInsets.only(left: 12, right: 4),
                     child: Text(
-                      '+91',
-                      style: TextStyle(
+                      '+$gymDialCode',
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.ink,

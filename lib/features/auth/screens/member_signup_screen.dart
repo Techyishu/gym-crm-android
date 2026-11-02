@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:country_picker/country_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/widgets/auth_canvas_kit.dart';
 import '../providers/auth_provider.dart';
 
@@ -17,6 +19,10 @@ const _msg91TokenAuth = '513484TSm4YfunB6a26866aP1';
 /// added the member (with a phone) — this only claims/verifies an existing
 /// `members` row via `verify-phone-otp`'s gym-scoped path, it never creates
 /// a member record itself.
+///
+/// Non-Indian numbers skip the SMS (international OTP is too costly):
+/// gym code -> phone -> set password -> request sent, and gym staff approve
+/// it (`request_member_signup` RPC + `approve-member-signup` function).
 class MemberSignupScreen extends ConsumerStatefulWidget {
   const MemberSignupScreen({super.key});
 
@@ -24,7 +30,7 @@ class MemberSignupScreen extends ConsumerStatefulWidget {
   ConsumerState<MemberSignupScreen> createState() => _MemberSignupScreenState();
 }
 
-enum _Step { gymCode, phone, otp, password }
+enum _Step { gymCode, phone, otp, password, requested }
 
 class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
   _Step _step = _Step.gymCode;
@@ -36,6 +42,8 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
   String? _gymName;
 
   final _phoneCtrl = TextEditingController();
+  // Starts on the gym's country once the code resolves.
+  Country _country = Country.parse('IN');
   String? _reqId;
   final List<TextEditingController> _otpControllers = List.generate(
     6,
@@ -48,8 +56,13 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
   final _passwordCtrl = TextEditingController();
   bool _obscure = true;
 
-  static final _digitsOnly = RegExp(r'^\d{4,14}$');
-  String get _fullIdentifier => '91${_phoneCtrl.text.trim()}';
+  bool get _isIndia => _country.phoneCode == '91';
+
+  /// Full number without "+", e.g. "919812345678" — what MSG91 expects.
+  String get _fullIdentifier =>
+      (phoneWithCountryCode(_phoneCtrl.text, dialCode: _country.phoneCode) ??
+              '')
+          .replaceAll('+', '');
 
   @override
   void initState() {
@@ -117,6 +130,9 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
       setState(() {
         _gymId = row['id'] as String;
         _gymName = row['name'] as String;
+        _country =
+            Country.tryParse(row['country'] as String? ?? 'IN') ??
+            Country.parse('IN');
         _step = _Step.phone;
         _busy = false;
       });
@@ -129,12 +145,68 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
     }
   }
 
-  Future<void> _sendOtp() async {
-    final digits = _phoneCtrl.text.trim();
-    if (!_digitsOnly.hasMatch(digits)) {
+  /// Phone step's button: India texts an OTP, everyone else goes straight to
+  /// choosing a password for the approval request.
+  void _continueFromPhone() {
+    if (!isValidMobile(_phoneCtrl.text, dialCode: _country.phoneCode)) {
       setState(() => _error = 'Enter a valid mobile number');
       return;
     }
+    if (_isIndia) {
+      _sendOtp();
+    } else {
+      setState(() {
+        _error = null;
+        _step = _Step.password;
+      });
+    }
+  }
+
+  Future<void> _submitRequest() async {
+    if (_passwordCtrl.text.length < 6) {
+      setState(() => _error = 'Password must be at least 6 characters');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final status = await Supabase.instance.client.rpc(
+        'request_member_signup',
+        params: {
+          'p_code': _codeCtrl.text.trim(),
+          'p_phone': '+$_fullIdentifier',
+          'p_password': _passwordCtrl.text,
+        },
+      );
+      if (!mounted) return;
+      final message = switch (status) {
+        'requested' => null,
+        'no_member' =>
+          'No member found with this number at this gym. Ask your gym to add '
+              'you as a member first.',
+        'ambiguous' =>
+          'More than one member has this number. Please ask your gym to fix it.',
+        'no_gym' => 'No gym found with this code',
+        'weak_password' => 'Password must be at least 6 characters',
+        _ => 'Enter a valid mobile number',
+      };
+      setState(() {
+        _busy = false;
+        _error = message;
+        if (message == null) _step = _Step.requested;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not send your request. Please try again.';
+        _busy = false;
+      });
+    }
+  }
+
+  Future<void> _sendOtp() async {
     setState(() {
       _busy = true;
       _error = null;
@@ -279,6 +351,7 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
                 _Step.phone => _buildPhoneStep(),
                 _Step.otp => _buildOtpStep(),
                 _Step.password => _buildPasswordStep(),
+                _Step.requested => _buildRequestedStep(),
               },
             ),
           ),
@@ -360,11 +433,13 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
             const SizedBox(height: 18),
             CanvasKicker(_gymName ?? 'Your gym'),
             const SizedBox(height: 5),
-            const CanvasHeading(
+            CanvasHeading(
               title: 'Your mobile number',
-              subtitle:
-                  'Use the number your gym registered. We will text a '
-                  'one-time code.',
+              subtitle: _isIndia
+                  ? 'Use the number your gym registered. We will text a '
+                        'one-time code.'
+                  : 'Use the number your gym registered. Your gym will '
+                        'approve your request.',
             ),
             const SizedBox(height: 18),
             if (_error != null) ...[
@@ -376,30 +451,29 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
               child: TextField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
-                maxLength: 10,
+                maxLength: _isIndia ? 10 : 15,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: canvasFieldDecoration(hint: '9876543210').copyWith(
-                  counterText: '',
-                  prefixIcon: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 14),
-                    child: Text(
-                      '+91',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.inkSoft,
+                decoration:
+                    canvasFieldDecoration(
+                      hint: _isIndia ? '9876543210' : 'Mobile number',
+                    ).copyWith(
+                      counterText: '',
+                      prefixIcon: CountryDialPrefix(
+                        country: _country,
+                        onChanged: (c) => setState(() {
+                          _country = c;
+                          _error = null;
+                        }),
                       ),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 0),
                     ),
-                  ),
-                  prefixIconConstraints: const BoxConstraints(minWidth: 0),
-                ),
               ),
             ),
             const SizedBox(height: 18),
             CanvasButton(
-              label: 'Send code',
+              label: _isIndia ? 'Send code' : 'Continue',
               loading: _busy,
-              onPressed: _sendOtp,
+              onPressed: _continueFromPhone,
             ),
           ],
         ),
@@ -494,6 +568,17 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // The OTP path has a live session here, so no going back; the
+        // request path has nothing to undo yet.
+        if (!_isIndia) ...[
+          CanvasBack(
+            onTap: () => setState(() {
+              _step = _Step.phone;
+              _error = null;
+            }),
+          ),
+          const SizedBox(height: 12),
+        ],
         OrbitFormCard(
           children: [
             const CanvasProgress(total: 4, filled: 4),
@@ -525,13 +610,84 @@ class _MemberSignupScreenState extends ConsumerState<MemberSignupScreen> {
             ),
             const SizedBox(height: 18),
             CanvasButton(
-              label: 'Finish',
+              label: _isIndia ? 'Finish' : 'Send request',
               loading: _busy,
-              onPressed: _setPassword,
+              onPressed: _isIndia ? _setPassword : _submitRequest,
             ),
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildRequestedStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OrbitFormCard(
+          children: [
+            const CanvasProgress(total: 4, filled: 4),
+            const SizedBox(height: 18),
+            CanvasHeading(
+              title: 'Request sent',
+              subtitle:
+                  '${_gymName ?? 'Your gym'} will approve it shortly. Then log '
+                  'in with +$_fullIdentifier and the password you just set.',
+            ),
+            const SizedBox(height: 18),
+            CanvasButton(
+              label: 'Go to login',
+              loading: false,
+              onPressed: () => context.go('/login/member'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Tappable "🇦🇪 +971 ▾" prefix for a phone field; opens the country picker.
+class CountryDialPrefix extends StatelessWidget {
+  final Country country;
+  final ValueChanged<Country> onChanged;
+
+  const CountryDialPrefix({
+    super.key,
+    required this.country,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => showCountryPicker(
+        context: context,
+        showPhoneCode: true,
+        favorite: const ['IN'],
+        onSelect: onChanged,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${country.flagEmoji} +${country.phoneCode}',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.inkSoft,
+              ),
+            ),
+            const Icon(
+              Icons.arrow_drop_down,
+              size: 18,
+              color: AppTheme.inkSoft,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

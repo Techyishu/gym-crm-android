@@ -68,6 +68,7 @@ interface GymSettings {
   whatsapp_credits: number
   whatsapp_monthly_quota_used: number
   whatsapp_template: string | null
+  settings: { country?: string } | null
 }
 
 /** Legacy (₹249, pre-price-change) gyms keep the old 100/mo cap regardless of
@@ -206,7 +207,7 @@ Deno.serve(async (req: Request) => {
 
   let gymsQuery = supabase
     .from('gyms')
-    .select('id, name, plan, legacy_pricing, whatsapp_reminder_enabled, whatsapp_reminder_days, whatsapp_credits, whatsapp_monthly_quota_used, whatsapp_template')
+    .select('id, name, plan, legacy_pricing, whatsapp_reminder_enabled, whatsapp_reminder_days, whatsapp_credits, whatsapp_monthly_quota_used, whatsapp_template, settings')
     .eq('whatsapp_reminder_enabled', true)
   if (filterGymId) gymsQuery = gymsQuery.eq('id', filterGymId)
 
@@ -222,6 +223,11 @@ Deno.serve(async (req: Request) => {
   let sent = 0
   let exhausted = 0
   for (const gym of gyms ?? []) {
+    // Automatic WhatsApp is India-only: Meta bills by the recipient's country
+    // at 12-40x India's rate. consume_whatsapp_allowance refuses these gyms
+    // too; skipping here just avoids scanning members to find that out.
+    if ((gym.settings?.country ?? 'IN') !== 'IN') continue
+
     const days: number[] = gym.whatsapp_reminder_days ?? []
     if (!days.length) continue
 

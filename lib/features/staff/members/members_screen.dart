@@ -30,6 +30,8 @@ import '../../../shared/widgets/responsive_content.dart';
 import '../billing/billing_screen.dart' show PlanFormSheet;
 import '../settings/gym_code_sheet.dart';
 import 'import_csv_screen.dart';
+import 'registration_requests.dart';
+import 'signup_requests.dart';
 import 'upcoming_payments_screen.dart' show QuickCollectSheet;
 import 'package:gym_crm/shared/widgets/adaptive_sheet.dart';
 import '../../../core/theme/app_icons.dart';
@@ -620,6 +622,10 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
               return '${all.length} total · $active active';
             }()),
             _buildSearchAndFilter(members.valueOrNull ?? const [], dueMap),
+            const SignupRequestsBanner(),
+            RegistrationRequestsBanner(
+              onReview: (p) => showAddMemberSheet(context, registration: p),
+            ),
             Expanded(
               child: members.when(
                 loading: () => _MembersShimmer(),
@@ -1067,7 +1073,7 @@ class _MemberRow extends ConsumerWidget {
 
   void _showMoreActions(BuildContext context) {
     final phone = (member.phone ?? '').replaceAll(RegExp(r'\D'), '');
-    final number = phone.length == 10 ? '91$phone' : phone;
+    final number = whatsAppDigits(member.phone);
     showAdaptiveSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -1389,15 +1395,22 @@ class _NoPlansBox extends StatelessWidget {
 /// [queue] (name, phone) pairs — e.g. contacts the owner picked — are worked
 /// through one by one: each opens the same form prefilled, so plan, payment
 /// and details are asked exactly as for a hand-typed member.
+///
+/// [registration] opens the same form prefilled from a member's own
+/// self-registration; saving it marks that request approved.
 Future<void> showAddMemberSheet(
   BuildContext context, {
   List<(String, String)> queue = const [],
+  RegistrationPrefill? registration,
 }) async {
   // A full page (both designs) with "Save & add next" for adding members back
   // to back, and a discard check instead of a swipe that loses typed data.
   final added = await Navigator.of(context, rootNavigator: true)
       .push<Map<String, dynamic>>(
-        MaterialPageRoute(builder: (_) => _AddMemberPage(queue: queue)),
+        MaterialPageRoute(
+          builder: (_) =>
+              _AddMemberPage(queue: queue, registration: registration),
+        ),
       );
   if (added == null || !context.mounted) return;
   await showAdaptiveSheet(
@@ -1615,7 +1628,7 @@ class _MemberAddedSheetState extends State<_MemberAddedSheet> {
                 child: TextButton(
                   onPressed: () {
                     Navigator.pop(context);
-                    final number = phone.length == 10 ? '91$phone' : phone;
+                    final number = whatsAppDigits(added['phone'] as String?);
                     final text =
                         'Welcome ${name.split(' ').first}! 🎉 '
                         'Excited to have you with us. See you at the gym soon!';
@@ -1655,7 +1668,8 @@ class _AddMemberException implements Exception {
 /// (new key), so every field starts empty like the first time.
 class _AddMemberPage extends StatefulWidget {
   final List<(String, String)> queue;
-  const _AddMemberPage({this.queue = const []});
+  final RegistrationPrefill? registration;
+  const _AddMemberPage({this.queue = const [], this.registration});
 
   @override
   State<_AddMemberPage> createState() => _AddMemberPageState();
@@ -1666,7 +1680,9 @@ class _AddMemberPageState extends State<_AddMemberPage> {
 
   // Next prefilled contact, or leave the page once the queue is used up.
   void _next() {
-    if (widget.queue.isNotEmpty && _round + 1 >= widget.queue.length) {
+    // A registration is one member: after saving there is no next form.
+    if (widget.registration != null ||
+        (widget.queue.isNotEmpty && _round + 1 >= widget.queue.length)) {
       Navigator.of(context).pop();
       return;
     }
@@ -1680,7 +1696,9 @@ class _AddMemberPageState extends State<_AddMemberPage> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: Text(
-          queued
+          widget.registration != null
+              ? 'Review registration'
+              : queued
               ? '${context.l10n.addMember} · ${_round + 1}/${widget.queue.length}'
               : context.l10n.addMember,
         ),
@@ -1696,6 +1714,7 @@ class _AddMemberPageState extends State<_AddMemberPage> {
             key: ValueKey(_round),
             initialName: queued ? widget.queue[_round].$1 : null,
             initialPhone: queued ? widget.queue[_round].$2 : null,
+            registration: widget.registration,
             inQueue: queued,
             lastInQueue: queued && _round + 1 >= widget.queue.length,
             onAddedNext: _next,
@@ -1719,11 +1738,16 @@ class AddMemberSheet extends ConsumerStatefulWidget {
   /// contact instead of closing the page and dropping the rest.
   final bool inQueue;
   final bool lastInQueue;
+
+  /// A member's own registration to review: prefills every field they filled
+  /// in and marks the request approved once the member is saved.
+  final RegistrationPrefill? registration;
   const AddMemberSheet({
     super.key,
     this.onAddedNext,
     this.initialName,
     this.initialPhone,
+    this.registration,
     this.inQueue = false,
     this.lastInQueue = false,
   });
@@ -1775,6 +1799,43 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
     super.initState();
     _nameCtrl.text = widget.initialName ?? '';
     _phoneCtrl.text = localMobileDigits(widget.initialPhone);
+    final reg = widget.registration;
+    if (reg != null) _prefillRegistration(reg);
+  }
+
+  void _prefillRegistration(RegistrationPrefill reg) {
+    _nameCtrl.text = reg.name;
+    // The gym's own dial code is painted beside the field, so only its local
+    // digits go in the box; a number from another country keeps its "+" and
+    // is saved as typed.
+    final gymPrefix = '+$gymDialCode';
+    _phoneCtrl.text = reg.phone.startsWith(gymPrefix)
+        ? localMobileDigits(reg.phone)
+        : reg.phone;
+    _emailCtrl.text = reg.email ?? '';
+    _dob = reg.dob;
+    _bloodGroup = reg.bloodGroup;
+    _emergencyNameCtrl.text = reg.emergencyName ?? '';
+    _emergencyPhoneCtrl.text = reg.emergencyPhone ?? '';
+    _moreDetails =
+        reg.email != null ||
+        reg.dob != null ||
+        reg.bloodGroup != null ||
+        reg.emergencyName != null ||
+        reg.emergencyPhone != null;
+    final photo = reg.photo;
+    if (photo != null && photo.isNotEmpty) {
+      // Same sniffing the database used to accept it: PNG / WebP / else JPEG.
+      final isPng = photo.length > 3 && photo[1] == 0x50 && photo[2] == 0x4E;
+      final isWebp = photo.length > 11 && photo[8] == 0x57 && photo[9] == 0x45;
+      final ext = isPng ? 'png' : (isWebp ? 'webp' : 'jpg');
+      _avatarBytes = photo;
+      _avatarFile = XFile.fromData(
+        photo,
+        name: 'registration.$ext',
+        mimeType: 'image/${ext == 'jpg' ? 'jpeg' : ext}',
+      );
+    }
   }
 
   /// Nothing typed yet — leaving the page needs no "discard?" check.
@@ -2181,6 +2242,25 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
         }
       }
 
+      // The member exists now. Close the registration request; if that one
+      // call fails the member is still saved and the request just stays in
+      // the list for staff to dismiss.
+      final reg = widget.registration;
+      if (reg != null) {
+        try {
+          await client.rpc(
+            'decide_member_registration',
+            params: {
+              'p_id': reg.requestId,
+              'p_approve': true,
+              'p_member_id': inserted['id'],
+            },
+          );
+        } catch (e) {
+          debugPrint('[GymCRM] registration not marked approved: $e');
+        }
+      }
+
       if (countBefore != null) {
         unawaited(
           AppEvents.checkMemberMilestones(
@@ -2298,7 +2378,9 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
           ),
           child: Row(
             children: [
-              if (_asPage && !widget.inQueue) ...[
+              if (_asPage &&
+                  !widget.inQueue &&
+                  widget.registration == null) ...[
                 Expanded(
                   child: OutlinedButton(
                     // Local minimumSize: the theme's full-width default would
@@ -2416,11 +2498,11 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                 // prefixIcon, not prefixText — prefixText stays hidden until
                 // the field has focus, and the canvas shows +91 at rest.
                 decoration: InputDecoration(
-                  prefixIcon: const Padding(
-                    padding: EdgeInsets.only(left: 12, right: 4),
+                  prefixIcon: Padding(
+                    padding: const EdgeInsets.only(left: 12, right: 4),
                     child: Text(
-                      '+91',
-                      style: TextStyle(
+                      '+$gymDialCode',
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.ink,
@@ -2463,6 +2545,19 @@ class _AddMemberSheetState extends ConsumerState<AddMemberSheet> {
                       setState(() => _selectPlan(list.first));
                     }
                   });
+                }
+                // The plan the member picked on their registration form —
+                // staff can still change it before saving.
+                final wanted = widget.registration?.planId;
+                if (wanted != null && _planId == null) {
+                  final match = list.where((p) => p['id'] == wanted);
+                  if (match.isNotEmpty) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && _planId == null) {
+                        setState(() => _selectPlan(match.first));
+                      }
+                    });
+                  }
                 }
                 // A menu, not chips: chips cost one row per two or three
                 // plans, so a gym running ten of them pushed the rest of the

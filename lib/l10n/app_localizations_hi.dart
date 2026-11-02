@@ -2651,4 +2651,104 @@ class AppLocalizationsHi extends AppLocalizations {
   @override
   String get invoiceRemoveFailed =>
       'इनवॉइस नहीं हटा सका। कृपया फिर कोशिश करें।';
+
+  @override
+  String regTitle(String gym) {
+    return '$gym से जुड़ें';
+  }
+
+  @override
+  String regSubtitle(String gym) {
+    return 'अपनी जानकारी भरें। $gym इसे जाँचकर आपकी सदस्यता पक्की करेगा।';
+  }
+
+  @override
+  String get regPhoto => 'फ़ोटो';
+
+  @override
+  String get regDob => 'जन्म तिथि';
+
+  @override
+  String get regDobNotSet => 'नहीं भरी';
+
+  @override
+  String get regMoreDetails => 'ईमेल और इमरजेंसी संपर्क जोड़ें';
+
+  @override
+  String get regPlanHeading => 'अपना प्लान चुनें';
+
+  @override
+  String get regPlanRequired => 'कृपया एक प्लान चुनें';
+
+  @override
+  String regConsent(String gym) {
+    return 'मैं अपनी सदस्यता के लिए ये जानकारी $gym के साथ साझा करने के लिए सहमत हूँ।';
+  }
+
+  @override
+  String get regConsentRequired => 'आगे बढ़ने के लिए बॉक्स पर टिक करें';
+
+  @override
+  String get regSubmit => 'रजिस्ट्रेशन भेजें';
+
+  @override
+  String get regSentTitle => 'रजिस्ट्रेशन भेज दिया गया';
+
+  @override
+  String regSentBody(String gym) {
+    return '$gym आपकी जानकारी जाँचकर आपकी सदस्यता पक्की करेगा।';
+  }
+
+  @override
+  String get regAnother => 'किसी और को रजिस्टर करें';
+
+  @override
+  String get regErrInvalid => 'यह रजिस्ट्रेशन लिंक सही नहीं है।';
+
+  @override
+  String get regErrDisabled => 'इस जिम में अभी रजिस्ट्रेशन बंद है।';
+
+  @override
+  String get regErrExpired =>
+      'यह रजिस्ट्रेशन लिंक समाप्त हो गया है। कृपया जिम से नया लिंक माँगें।';
+
+  @override
+  String get regErrGeneric =>
+      'रजिस्ट्रेशन नहीं भेज सका। कृपया जानकारी जाँचकर फिर कोशिश करें।';
+
+  @override
+  String get regErrBusy =>
+      'जिम में अभी बहुत रजिस्ट्रेशन आ रहे हैं। कृपया कुछ मिनट बाद फिर कोशिश करें।';
+
+  @override
+  String get regErrPhoto => 'यह फ़ोटो इस्तेमाल नहीं हो सकी। कृपया दूसरी चुनें।';
+
+  @override
+  String get regErrLoad =>
+      'यह पेज नहीं खुल सका। इंटरनेट जाँचकर फिर कोशिश करें।';
+
+  @override
+  String get regRetry => 'फिर कोशिश करें';
+
+  @override
+  String regMonths(int n) {
+    String _temp0 = intl.Intl.pluralLogic(
+      n,
+      locale: localeName,
+      other: '$n महीने',
+      one: '1 महीना',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String regDays(int n) {
+    String _temp0 = intl.Intl.pluralLogic(
+      n,
+      locale: localeName,
+      other: '$n दिन',
+      one: '1 दिन',
+    );
+    return '$_temp0';
+  }
 }

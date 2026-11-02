@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/access/gym_permissions.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/utils/validators.dart' show gymCountry;
 import '../../core/utils/invoice_pdf.dart';
 import '../../core/utils/platform_info.dart' as platform_info;
 import '../../shared/widgets/redesign.dart';
@@ -378,7 +379,7 @@ class _Header extends StatelessWidget {
                 if (gstin != null && gstin!.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'GSTIN: $gstin',
+                    '${gymCountry == 'IN' ? 'GSTIN' : 'Tax ID'}: $gstin',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -693,9 +694,14 @@ class _Total extends StatelessWidget {
           ],
           if (showGst) ...[
             _taxRow('TAXABLE VALUE', taxableAmount),
-            if (cgstAmount > 0) _taxRow('CGST', cgstAmount),
-            if (sgstAmount > 0) _taxRow('SGST', sgstAmount),
-            if (igstAmount > 0) _taxRow('IGST', igstAmount),
+            // CGST/SGST/IGST is India's split; elsewhere it is one tax line.
+            if (gymCountry != 'IN')
+              _taxRow('TAX', gstAmount)
+            else ...[
+              if (cgstAmount > 0) _taxRow('CGST', cgstAmount),
+              if (sgstAmount > 0) _taxRow('SGST', sgstAmount),
+              if (igstAmount > 0) _taxRow('IGST', igstAmount),
+            ],
             const SizedBox(height: 10),
             const Divider(height: 1, color: AppTheme.border),
             const SizedBox(height: 10),

@@ -1,9 +1,12 @@
+import 'package:country_picker/country_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/validators.dart';
 import '../../../core/widgets/auth_canvas_kit.dart';
 import '../providers/auth_provider.dart';
+import 'member_signup_screen.dart' show CountryDialPrefix;
 
 /// Canvas `mLogin` — split out of the old combined [LoginScreen] toggle once
 /// [WelcomeScreen] became the real entry point.
@@ -21,6 +24,8 @@ class _MemberLoginScreenState extends ConsumerState<MemberLoginScreen> {
   bool _obscure = true;
   bool _loading = false;
   String? _error;
+  // No gym yet on this screen, so the member picks their own country.
+  Country _country = Country.parse('IN');
 
   @override
   void dispose() {
@@ -36,7 +41,11 @@ class _MemberLoginScreenState extends ConsumerState<MemberLoginScreen> {
       _error = null;
     });
 
-    final email = memberSyntheticEmail(_phoneCtrl.text.trim());
+    // Full number first, then the last-10-digit rule inside — for an Indian
+    // number that is the same email it always was.
+    final email = memberSyntheticEmail(
+      phoneWithCountryCode(_phoneCtrl.text, dialCode: _country.phoneCode) ?? '',
+    );
     final error = await ref
         .read(authNotifierProvider.notifier)
         .signIn(email, _passwordCtrl.text);
@@ -44,7 +53,11 @@ class _MemberLoginScreenState extends ConsumerState<MemberLoginScreen> {
     if (!mounted) return;
     if (error != null) {
       setState(() {
-        _error = error;
+        // Non-Indian signups wait for staff approval, and until then the
+        // login just looks like a wrong password.
+        _error = _country.phoneCode == '91'
+            ? error
+            : '$error\nJust signed up? Your gym has to approve you first.';
         _loading = false;
       });
     }
@@ -101,16 +114,10 @@ class _MemberLoginScreenState extends ConsumerState<MemberLoginScreen> {
                                   canvasFieldDecoration(
                                     hint: '98765 43210',
                                   ).copyWith(
-                                    prefixIcon: const Padding(
-                                      padding: EdgeInsets.only(right: 10),
-                                      child: Text(
-                                        '+91',
-                                        style: TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w800,
-                                          color: AppTheme.ink,
-                                        ),
-                                      ),
+                                    prefixIcon: CountryDialPrefix(
+                                      country: _country,
+                                      onChanged: (c) =>
+                                          setState(() => _country = c),
                                     ),
                                     prefixIconConstraints: const BoxConstraints(
                                       minWidth: 0,
@@ -120,8 +127,10 @@ class _MemberLoginScreenState extends ConsumerState<MemberLoginScreen> {
                                 if (v == null || v.trim().isEmpty) {
                                   return 'Mobile number is required';
                                 }
-                                if (v.replaceAll(RegExp(r'\D'), '').length <
-                                    10) {
+                                if (!isValidMobile(
+                                  v,
+                                  dialCode: _country.phoneCode,
+                                )) {
                                   return 'Enter a valid mobile number';
                                 }
                                 return null;

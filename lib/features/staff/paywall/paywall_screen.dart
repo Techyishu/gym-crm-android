@@ -18,6 +18,7 @@ import '../../../core/services/revenue_cat_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/platform_info.dart';
+import '../../../core/utils/validators.dart' show gymCountry;
 import '../../../l10n/l10n.dart';
 import '../../../shared/widgets/redesign.dart';
 import '../../../shared/widgets/responsive_content.dart';
@@ -267,16 +268,25 @@ class _PlanBodyState extends ConsumerState<_PlanBody> {
                     .valueOrNull?['plans']?['pro']?['whatsapp_quota']
                 as num?)
             ?.toInt();
+    // Automatic WhatsApp is India-only, so gyms elsewhere aren't sold it.
+    final india = gymCountry == 'IN';
     final features = isLegacy
         ? _kLegacyFeatures
         : effectiveTier == 'starter'
         ? _kStarterFeatures
         : [
-            ..._kProFeatures,
-            if (proQuota != null)
+            ..._kProFeatures.where(
+              (f) => india || !f.text.contains('WhatsApp'),
+            ),
+            if (proQuota != null && india)
               (
                 icon: AppIcons.layers,
                 text: context.l10n.paywallLimitsLine(proQuota),
+              )
+            else if (!india)
+              (
+                icon: AppIcons.layers,
+                text: 'Unlimited members and staff logins',
               ),
           ];
 
@@ -889,7 +899,9 @@ int? _offerPaise(_TermOption t) {
 /// "20% off" / "₹50 off".
 String _offerLabel(Map<String, dynamic> o) {
   final pct = (o['percent_off'] as num?)?.toInt();
-  return pct != null ? '$pct% off' : '₹${(o['amount_off'] as num).toInt()} off';
+  return pct != null
+      ? '$pct% off'
+      : '$_cur${(o['amount_off'] as num).toInt()} off';
 }
 
 // Master switch for whether the paywall offers Starter as a choice at all.
@@ -1055,6 +1067,7 @@ class _DbPricingState extends ConsumerState<_DbPricing> {
         final plan = plans[widget.tier] == null
             ? null
             : Map<String, dynamic>.from(plans[widget.tier] as Map);
+        _setBillingCurrency(plan?['currency'] as String?);
         final terms = _termsFrom(plan);
         if (terms.isEmpty) {
           return _PricingUnavailable(
@@ -1142,7 +1155,7 @@ class _DbPricingState extends ConsumerState<_DbPricing> {
                 currentLeft == null
                     ? 'Your $currentPct% discount applies every month.'
                     : 'Your $currentPct% discount: $currentLeft more '
-                          '${currentLeft == 1 ? 'month' : 'months'}, then ₹${selected.totalPrice}.',
+                          '${currentLeft == 1 ? 'month' : 'months'}, then $_cur${selected.totalPrice}.',
                 style: const TextStyle(
                   fontSize: 13,
                   color: AppTheme.inkSoft,
@@ -1166,12 +1179,18 @@ class _DbPricingState extends ConsumerState<_DbPricing> {
             ),
             // Dodo adds 18% GST on top (tax-exclusive products). The button
             // keeps the plan price; this line spells out the tax and total.
+            // Outside India Dodo applies the buyer's local tax instead and
+            // UPI/netbanking don't exist, so that gym gets a plain line.
             if (current == null) ...[
               const SizedBox(height: 8),
               Text(
-                '$payNow + ${_formatRupees((payNowPaise * 18 / 100).round())} '
-                'GST = ${_formatRupees((payNowPaise * 118 / 100).round())} · '
-                'UPI, cards & netbanking',
+                gymCountry == 'IN'
+                    ? '$payNow + ${_formatRupees((payNowPaise * 18 / 100).round())} '
+                          'GST = ${_formatRupees((payNowPaise * 118 / 100).round())} · '
+                          'UPI, cards & netbanking'
+                    : _cur == '₹'
+                    ? '$payNow + local taxes · billed in Indian rupees · cards'
+                    : '$payNow + local taxes · cards',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 12,
@@ -1325,8 +1344,8 @@ class _CurrentPlanNote extends StatelessWidget {
     final period = left == null
         ? 'every month'
         : left == 1
-        ? 'for 1 more month, then ₹$price'
-        : 'for $left more months, then ₹$price';
+        ? 'for 1 more month, then $_cur$price'
+        : 'for $left more months, then $_cur$price';
     const ink = TextStyle(
       fontSize: 14,
       fontWeight: FontWeight.w700,
@@ -1350,14 +1369,14 @@ class _CurrentPlanNote extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           if (discounted == null)
-            Text('₹$price/month', style: ink)
+            Text('$_cur$price/month', style: ink)
           else
             Text.rich(
               TextSpan(
                 style: ink,
                 children: [
                   TextSpan(
-                    text: '₹$price',
+                    text: '$_cur$price',
                     style: const TextStyle(
                       decoration: TextDecoration.lineThrough,
                       fontWeight: FontWeight.w600,
@@ -1374,12 +1393,21 @@ class _CurrentPlanNote extends StatelessWidget {
   }
 }
 
-/// "₹249.50" for paise with a remainder, "₹299" otherwise.
-// Always INR here (Dodo bills in rupees), whatever the gym's own currency is.
-final _inr = NumberFormat.decimalPattern('en_IN');
+// The billing currency of the plan on sale — what Dodo charges, not the gym's
+// own display currency. ₹ for Indian plans; $ for the USD plan international
+// gyms get (pricing_plans.currency). Set when get_paywall_pricing loads.
+String _cur = '₹';
+NumberFormat _priceFmt = NumberFormat.decimalPattern('en_IN');
+void _setBillingCurrency(String? code) {
+  final usd = code == 'USD';
+  _cur = usd ? r'$' : '₹';
+  _priceFmt = NumberFormat.decimalPattern(usd ? 'en_US' : 'en_IN');
+}
+
+/// "₹249.50" for paise (or cents) with a remainder, "₹299" otherwise.
 String _formatRupees(int paise) => paise % 100 == 0
-    ? '₹${_inr.format(paise ~/ 100)}'
-    : '₹${_inr.format(paise ~/ 100)}.${(paise % 100).toString().padLeft(2, '0')}';
+    ? '$_cur${_priceFmt.format(paise ~/ 100)}'
+    : '$_cur${_priceFmt.format(paise ~/ 100)}.${(paise % 100).toString().padLeft(2, '0')}';
 
 /// "50% OFF · ~~₹499~~ ₹249.50/month for your first 6 months, then ₹499".
 /// Dodo applies the actual discount from the offer's code; this only restates
@@ -1722,7 +1750,7 @@ class _TermCard extends StatelessWidget {
               : '${_offerLabel(offer)} with offer')
         : term.months == 1
         ? 'per month'
-        : '₹$perMonth/mo${saving == null ? '' : ' · $saving'}';
+        : '$_cur$perMonth/mo${saving == null ? '' : ' · $saving'}';
     final badge = offer != null
         ? 'OFFER'
         : free != null

@@ -26,6 +26,7 @@ import '../dashboard/money_dashboard_screen.dart'
         activationTarget;
 import '../../../core/providers/app_config_provider.dart';
 import '../members/members_screen.dart' show showAddMemberSheet;
+import '../registration/registration_home_card.dart';
 import '../notifications/notifications_screen.dart';
 import '../settings/gym_branches_sheet.dart';
 import '../settings/gym_code_sheet.dart';
@@ -404,6 +405,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ],
                 if (birthdays.isNotEmpty) ...[
                   BirthdaysToday(members: birthdays),
+                  const SizedBox(height: 12),
+                ],
+                // Members register themselves from a QR; the owner approves.
+                if (canAddMember) ...[
+                  RegistrationHomeCard(
+                    gym: gym,
+                    onReview: (p) => showAddMemberSheet(context, registration: p),
+                  ),
                   const SizedBox(height: 12),
                 ],
                 if (canMoney || canCheckIn) ...[
